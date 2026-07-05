@@ -1,0 +1,23 @@
+appId: com.cosmosai.cosmos
+productName: COSMOS
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**
+  - package.json
+  - '!node_modules/**'
+  - node_modules/systeminformation/**
+  - node_modules/playwright-core/**
+asar: true
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  shortcutName: COSMOS
+  uninstallDisplayName: COSMOS
+# auto-update: deferred — requires a publish target (GitHub Releases);
+# wire `publish` + electron-updater when distribution is decided

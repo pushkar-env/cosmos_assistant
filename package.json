@@ -1,0 +1,44 @@
+{
+  "name": "cosmos",
+  "productName": "COSMOS",
+  "version": "0.1.0",
+  "description": "A cinematic, voice-first desktop AI assistant.",
+  "main": "./out/main/index.js",
+  "author": "Cosmos AI",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
+    "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
+    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "dist": "electron-vite build && electron-builder --win"
+  },
+  "dependencies": {
+    "playwright-core": "^1.61.1",
+    "systeminformation": "^5.23.5"
+  },
+  "devDependencies": {
+    "@react-three/fiber": "^9.1.2",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@types/three": "^0.178.0",
+    "@vitejs/plugin-react": "^4.6.0",
+    "autoprefixer": "^10.4.20",
+    "electron": "^37.2.0",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^4.0.0",
+    "framer-motion": "^12.19.1",
+    "gsap": "^3.13.0",
+    "postcss": "^8.5.1",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "tailwindcss": "^3.4.17",
+    "three": "^0.178.0",
+    "typescript": "^5.8.3",
+    "vite": "^7.0.0",
+    "zustand": "^5.0.5"
+  }
+}

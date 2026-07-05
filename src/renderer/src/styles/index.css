@@ -1,0 +1,164 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Theme tokens (defaults = Cyber Blue; ThemeProvider overwrites) ── */
+:root {
+  --bg: #02050a;
+  --bg-elevated: #071120;
+  --accent: #22d3ee;
+  --accent-bright: #7df9ff;
+  --accent-dim: rgba(34, 211, 238, 0.28);
+  --glow: rgba(34, 211, 238, 0.45);
+  --text: #e6f6ff;
+  --text-dim: rgba(230, 246, 255, 0.55);
+  --danger: #ff5a4e;
+  --success: #2dd4a7;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Rajdhani', sans-serif;
+  user-select: none;
+  cursor: default;
+}
+
+::selection {
+  background: var(--accent-dim);
+}
+
+/* ── Scrollbars ── */
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--accent-dim);
+  border-radius: 3px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}
+
+/* ── The glass recipe (see DESIGN_SYSTEM.md §3) ── */
+.glass {
+  background: color-mix(in srgb, var(--bg-elevated) 72%, transparent);
+  backdrop-filter: blur(24px) saturate(140%);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+  border: 1px solid var(--accent-dim);
+  border-radius: 16px;
+  box-shadow:
+    0 0 24px -8px var(--glow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.glass-hover {
+  transition:
+    border-color 0.25s ease,
+    box-shadow 0.25s ease;
+}
+.glass-hover:hover {
+  border-color: var(--accent);
+  box-shadow:
+    0 0 36px -6px var(--glow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+/* ── Neon text ── */
+.neon {
+  color: var(--accent-bright);
+  text-shadow:
+    0 0 8px var(--glow),
+    0 0 32px var(--glow);
+}
+
+/* ── Corner brackets: the signature COSMOS frame ── */
+.brackets {
+  position: relative;
+}
+.brackets::before,
+.brackets::after {
+  content: '';
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-color: var(--accent);
+  border-style: solid;
+  opacity: 0.85;
+  pointer-events: none;
+}
+.brackets::before {
+  top: -1px;
+  left: -1px;
+  border-width: 1.5px 0 0 1.5px;
+  border-top-left-radius: 6px;
+}
+.brackets::after {
+  bottom: -1px;
+  right: -1px;
+  border-width: 0 1.5px 1.5px 0;
+  border-bottom-right-radius: 6px;
+}
+
+/* ── Scanline sweep for boot ── */
+@keyframes scan-sweep {
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(100vh);
+  }
+}
+.scanline {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  box-shadow: 0 0 16px 2px var(--glow);
+  animation: scan-sweep 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+/* ── Ambient rotating conic aura behind the orb ── */
+@keyframes aura-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.orb-aura {
+  background: conic-gradient(
+    from 0deg,
+    transparent 0%,
+    var(--accent-dim) 12%,
+    transparent 30%,
+    var(--accent-dim) 55%,
+    transparent 75%,
+    var(--accent-dim) 92%,
+    transparent 100%
+  );
+  animation: aura-spin 24s linear infinite;
+  filter: blur(28px);
+}
+
+/* number readouts never jitter */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scanline,
+  .orb-aura {
+    animation: none;
+  }
+}
