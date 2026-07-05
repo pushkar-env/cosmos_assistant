@@ -1,160 +1,302 @@
-# COSMOS
+<div align="center">
 
-A cinematic, voice-first desktop AI assistant. Dark holographic HUD, a living
-shader-driven AI core, live system telemetry, and streaming multi-provider AI —
-built on Electron, React 19, TypeScript, Three.js/R3F, Framer Motion and GSAP.
+# 🌌 COSMOS
 
-![status](https://img.shields.io/badge/roadmap-complete%20%C2%B7%207%2F7%20phases-2dd4a7)
+### The desktop AI assistant that feels like J.A.R.V.I.S.
 
-## Quick start
+A cinematic, voice-first AI operating layer for Windows — a living, shader-driven
+AI core, a holographic HUD, real system control, and a team of AI agents at your command.
+
+<br />
+
+![Status](https://img.shields.io/badge/roadmap-7%2F7_phases_complete-2dd4a7?style=for-the-badge)
+![Platform](https://img.shields.io/badge/platform-Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)
+![License](https://img.shields.io/badge/license-MIT-a78bfa?style=for-the-badge)
+
+![Electron](https://img.shields.io/badge/Electron-2B2E3A?style=flat&logo=electron&logoColor=9FEAF9)
+![React](https://img.shields.io/badge/React_19-20232A?style=flat&logo=react&logoColor=61DAFB)
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat&logo=typescript&logoColor=white)
+![Three.js](https://img.shields.io/badge/Three.js-000000?style=flat&logo=three.js&logoColor=white)
+![Vite](https://img.shields.io/badge/Vite-646CFF?style=flat&logo=vite&logoColor=white)
+![Tailwind](https://img.shields.io/badge/Tailwind-06B6D4?style=flat&logo=tailwindcss&logoColor=white)
+
+</div>
+
+<!--
+  📸 Tip: drop a screenshot or a short GIF of COSMOS here for maximum impact, e.g.
+  <p align="center"><img src="docs/preview.gif" width="820" alt="COSMOS preview" /></p>
+-->
+
+---
+
+## ✨ What is COSMOS?
+
+COSMOS is **not a chatbot in a window**. It's a full AI experience: launch it and a
+cinematic boot sequence reveals a **living AI core** — a custom GLSL orb wrapped in
+2,400 orbiting particles that reacts to your voice, your cursor, and its own thoughts.
+Around it float live holograms of your system, and behind it is a genuine assistant
+that can **see your screen, control your PC, browse the web, remember you, and command
+a team of specialist agents**.
+
+<div align="center">
+
+| 🎬 Cinematic | 🎙️ Voice-first | 🛠️ Real hands | 🧠 Remembers you |
+|:---:|:---:|:---:|:---:|
+| Shader orb, glass HUD, particle FX | Wake word, STT + neural TTS | Files, apps, terminal, web | Encrypted long-term memory |
+
+</div>
+
+---
+
+## 🚀 Quick Start
 
 ```bash
-npm install        # once, after cloning or pulling new code
-npm run dev        # run in development (hot reload)
+git clone <your-repo-url>
+cd cosmos_ai
+npm install        # once
+npm run dev        # launch with hot reload
 ```
 
-Then open **Settings (⚙ or Ctrl+Space → "Open Settings")** and paste an API key
-for Claude / OpenAI / Gemini — or run [Ollama](https://ollama.com) locally for a
-fully offline model. Switch providers instantly from the chat panel tabs.
+Then open **Settings** (`⚙` in the title bar, or `Ctrl+Space` → *"Open Settings"*) and
+paste an API key for **Claude**, **OpenAI**, or **Gemini** — or run
+[Ollama](https://ollama.com) locally for a **100% offline** model. Switch providers
+instantly from the tabs at the top of the chat panel.
 
-## Running & building — the reliable way
+> [!TIP]
+> Voice replies and offline OCR work out of the box. Voice **input** (Whisper) and
+> **vision** use your OpenAI/Claude/Gemini key.
 
-COSMOS stores your API keys, memory and settings in **`%APPDATA%\COSMOS`**,
-encrypted with Windows DPAPI. Dev mode and the installed app share that one
-folder, so **keys you enter once work in both** — you don't re-enter them per
-run.
+---
 
-**Run in development** (for editing code, hot reload):
+## 📦 Build the App
+
+To use COSMOS like a normal installed app (no terminal):
 
 ```bash
-npm run dev
+npm run dist       # → release/COSMOS Setup 0.1.0.exe
 ```
 
-**Build the installer** (`.exe`) and use COSMOS like a normal app:
+Run the installer, launch COSMOS from your Start menu, and it lives in your **system
+tray** — closing the window keeps it running in the background. Ship an update by
+running `npm run dist` again.
 
-```bash
-npm run dist
-```
+> [!NOTE]
+> Your API keys, memory, and settings live encrypted in `%APPDATA%\COSMOS` (Windows
+> DPAPI). Dev mode and the installed app **share that folder**, so you enter keys once
+> and they survive updates and reinstalls.
 
-This produces **`release\COSMOS Setup 0.1.0.exe`**. Run it to install COSMOS
-into your Start menu; launch it from there like any app. This is the
-recommended way to actually *use* COSMOS day-to-day (no terminal needed). To
-ship a new version after code changes, just run `npm run dist` again and
-re-run the installer.
+---
 
-> **Note on API keys:** keys are tied to the Windows user + the `%APPDATA%\COSMOS`
-> profile. They survive updates and reinstalls. The only time you'd re-enter
-> them is if you delete that folder or move to a different Windows account — and
-> even then, COSMOS never *deletes* an unreadable key, it just asks you to type
-> it again.
+## ⌨️ Keyboard Shortcuts
 
 | Shortcut | Action |
-|---|---|
-| `Ctrl+Space` | Command palette (works globally, even when unfocused) |
-| `Ctrl+J` | Speak to COSMOS (push-to-talk; press again to finish early) |
+|:--|:--|
+| `Ctrl` + `Space` | **Command palette** — works globally, even when COSMOS is unfocused |
+| `Ctrl` + `J` | **Push-to-talk** — speak to COSMOS (press again to finish early) |
 | `Enter` | Send message |
-| `Esc` | Close palette / settings |
+| `Esc` | Close the palette / any panel |
 
-## Voice
+---
 
-Voice replies work out of the box using the built-in Windows voice; switch to
-**ElevenLabs** (API key) or **Piper** (offline neural TTS) in Settings → Voice.
-Voice *input* uses the OpenAI Whisper API, so it needs an OpenAI key.
+## 🧠 AI Providers
 
-Enable **Hands-Free** in Settings (or the palette) and just say
-*"Cosmos, …"* — a local voice-activity detector segments your speech and only
-utterances addressed to Cosmos are executed. Speaking again, sending a new
-message, or hitting Stop interrupts him mid-sentence.
+Switch between any of these instantly — keys never leave the main process.
 
-## Tools — Cosmos can act
+| Provider | Models | Notes |
+|:--|:--|:--|
+| **Anthropic** | Claude | Full tool use + vision |
+| **OpenAI** | GPT | Full tool use + vision |
+| **Google** | Gemini | Full tool use + vision |
+| **Ollama** | Llama 3.1, Qwen, Mistral… | **Fully offline**, tool use on supported models |
 
-With Claude or GPT selected, Cosmos has real hands: ask him to *"find my tax
-PDFs and zip them"*, *"take a screenshot"*, *"what's hogging my CPU?"*, or
-*"open Spotify and turn the volume down"*. He can list/read/write/search/move
-files, delete to the Recycle Bin, zip/unzip, run PowerShell commands, use the
-clipboard, launch apps and URLs, and control volume and power.
+---
 
-**Sensitive actions always ask first** — writes, moves, deletes, terminal
-commands, and power actions pause with an Approve / Always / Deny card in the
-chat. Read-only tools run automatically, and every action shows live in the
-transcript. Conversations persist in SQLite and are restored on launch.
+## 🎙️ Voice
 
-## The Team & the Web
+- **Speaks out of the box** with the built-in Windows voice — upgrade to
+  **ElevenLabs** (premium) or **Piper** (offline neural TTS) in *Settings → Voice*.
+- **Push-to-talk** (`Ctrl+J`) or fully **hands-free**: enable it and just say
+  *"Cosmos, …"* — a local voice-activity detector segments your speech and only
+  utterances addressed to Cosmos are executed.
+- **Barge-in** — talk over it, send a new message, or hit Stop to interrupt mid-sentence.
+- The orb's pulse is driven by the **real audio envelope** — mic while listening, TTS
+  while speaking.
 
-For complex work, Cosmos leads a team. Ask for something multi-step —
-*"research the best Rust game engines and write me a comparison doc"* — and
-he'll delegate to specialist agents: **planner**, **researcher**, **coder**,
-**debugger**, **reviewer**. You'll see them materialize as glowing chips
-orbiting the core while they work, and every tool they touch is tagged in the
-transcript. He can also browse: web search, page reading, and full browser
-automation (via your installed Edge/Chrome — clicking and form-filling always
-ask permission first).
+---
 
-## Eyes & Engines
+## 🛠️ What COSMOS Can Do
 
-Cosmos can see: *"look at my screen and tell me what this error means"* uses
-your vision model on a live capture, and offline OCR (Windows' built-in
-engine, no API call) extracts exact text from the screen or any image.
+With Claude, GPT, or Gemini selected, COSMOS has **real hands**:
 
-For game developers: say *"install your bridge into D:\\Projects\\MyGame"*
-and Cosmos drops a `CosmosBridge.cs` into the Unity project. From then on he
-can read the console (including compile errors), dump the scene hierarchy,
-refresh assets, and enter/exit play mode — so "write me a player controller"
-becomes write → recompile → check errors → fix, hands-free. Unreal projects
-are reachable through the engine's Remote Control API plugin.
+> 💬 *"Find my tax PDFs and zip them to the desktop"*
+> 💬 *"Open Steam and play Believer by Imagine Dragons"*
+> 💬 *"What's hogging my CPU right now?"*
+> 💬 *"Research the best Rust game engines and save me a comparison note"*
 
-## Platform
+<table>
+<tr>
+<td valign="top" width="50%">
 
-- **Dashboard** (▦) — live overview: telemetry, weather, today's actions,
-  memories, quick actions
-- **Workspace** (✎) — persistent encrypted notes; agents write research and
-  reports straight into it
-- **Notifications** (◔) — glass toasts + a notification center; Cosmos can
-  alert you proactively via his `notify` tool
-- **Compact mode** (⧉) — Cosmos shrinks to a floating always-on-top orb you
-  can keep over your game or IDE
-- **Plugins** — drop a `plugin.json` into the plugins folder to add palette
-  commands ([docs/PLUGINS.md](docs/PLUGINS.md))
+**🗂️ Files & System**
+- List / read / write / search / move files
+- Delete to Recycle Bin, zip / unzip
+- Run PowerShell commands
+- Launch & **close** apps, open URLs
+- Volume, power (sleep / restart / shutdown)
+- Clipboard, screenshots, live telemetry
 
-## Memory & the Vault
+</td>
+<td valign="top" width="50%">
 
-Cosmos remembers you. Durable preferences, projects, and goals are saved to
-long-term memory (automatically via tool use, or manually) and recalled by
-semantic similarity into every conversation — tell him once that you build in
-Unity, and he'll know next week. Open the **Vault** (◈ in the title bar) to
-browse and delete memories, revoke "Always allow" tool grants, and review the
-audit log of everything Cosmos has done on your machine. API keys, chat
-history, and memory content are encrypted at rest with Windows DPAPI.
+**🌐 Web & Vision**
+- Web search + news + page reading
+- Full browser automation (Edge / Chrome)
+- **Play media** in your default browser
+- See your screen (vision model)
+- Offline OCR (Windows engine, no API)
 
-## What's in Phase 1
+</td>
+</tr>
+</table>
 
-- **Boot cinematic** — particle field, scanline sweep, GSAP glyph-scramble
-  module init, glowing COSMOS reveal, synthesized power-on sound
-- **AI Core** — custom GLSL noise-displaced orb with fresnel rim, 2,400
-  orbiting GPU particles, gyroscope rings; visibly shifts between
-  idle / listening / thinking / speaking
-- **Holographic HUD** — draggable glass cards: CPU, GPU, RAM, network,
-  battery, clock, weather (keyless Open-Meteo), all live
-- **AI conversation** — streaming, interruptible, provider-switchable
-  (Anthropic / OpenAI / Gemini / Ollama), keys never leave the main process
-- **Command palette** — apps, websites, power controls (with confirmation
-  for destructive actions), themes, AI actions
-- **5 themes** · **synthesized UI sound design** · **searchable settings**
+> [!IMPORTANT]
+> **Sensitive actions always ask first.** Writes, deletes, terminal commands, and power
+> actions pause with an **Approve / Always / Deny** card. Read-only tools run
+> automatically, every action is shown live in the transcript, and everything is written
+> to an **audit log** you can review in the Vault.
 
-## Scripts
+---
 
-```bash
-npm run dev         # dev mode with HMR
-npm run build       # production bundles into out/
-npm run start       # preview the production build
-npm run typecheck   # strict TS across main + renderer
+## 👥 The Team — Multi-Agent
+
+<details open>
+<summary><b>COSMOS leads a team of specialist agents for complex work.</b></summary>
+
+<br />
+
+Ask for something multi-step and COSMOS **delegates** to focused sub-agents — you'll
+see them materialize as glowing chips **orbiting the AI core** while they work, each
+tool they touch tagged in the transcript.
+
+| Agent | Role |
+|:--|:--|
+| 🧭 **Planner** | Decomposes a goal into a concrete plan |
+| 🔎 **Researcher** | Web + local research with cited findings |
+| 💻 **Coder** | Reads projects, writes code, runs tests |
+| 🐛 **Debugger** | Reproduces, root-causes, and fixes |
+| 🔍 **Reviewer** | Read-only code review by severity |
+
+</details>
+
+---
+
+## 👁️ Vision & Creator Integrations
+
+- **See the screen** — *"look at my screen and tell me what this error means"* runs your
+  vision model on a live capture. Offline **OCR** extracts exact text with no API call.
+- **Unity** — *"install your bridge into my Unity project"* drops a `CosmosBridge.cs`
+  editor script; COSMOS can then read the console (incl. compile errors), dump the scene
+  hierarchy, refresh assets, and enter/exit play mode. *Write → recompile → fix*, hands-free.
+- **Unreal** — reachable through the engine's Remote Control API plugin.
+
+---
+
+## 🗄️ Memory & The Vault
+
+COSMOS **remembers you**. Durable preferences, projects, and goals are saved to
+long-term memory and recalled by **semantic similarity** into every conversation — tell
+it once you build in Unity, and it knows next week.
+
+Open the **Vault** (`◈`) to:
+- 🧠 Browse, add, and delete memories
+- 🔐 Revoke *"Always allow"* tool grants
+- 📜 Review the full audit log of everything COSMOS has done
+
+> API keys, chat history, and memory content are **encrypted at rest** with Windows DPAPI.
+
+---
+
+## 🎨 Platform
+
+| | Feature |
+|:--:|:--|
+| ▦ | **Dashboard** — live telemetry, weather, today's activity, quick actions |
+| ✎ | **Workspace** — persistent encrypted notes the agents can write into |
+| ◔ | **Notifications** — glass toasts + a center; COSMOS can alert you proactively |
+| ◉ | **Orb / Compact mode** — shrink to a floating always-on-top orb over your game or IDE |
+| ⧉ | **System tray** — runs in the background; quit only when *you* say so |
+| 🎨 | **5 themes** — Cyber Blue · Crimson · Nebula Purple · Emerald · Arctic White |
+| 🧩 | **Plugins** — drop a `plugin.json` to add palette commands ([guide](docs/PLUGINS.md)) |
+
+---
+
+## 🧬 Tech Stack
+
+<div align="center">
+
+| Layer | Technologies |
+|:--|:--|
+| **Shell** | Electron · electron-vite |
+| **UI** | React 19 · TypeScript · TailwindCSS · Framer Motion · GSAP |
+| **3D / FX** | Three.js · React Three Fiber · custom GLSL shaders |
+| **State** | Zustand |
+| **AI** | Claude · OpenAI · Gemini · Ollama (streaming, native tool-use) |
+| **Voice** | Whisper (STT) · Windows SAPI / ElevenLabs / Piper (TTS) |
+| **Data** | SQLite (`node:sqlite`) · safeStorage (DPAPI) encryption |
+| **Automation** | Playwright · PowerShell · Windows OCR |
+
+</div>
+
+---
+
+## 📂 Project Structure
+
+```
+src/
+├── shared/          # types + IPC contracts shared across processes
+├── main/            # Node.js — services, AI, tools, tray, windows
+│   └── services/    # AIService, MemoryService, tools/, voice/, unity/ …
+├── preload/         # the single typed renderer ↔ main bridge
+└── renderer/src/
+    ├── core/        # stores (zustand), theme, sound, voice
+    └── features/    # boot · orb · hud · chat · palette · vault · agents …
 ```
 
-## Documentation
+---
 
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — process model, folder
-  structure, IPC contracts, provider abstraction
-- [docs/DESIGN_SYSTEM.md](docs/DESIGN_SYSTEM.md) — tokens, glass recipe,
-  motion language, orb states, sound design
-- [docs/ROADMAP.md](docs/ROADMAP.md) — Phases 2–7: voice, automation daemon,
-  vector memory, multi-agent, Unity/Unreal, plugins
+## 📖 Documentation
+
+| Doc | What's inside |
+|:--|:--|
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Process model, folder structure, IPC contracts, provider abstraction |
+| [DESIGN_SYSTEM.md](docs/DESIGN_SYSTEM.md) | Design tokens, glass recipe, motion language, orb states, sound design |
+| [ROADMAP.md](docs/ROADMAP.md) | All 7 shipped phases + the post-roadmap backlog |
+| [PLUGINS.md](docs/PLUGINS.md) | Plugin format & examples |
+
+---
+
+## 🧑‍💻 Scripts
+
+```bash
+npm run dev         # dev mode with hot reload
+npm run build       # production bundles into out/
+npm run dist        # build the Windows installer → release/
+npm run typecheck   # strict TypeScript across main + renderer
+npm run start       # preview the production build
+```
+
+---
+
+<div align="center">
+
+## 📜 License
+
+Released under the [MIT License](LICENSE).
+
+<br />
+
+**Built to feel like the real thing.**
+<br />
+<sub>🌌 COSMOS</sub>
+
+</div>
