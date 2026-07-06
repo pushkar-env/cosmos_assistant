@@ -64,6 +64,7 @@ const commands = new CommandService()
 const embeddings = new EmbeddingService(settings)
 const memory = new MemoryService(embeddings)
 const browser = new BrowserService()
+const media = new MediaService(browser, settings)
 const tools = new ToolRegistry({
   stats,
   commands,
@@ -73,7 +74,7 @@ const tools = new ToolRegistry({
   ocr: new OcrService(),
   unity: new UnityService(),
   unreal: new UnrealService(),
-  media: new MediaService()
+  media
 })
 const ai = new AIService(settings, tools, memory)
 const stt = new SttService(settings)
@@ -325,7 +326,7 @@ if (!gotLock) {
   app.on('before-quit', () => {
     isQuitting = true
     stats.stop()
-    void browser.close()
+    void browser.close() // also closes the media tab
   })
 
   app.on('will-quit', () => {

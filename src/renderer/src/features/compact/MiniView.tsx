@@ -5,6 +5,7 @@ import { useAssistantStore } from '@/core/stores/useAssistantStore'
 import { useVoiceStore } from '@/features/voice/useVoiceStore'
 import { MicButton } from '@/features/voice/MicButton'
 import { OrbScene } from '@/features/orb/OrbScene'
+import { Markdown } from '@/shared/ui/Markdown'
 
 /**
  * Compact mode: a small always-on-top COSMOS — orb, last exchange,
@@ -58,11 +59,9 @@ export function MiniView(): React.JSX.Element {
         <OrbScene />
       </div>
 
-      <div className="min-h-0 flex-1 select-text overflow-y-auto px-4 py-2">
+      <div className="min-h-0 flex-1 select-text overflow-y-auto px-4 py-2 font-body text-xs leading-relaxed text-body">
         {lastAssistant ? (
-          <p className="whitespace-pre-wrap font-body text-xs leading-relaxed text-body">
-            {lastAssistant.content}
-          </p>
+          <Markdown>{lastAssistant.content}</Markdown>
         ) : (
           <p className="text-center font-ui text-xs text-dim">Standing by.</p>
         )}

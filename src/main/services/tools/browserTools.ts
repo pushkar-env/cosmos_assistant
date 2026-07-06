@@ -200,8 +200,33 @@ export function browserTools(browser: BrowserService): ToolSpec[] {
     },
     {
       def: {
+        name: 'browser_tabs',
+        description: 'List the open tabs in the COSMOS browser (title + URL).',
+        inputSchema: { type: 'object', properties: {} },
+        sensitive: false
+      },
+      summary: () => 'list tabs',
+      run: () => browser.listTabs()
+    },
+    {
+      def: {
+        name: 'browser_close_tab',
+        description:
+          'Close a specific tab in the COSMOS browser by name — a title or URL substring (e.g. "youtube", "gmail"). Use for "close the YouTube tab".',
+        inputSchema: {
+          type: 'object',
+          properties: { query: { type: 'string', description: 'e.g. "youtube"' } },
+          required: ['query']
+        },
+        sensitive: false
+      },
+      summary: (a) => String(a.query ?? ''),
+      run: (a) => browser.closeTab(String(a.query))
+    },
+    {
+      def: {
         name: 'browser_close',
-        description: 'Close the browser session.',
+        description: 'Close the entire COSMOS browser session (all tabs).',
         inputSchema: { type: 'object', properties: {} },
         sensitive: false
       },

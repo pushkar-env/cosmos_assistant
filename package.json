@@ -18,6 +18,8 @@
   },
   "dependencies": {
     "playwright-core": "^1.61.1",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "systeminformation": "^5.23.5"
   },
   "devDependencies": {

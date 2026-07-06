@@ -3,9 +3,13 @@ import { execFile } from 'child_process'
 import { promises as fs } from 'fs'
 import { join } from 'path'
 
-interface Shortcut {
+type LaunchKind = 'appid' | 'url' | 'lnk'
+
+interface AppEntry {
   name: string
-  path: string
+  kind: LaunchKind
+  /** AUMID (appid), protocol URL (steam://…), or a .lnk path */
+  target: string
 }
 
 /** strip spaces, hyphens and dots for space-insensitive name matching */
@@ -31,108 +35,163 @@ const ALIASES: Record<string, string> = {
 }
 
 /**
- * Resolves human app names ("steam", "discord", "vs code") to something
- * launchable. The winning strategy on Windows is Start Menu shortcuts —
- * that's the same index the Start menu searches, so it covers Steam,
- * Spotify, Discord, games, etc. Falls back to App Paths / PATH via the
- * shell `start` builtin, and to a literal path.
+ * Resolves human app names ("steam", "discord", "apex legends") to a
+ * launchable target. The comprehensive source is Windows' own "All apps"
+ * list (Get-StartApps) — it covers desktop apps, Store/UWP apps AND
+ * games/launchers (Steam, EA, Epic), far more than Start Menu shortcuts
+ * alone. Games launch via their protocol (steam://…), Store apps via
+ * shell:AppsFolder, and the rest via their shortcut.
  */
 export class AppLauncher {
-  private cache: Shortcut[] | null = null
+  private cache: AppEntry[] | null = null
 
   async launch(query: string): Promise<{ ok: boolean; message: string }> {
     const q = query.trim()
     if (!q) return { ok: false, message: 'No application specified' }
 
-    // 1. explicit existing path
+    // 1. explicit existing path / exe
     if (/[\\/]/.test(q) || q.toLowerCase().endsWith('.exe')) {
       const err = await shell.openPath(q)
       if (!err) return { ok: true, message: `Launched ${q}` }
     }
 
-    // 2. Start Menu shortcut (best name match, alias-aware)
-    const shortcuts = await this.shortcuts()
-    const match = this.bestMatch(shortcuts, q) ?? this.bestMatch(shortcuts, ALIASES[q.toLowerCase()] ?? '')
-    if (match) {
-      const err = await shell.openPath(match.path)
-      if (!err) return { ok: true, message: `Launched ${match.name}` }
-      return { ok: false, message: `Found "${match.name}" but failed to launch: ${err}` }
-    }
+    // 2. best match across every installed app (alias-aware)
+    const apps = await this.index()
+    const match = this.bestMatch(apps, q) ?? this.bestMatch(apps, ALIASES[q.toLowerCase()] ?? '')
+    if (match) return this.dispatch(match)
 
-    // 3. App Paths / PATH via `start`
-    const viaStart = await this.tryStart(q)
-    if (viaStart) return { ok: true, message: `Launched ${q}` }
+    // 3. last resort: let Windows resolve the bare name
+    if (await this.tryStart(q)) return { ok: true, message: `Launched ${q}` }
 
     return {
       ok: false,
-      message: `Couldn't find an app matching "${q}". Try the exact name as it appears in the Start menu, or give a full path.`
+      message: `Couldn't find an app matching "${q}". Ask me to list your apps to see what's installed.`
     }
   }
 
-  /** ranked list of installed app names (for the model / diagnostics) */
+  private async dispatch(entry: AppEntry): Promise<{ ok: boolean; message: string }> {
+    try {
+      if (entry.kind === 'url') {
+        await shell.openExternal(entry.target) // steam://, com.epicgames://, etc.
+        return { ok: true, message: `Launched ${entry.name}` }
+      }
+      if (entry.kind === 'lnk') {
+        const err = await shell.openPath(entry.target)
+        return err
+          ? { ok: false, message: `Found "${entry.name}" but couldn't launch it: ${err}` }
+          : { ok: true, message: `Launched ${entry.name}` }
+      }
+      // appid (AUMID / registered app) → the Windows "Apps" folder launcher
+      const ok = await this.tryStart(`shell:AppsFolder\\${entry.target}`)
+      return ok
+        ? { ok: true, message: `Launched ${entry.name}` }
+        : { ok: false, message: `Found "${entry.name}" but couldn't launch it.` }
+    } catch (err) {
+      return { ok: false, message: err instanceof Error ? err.message : String(err) }
+    }
+  }
+
+  /** every installed app name (for the model / diagnostics) */
   async listApps(filter?: string): Promise<string[]> {
-    let items = await this.shortcuts()
+    let items = await this.index()
     if (filter) {
       const f = filter.toLowerCase()
-      items = items.filter((s) => s.name.toLowerCase().includes(f))
+      const fc = collapse(filter)
+      items = items.filter((a) => a.name.toLowerCase().includes(f) || collapse(a.name).includes(fc))
     }
-    return [...new Set(items.map((s) => s.name))].sort().slice(0, 60)
+    return [...new Set(items.map((a) => a.name))].sort((a, b) => a.localeCompare(b))
   }
 
-  private async shortcuts(): Promise<Shortcut[]> {
+  /** Build the combined app index (cached): Get-StartApps + Start Menu .lnk. */
+  private async index(): Promise<AppEntry[]> {
     if (this.cache) return this.cache
-    const roots = [
+    const entries: AppEntry[] = []
+
+    // 1. Windows "All apps" — comprehensive (UWP, games, launchers)
+    try {
+      const json = await this.runPs(
+        'Get-StartApps | Select-Object Name,AppID | ConvertTo-Json -Compress',
+        12_000
+      )
+      const parsed = JSON.parse(json) as
+        | { Name?: string; AppID?: string }
+        | { Name?: string; AppID?: string }[]
+      for (const it of Array.isArray(parsed) ? parsed : [parsed]) {
+        const name = String(it.Name ?? '').trim()
+        const appId = String(it.AppID ?? '').trim()
+        if (!name || !appId) continue
+        const kind: LaunchKind = /^[a-z][\w+.-]*:\/\//i.test(appId) ? 'url' : 'appid'
+        entries.push({ name, kind, target: appId })
+      }
+    } catch {
+      /* PowerShell/Get-StartApps unavailable — shortcuts still cover most apps */
+    }
+
+    // 2. Start Menu .lnk shortcuts (supplement anything Get-StartApps missed)
+    for (const root of [
       join(process.env.ProgramData ?? 'C:\\ProgramData', 'Microsoft\\Windows\\Start Menu\\Programs'),
       join(process.env.APPDATA ?? '', 'Microsoft\\Windows\\Start Menu\\Programs')
-    ].filter(Boolean)
+    ].filter(Boolean)) {
+      await this.walkShortcuts(root, entries, 0)
+    }
 
-    const found: Shortcut[] = []
-    for (const root of roots) await this.walk(root, found, 0)
-    this.cache = found
-    return found
+    this.cache = entries
+    return entries
   }
 
-  private async walk(dir: string, out: Shortcut[], depth: number): Promise<void> {
+  private async walkShortcuts(dir: string, out: AppEntry[], depth: number): Promise<void> {
     if (depth > 4) return
-    let entries: import('fs').Dirent[]
+    let items: import('fs').Dirent[]
     try {
-      entries = await fs.readdir(dir, { withFileTypes: true })
+      items = await fs.readdir(dir, { withFileTypes: true })
     } catch {
       return
     }
-    for (const e of entries) {
+    for (const e of items) {
       const full = join(dir, e.name)
-      if (e.isDirectory()) {
-        await this.walk(full, out, depth + 1)
-      } else if (e.name.toLowerCase().endsWith('.lnk')) {
-        out.push({ name: e.name.slice(0, -4), path: full })
+      if (e.isDirectory()) await this.walkShortcuts(full, out, depth + 1)
+      else if (e.name.toLowerCase().endsWith('.lnk')) {
+        out.push({ name: e.name.slice(0, -4), kind: 'lnk', target: full })
       }
     }
   }
 
-  private bestMatch(shortcuts: Shortcut[], query: string): Shortcut | null {
+  private bestMatch(apps: AppEntry[], query: string): AppEntry | null {
     const q = query.toLowerCase().trim()
     if (!q) return null
     // collapsed form ignores spaces/hyphens so "anti gravity" == "antigravity"
     const qc = collapse(q)
-    let best: { s: Shortcut; score: number } | null = null
-    for (const s of shortcuts) {
-      const name = s.name.toLowerCase()
+    let best: { a: AppEntry; score: number } | null = null
+    for (const a of apps) {
+      const name = a.name.toLowerCase()
       const nc = collapse(name)
       let score = 0
       if (name === q || nc === qc) score = 100
-      else if (name.startsWith(q) || nc.startsWith(qc)) score = 80 - name.length * 0.1
-      else if (name.includes(q) || nc.includes(qc)) score = 60 - name.length * 0.1
+      else if (name.startsWith(q) || nc.startsWith(qc)) score = 80 - name.length * 0.05
+      else if (name.includes(q) || nc.includes(qc)) score = 60 - name.length * 0.05
       else {
-        // all query words present anywhere
         const words = q.split(/\s+/)
-        if (words.every((w) => name.includes(w))) score = 40 - name.length * 0.1
+        if (words.every((w) => name.includes(w))) score = 40 - name.length * 0.05
       }
-      // prefer the launcher over uninstallers/help entries
-      if (/uninstall|readme|help|documentation|website/i.test(name)) score -= 50
-      if (score > 0 && (!best || score > best.score)) best = { s, score }
+      // demote uninstallers/help/web-shortcut noise
+      if (/uninstall|readme|help|documentation|website|support|^www\./i.test(name)) score -= 50
+      // web shortcuts (http/https) are rarely the intended app → demote hard;
+      // app protocols (steam://, com.epicgames://…) are legit game launches
+      if (a.kind === 'url') score -= /^https?:\/\//i.test(a.target) ? 40 : 4
+      if (score > 0 && (!best || score > best.score)) best = { a, score }
     }
-    return best?.s ?? null
+    return best?.a ?? null
+  }
+
+  private runPs(script: string, timeoutMs: number): Promise<string> {
+    return new Promise((resolve, reject) => {
+      execFile(
+        'powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-Command', script],
+        { windowsHide: true, timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024 },
+        (err, stdout) => (err ? reject(err) : resolve(stdout.trim()))
+      )
+    })
   }
 
   /**

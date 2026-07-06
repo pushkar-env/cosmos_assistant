@@ -18,7 +18,7 @@ type OllamaMessage =
       content: string
       tool_calls: { function: { name: string; arguments: Record<string, unknown> } }[]
     }
-  | { role: 'tool'; content: string }
+  | { role: 'tool'; content: string; tool_name?: string }
 
 function toWire(system: string | undefined, messages: AgentMessage[]): OllamaMessage[] {
   const out: OllamaMessage[] = []
@@ -31,8 +31,8 @@ function toWire(system: string | undefined, messages: AgentMessage[]): OllamaMes
         tool_calls: m.calls.map((c) => ({ function: { name: c.name, arguments: c.args } }))
       })
     } else if (m.role === 'tool-results') {
-      // Ollama matches tool results to calls by order
-      for (const r of m.results) out.push({ role: 'tool', content: r.result })
+      // tool_name helps newer Ollama match results to the right call
+      for (const r of m.results) out.push({ role: 'tool', content: r.result, tool_name: r.name })
     } else {
       out.push(m)
     }
@@ -47,30 +47,48 @@ export const ollamaProvider: AIProvider = {
   async streamChat(req, ctx, emit, signal) {
     const base = (ctx.baseUrl ?? 'http://localhost:11434').replace(/\/$/, '')
 
+    const hasTools = !!req.tools?.length
+    const body = {
+      model: req.model,
+      stream: true,
+      messages: toWire(req.system, req.messages),
+      tools: req.tools?.map((t) => ({
+        type: 'function',
+        function: { name: t.name, description: t.description, parameters: t.inputSchema }
+      })),
+      // keep the model loaded between tool rounds (no reload latency)
+      keep_alive: '15m',
+      options: {
+        // CRITICAL for agentic use: the big system prompt + ~45 tool
+        // definitions + tool results overflow Ollama's small default
+        // context (2048) and the model silently loses its tools.
+        num_ctx: ctx.numCtx && ctx.numCtx >= 2048 ? ctx.numCtx : 8192,
+        // lower temperature → more reliable, deterministic tool calls
+        temperature: 0.6
+      }
+    }
+
     let res: Response
     try {
       res = await fetch(`${base}/api/chat`, {
         method: 'POST',
         signal,
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          model: req.model,
-          stream: true,
-          messages: toWire(req.system, req.messages),
-          tools: req.tools?.map((t) => ({
-            type: 'function',
-            function: { name: t.name, description: t.description, parameters: t.inputSchema }
-          }))
-        })
+        body: JSON.stringify(body)
       })
     } catch {
-      throw new Error(`Cannot reach Ollama at ${base} — is it running?`)
+      throw new Error(`Cannot reach Ollama at ${base} — is it running? (run: ollama serve)`)
     }
     if (!res.ok) {
-      const detail = (await res.text().catch(() => '')).slice(0, 300)
-      if (res.status === 400 && /tool/i.test(detail)) {
+      const detail = (await res.text().catch(() => '')).slice(0, 400)
+      if (res.status === 404) {
         throw new Error(
-          `Model "${req.model}" does not support tools — try llama3.1, qwen2.5 or mistral-nemo`
+          `Model "${req.model}" is not installed. Run: ollama pull ${req.model}`
+        )
+      }
+      if (hasTools && /tool|function/i.test(detail)) {
+        throw new Error(
+          `Model "${req.model}" doesn't support tools/agentic actions. Use a tool-capable model — recommended: qwen2.5:7b or llama3.1:8b (or llama3.2 for lighter machines).`
         )
       }
       throw new Error(`Ollama API error ${res.status}: ${detail || res.statusText}`)

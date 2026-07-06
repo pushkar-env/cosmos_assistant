@@ -51,6 +51,7 @@ export class SettingsService {
       ...current,
       ...patch,
       apiKeys: nextKeys,
+      providerModels: { ...current.providerModels, ...patch.providerModels },
       location: { ...current.location, ...patch.location },
       voice: nextVoice
     }
@@ -71,10 +72,18 @@ export class SettingsService {
           ...DEFAULT_SETTINGS,
           ...raw,
           apiKeys: { ...DEFAULT_SETTINGS.apiKeys, ...raw.apiKeys },
+          providerModels: { ...DEFAULT_SETTINGS.providerModels, ...raw.providerModels },
           location: { ...DEFAULT_SETTINGS.location, ...raw.location },
           voice: { ...DEFAULT_SETTINGS.voice, ...raw.voice },
           alwaysAllowTools: raw.alwaysAllowTools ?? []
         }
+        // migrate: remember the active model for its provider if not already
+        if (raw.model && !raw.providerModels?.[merged.provider]) {
+          merged.providerModels[merged.provider] = raw.model
+        }
+        // migrate the old hard-coded Ollama default → the new one
+        if (merged.providerModels.ollama === 'llama3.1') merged.providerModels.ollama = 'llama3.2'
+        if (merged.provider === 'ollama' && merged.model === 'llama3.1') merged.model = 'llama3.2'
         this.resolveSecret(merged, 'anthropic', merged.apiKeys.anthropic)
         this.resolveSecret(merged, 'openai', merged.apiKeys.openai)
         this.resolveSecret(merged, 'gemini', merged.apiKeys.gemini)

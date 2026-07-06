@@ -25,6 +25,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       ...get().settings,
       ...patch,
       apiKeys: { ...get().settings.apiKeys, ...patch.apiKeys },
+      providerModels: { ...get().settings.providerModels, ...patch.providerModels },
       location: { ...get().settings.location, ...patch.location },
       voice: { ...get().settings.voice, ...patch.voice }
     }

@@ -1,57 +1,228 @@
 import { app } from 'electron'
 import { promises as fs } from 'fs'
 import { join } from 'path'
-import { chromium, type Browser, type Page } from 'playwright-core'
+import { chromium, type BrowserContext, type Page } from 'playwright-core'
 
 const IDLE_CLOSE_MS = 3 * 60_000
 const READ_LIMIT = 15_000
 
 /**
- * Playwright over the user's installed Edge/Chrome (playwright-core,
- * channel launch — no browser downloads). One lazy headless session,
- * auto-closed after idle. Used by the browser_* tools and the
- * Researcher agent.
+ * Playwright over the user's installed Chrome/Edge (playwright-core,
+ * channel launch — no browser downloads). Uses a PERSISTENT profile so
+ * cache and cookies survive: YouTube and other sites load fast and fully
+ * instead of cold-loading (and hitting consent walls) every time.
+ * Powers the browser_* automation tools and media playback (separate tab).
  */
 export class BrowserService {
-  private browser: Browser | null = null
+  private context: BrowserContext | null = null
   private page: Page | null = null
+  /** a separate tab dedicated to media playback, so automation on the
+   *  main tab never navigates away from a playing song */
+  private mediaPage: Page | null = null
   private idleTimer: NodeJS.Timeout | null = null
+
+  /** Launch (or reuse) the shared visible browser with a persistent profile. */
+  private async ensureContext(): Promise<BrowserContext> {
+    if (this.context) return this.context
+    const userDataDir = join(app.getPath('userData'), 'cosmos-browser')
+    await fs.mkdir(userDataDir, { recursive: true }).catch(() => undefined)
+    let lastErr: unknown = null
+    for (const channel of ['chrome', 'msedge'] as const) {
+      try {
+        this.context = await chromium.launchPersistentContext(userDataDir, {
+          channel,
+          headless: false,
+          viewport: null,
+          // run sandboxed like a real browser (avoids the "--no-sandbox is
+          // unsupported" warning bar that shows once automation is hidden)
+          chromiumSandbox: true,
+          // behave like a normal browser: drop the "controlled by automated
+          // software" infobar and the webdriver flag so sites (YouTube!)
+          // serve their full, fast page instead of a degraded one
+          ignoreDefaultArgs: ['--enable-automation'],
+          args: [
+            '--start-maximized',
+            '--disable-blink-features=AutomationControlled',
+            '--autoplay-policy=no-user-gesture-required'
+          ]
+        })
+        this.context.on('close', () => {
+          this.context = null
+          this.page = null
+          this.mediaPage = null
+        })
+        return this.context
+      } catch (err) {
+        lastErr = err
+        this.context = null
+      }
+    }
+    throw new Error(
+      `No usable browser found (need Edge or Chrome installed): ${
+        lastErr instanceof Error ? lastErr.message.split('\n')[0] : lastErr
+      }`
+    )
+  }
 
   private async ensurePage(): Promise<Page> {
     this.touch()
     if (this.page && !this.page.isClosed()) return this.page
+    const ctx = await this.ensureContext()
+    // reuse the profile's initial blank tab if it's free
+    this.page = ctx.pages().find((p) => p !== this.mediaPage && !p.isClosed()) ?? (await ctx.newPage())
+    return this.page
+  }
 
-    if (!this.browser?.isConnected()) {
-      let lastErr: unknown = null
-      // prefer Chrome (most users' default) so the automation window,
-      // when it's actually needed, matches their normal browser
-      for (const channel of ['chrome', 'msedge'] as const) {
+  // ── media playback (separate tab) ──────────────────────────────
+
+  /** Open a URL in the media tab and start it playing (with sound). */
+  async playMedia(url: string): Promise<void> {
+    if (!/^https?:\/\//.test(url)) throw new Error('Only http(s) URLs are allowed')
+    const ctx = await this.ensureContext()
+    if (!this.mediaPage || this.mediaPage.isClosed()) {
+      // prefer an already-open YouTube tab so a new song plays in the SAME
+      // tab; else reuse a spare/blank tab; else open one. Never stack tabs.
+      const host = new URL(url).hostname.replace(/^www\./, '')
+      const existing = ctx
+        .pages()
+        .find((p) => !p.isClosed() && p.url().includes(host))
+      const spare = ctx.pages().find((p) => p !== this.page && !p.isClosed())
+      this.mediaPage = existing ?? spare ?? (await ctx.newPage())
+    }
+    const page = this.mediaPage
+    // 'commit' fires as soon as navigation starts — far more reliable than
+    // waiting for a heavy page like YouTube to fully load
+    await page.goto(url, { waitUntil: 'commit', timeout: 30_000 })
+    await page.bringToFront().catch(() => undefined)
+    // give the player a moment, then unmute + play() in case autoplay lags
+    await page.waitForTimeout(1500)
+    await this.videoAction(page, 'play').catch(() => undefined)
+    this.touch()
+  }
+
+  /** Control whatever media is in the media tab. */
+  async mediaControl(action: string): Promise<string> {
+    if (!this.mediaPage || this.mediaPage.isClosed()) {
+      throw new Error('Nothing is playing in the COSMOS player.')
+    }
+    this.touch()
+    const result = await this.videoAction(this.mediaPage, action)
+    return result
+  }
+
+  // ── tab management (COSMOS-controlled browser) ─────────────────
+
+  /** List the open tabs in the COSMOS browser. */
+  async listTabs(): Promise<string> {
+    if (!this.context) return 'The COSMOS browser is not open.'
+    const pages = this.context.pages().filter((p) => !p.isClosed())
+    if (pages.length === 0) return 'No open tabs.'
+    const rows = await Promise.all(
+      pages.map(async (p, i) => {
+        let title = ''
         try {
-          // visible, not headless: the user watches COSMOS drive the page
-          // (form-fill, clicks, logins). Audio-playing media goes through
-          // the real default browser via MediaService instead.
-          this.browser = await chromium.launch({
-            channel,
-            headless: false,
-            args: ['--start-maximized', '--mute-audio']
-          })
-          break
-        } catch (err) {
-          lastErr = err
-          this.browser = null
+          title = await p.title()
+        } catch {
+          /* page busy */
         }
+        return `${i + 1}. ${title || '(untitled)'} — ${p.url()}`
+      })
+    )
+    return rows.join('\n')
+  }
+
+  /**
+   * Close tab(s) in the COSMOS browser matching a query (title or URL
+   * substring, e.g. "youtube"). Returns what was closed.
+   */
+  async closeTab(query: string): Promise<string> {
+    if (!this.context) throw new Error('The COSMOS browser is not open.')
+    const q = query.trim().toLowerCase()
+    if (!q) throw new Error('Say which tab to close (e.g. "youtube").')
+    const pages = this.context.pages().filter((p) => !p.isClosed())
+
+    const closed: string[] = []
+    for (const p of pages) {
+      let title = ''
+      try {
+        title = await p.title()
+      } catch {
+        /* ignore */
       }
-      if (!this.browser) {
-        throw new Error(
-          `No usable browser found (need Edge or Chrome installed): ${
-            lastErr instanceof Error ? lastErr.message.split('\n')[0] : lastErr
-          }`
-        )
+      if (p.url().toLowerCase().includes(q) || title.toLowerCase().includes(q)) {
+        closed.push(title || p.url())
+        if (p === this.mediaPage) this.mediaPage = null
+        if (p === this.page) this.page = null
+        await p.close().catch(() => undefined)
       }
     }
-    const context = await this.browser.newContext({ viewport: { width: 1280, height: 900 } })
-    this.page = await context.newPage()
-    return this.page
+    if (closed.length === 0) return `No open tab matched "${query}".`
+    return `Closed ${closed.length} tab${closed.length > 1 ? 's' : ''}: ${closed.join(', ')}`
+  }
+
+  get isMediaPlaying(): boolean {
+    return !!this.mediaPage && !this.mediaPage.isClosed()
+  }
+
+  private async videoAction(page: Page, action: string): Promise<string> {
+    return page.evaluate((act: string) => {
+      const doc = (globalThis as { document?: unknown }).document as
+        | {
+            querySelector(sel: string): {
+              paused: boolean
+              muted: boolean
+              volume: number
+              currentTime: number
+              duration: number
+              play(): Promise<void>
+              pause(): void
+            } | null
+          }
+        | undefined
+      const v = doc?.querySelector('video')
+      if (!v) return 'No video on the current page.'
+      switch (act) {
+        case 'play':
+          v.muted = false
+          void v.play().catch(() => undefined)
+          return 'Playing.'
+        case 'pause':
+          v.pause()
+          return 'Paused.'
+        case 'toggle':
+          if (v.paused) {
+            v.muted = false
+            void v.play().catch(() => undefined)
+            return 'Playing.'
+          }
+          v.pause()
+          return 'Paused.'
+        case 'mute':
+          v.muted = true
+          return 'Muted.'
+        case 'unmute':
+          v.muted = false
+          return 'Unmuted.'
+        case 'volume-up':
+          v.volume = Math.min(1, v.volume + 0.15)
+          return `Volume ${Math.round(v.volume * 100)}%.`
+        case 'volume-down':
+          v.volume = Math.max(0, v.volume - 0.15)
+          return `Volume ${Math.round(v.volume * 100)}%.`
+        case 'forward':
+          v.currentTime = Math.min(v.duration || 1e9, v.currentTime + 10)
+          return `Skipped to ${Math.round(v.currentTime)}s.`
+        case 'back':
+          v.currentTime = Math.max(0, v.currentTime - 10)
+          return `Back to ${Math.round(v.currentTime)}s.`
+        case 'restart':
+          v.currentTime = 0
+          void v.play().catch(() => undefined)
+          return 'Restarted.'
+        default:
+          return `Unknown media action: ${act}`
+      }
+    }, action)
   }
 
   async goto(url: string): Promise<string> {
@@ -178,13 +349,21 @@ export class BrowserService {
     return `Saved page screenshot: ${file}`
   }
 
+  async stopMedia(): Promise<void> {
+    if (this.mediaPage && !this.mediaPage.isClosed()) {
+      await this.mediaPage.close().catch(() => undefined) // close the tab, keep the browser
+    }
+    this.mediaPage = null
+  }
+
   async close(): Promise<void> {
     if (this.idleTimer) clearTimeout(this.idleTimer)
     this.idleTimer = null
     this.page = null
-    if (this.browser) {
-      await this.browser.close().catch(() => undefined)
-      this.browser = null
+    this.mediaPage = null
+    if (this.context) {
+      await this.context.close().catch(() => undefined)
+      this.context = null
     }
   }
 
@@ -195,8 +374,13 @@ export class BrowserService {
     return this.page
   }
 
+  /** Reset the idle-close timer. Media playback keeps the browser alive. */
   private touch(): void {
     if (this.idleTimer) clearTimeout(this.idleTimer)
-    this.idleTimer = setTimeout(() => void this.close(), IDLE_CLOSE_MS)
+    this.idleTimer = setTimeout(() => {
+      // never close mid-playback — reschedule while media is up
+      if (this.isMediaPlaying) this.touch()
+      else void this.close()
+    }, IDLE_CLOSE_MS)
   }
 }

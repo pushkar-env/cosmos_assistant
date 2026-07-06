@@ -75,16 +75,32 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   piperModelPath: ''
 }
 
+/**
+ * Where media (songs/videos) plays:
+ *  - dedicated — a COSMOS-controlled Chrome window that autoplays and can
+ *    be paused/played/seeked by voice or tools
+ *  - default   — your normal default browser (natural look; may not autoplay)
+ */
+export type MediaPlayerMode = 'dedicated' | 'default'
+
 export interface Settings {
   provider: ProviderId
+  /** the active model (for the current provider) */
   model: string
+  /** the chosen model per provider — so switching providers restores your
+   *  last model for that provider instead of resetting to a default */
+  providerModels: Record<ProviderId, string>
   apiKeys: { anthropic: string; openai: string; gemini: string }
   ollamaUrl: string
+  /** Ollama context window in tokens — larger = more room for agentic
+   *  tool use (needs more VRAM). 8192 is a good default for tool tasks. */
+  ollamaNumCtx: number
   theme: ThemeId
   soundEnabled: boolean
   userName: string
   location: { lat: number | null; lon: number | null; label: string }
   voice: VoiceSettings
+  mediaPlayer: MediaPlayerMode
   /** tools granted permanent approval ("Always allow") */
   alwaysAllowTools: string[]
 }
@@ -144,19 +160,22 @@ export const DEFAULT_MODELS: Record<ProviderId, string> = {
   anthropic: 'claude-sonnet-5',
   openai: 'gpt-4o',
   gemini: 'gemini-2.0-flash',
-  ollama: 'llama3.1'
+  ollama: 'llama3.2'
 }
 
 export const DEFAULT_SETTINGS: Settings = {
   provider: 'anthropic',
   model: DEFAULT_MODELS.anthropic,
+  providerModels: { ...DEFAULT_MODELS },
   apiKeys: { anthropic: '', openai: '', gemini: '' },
   ollamaUrl: 'http://localhost:11434',
+  ollamaNumCtx: 8192,
   theme: 'cyber-blue',
   soundEnabled: true,
   userName: '',
   location: { lat: null, lon: null, label: '' },
   voice: DEFAULT_VOICE_SETTINGS,
+  mediaPlayer: 'dedicated',
   alwaysAllowTools: []
 }
 

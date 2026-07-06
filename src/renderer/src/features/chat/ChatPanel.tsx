@@ -9,6 +9,7 @@ import { ToolCard } from './ToolCard'
 import { ApprovalCard } from './ApprovalCard'
 import { Glass } from '@/shared/ui/Glass'
 import { StatusDot } from '@/shared/ui/StatusDot'
+import { Markdown } from '@/shared/ui/Markdown'
 
 const PROVIDERS: { id: ProviderId; label: string }[] = [
   { id: 'anthropic', label: 'Claude' },
@@ -53,7 +54,9 @@ export function ChatPanel(): React.JSX.Element {
   }
 
   const switchProvider = (id: ProviderId): void => {
-    void update({ provider: id, model: DEFAULT_MODELS[id] })
+    // restore this provider's last-used model instead of resetting to default
+    const model = settings.providerModels[id] ?? DEFAULT_MODELS[id]
+    void update({ provider: id, model })
   }
 
   return (
@@ -134,11 +137,11 @@ export function ChatPanel(): React.JSX.Element {
                 className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}
               >
                 <div
-                  className={`max-w-[85%] whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-xl px-3.5 py-2.5 font-body text-sm leading-relaxed ${
+                  className={`max-w-[85%] break-words [overflow-wrap:anywhere] rounded-xl px-3.5 py-2.5 font-body text-sm leading-relaxed ${
                     m.role === 'user'
-                      ? 'rounded-br-sm bg-white/10 text-body'
+                      ? 'whitespace-pre-wrap rounded-br-sm bg-white/10 text-body'
                       : m.error
-                        ? 'rounded-bl-sm border border-red-500/30 text-red-300'
+                        ? 'whitespace-pre-wrap rounded-bl-sm border border-red-500/30 text-red-300'
                         : 'rounded-bl-sm text-body'
                   }`}
                   style={
@@ -147,7 +150,13 @@ export function ChatPanel(): React.JSX.Element {
                       : undefined
                   }
                 >
-                  {m.content || (
+                  {m.content ? (
+                    m.role === 'assistant' && !m.error ? (
+                      <Markdown>{m.content}</Markdown>
+                    ) : (
+                      m.content
+                    )
+                  ) : (
                     <span className="inline-flex gap-1">
                       {[0, 1, 2].map((i) => (
                         <motion.span

@@ -65,7 +65,9 @@ export function SettingsPanel(): React.JSX.Element {
             value={settings.provider}
             onChange={(e) => {
               const provider = e.target.value as ProviderId
-              void update({ provider, model: DEFAULT_MODELS[provider] })
+              // restore this provider's last model instead of resetting
+              const model = settings.providerModels[provider] ?? DEFAULT_MODELS[provider]
+              void update({ provider, model })
             }}
             className="w-64 rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-ui text-sm text-body focus:border-[var(--accent)] focus:outline-none"
           >
@@ -80,7 +82,17 @@ export function SettingsPanel(): React.JSX.Element {
         id: 'model',
         label: 'Model',
         keywords: 'model name version',
-        render: () => textInput(settings.model, (v) => void update({ model: v }), 'model id')
+        // save the model for the current provider so it persists & restores
+        render: () =>
+          textInput(
+            settings.model,
+            (v) =>
+              void update({
+                model: v,
+                providerModels: { ...settings.providerModels, [settings.provider]: v }
+              }),
+            'model id'
+          )
       },
       {
         id: 'key-anthropic',
@@ -124,6 +136,23 @@ export function SettingsPanel(): React.JSX.Element {
         keywords: 'ollama local url endpoint',
         render: () =>
           textInput(settings.ollamaUrl, (v) => void update({ ollamaUrl: v }), 'http://localhost:11434')
+      },
+      {
+        id: 'ollama-ctx',
+        label: 'Ollama Context (tokens)',
+        keywords: 'ollama context window num_ctx tokens agentic tools memory size',
+        render: () => (
+          <select
+            value={String(settings.ollamaNumCtx)}
+            onChange={(e) => void update({ ollamaNumCtx: Number(e.target.value) })}
+            className="w-64 rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-ui text-sm text-body focus:border-[var(--accent)] focus:outline-none"
+          >
+            <option value="4096">4096 — light (less VRAM)</option>
+            <option value="8192">8192 — recommended for tools</option>
+            <option value="16384">16384 — long tasks (more VRAM)</option>
+            <option value="32768">32768 — max (needs lots of VRAM)</option>
+          </select>
+        )
       },
       {
         id: 'theme',
@@ -175,6 +204,21 @@ export function SettingsPanel(): React.JSX.Element {
         keywords: 'name user identity call me',
         render: () =>
           textInput(settings.userName, (v) => void update({ userName: v }), 'How COSMOS addresses you')
+      },
+      {
+        id: 'media-player',
+        label: 'Media Playback',
+        keywords: 'media music video youtube play browser default dedicated autoplay',
+        render: () => (
+          <select
+            value={settings.mediaPlayer}
+            onChange={(e) => void update({ mediaPlayer: e.target.value as 'dedicated' | 'default' })}
+            className="w-64 rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-ui text-sm text-body focus:border-[var(--accent)] focus:outline-none"
+          >
+            <option value="dedicated">COSMOS player — autoplays, controllable</option>
+            <option value="default">Default browser — natural look</option>
+          </select>
+        )
       },
       {
         id: 'voice-replies',

@@ -123,7 +123,7 @@ export function systemTools(
       def: {
         name: 'app_open',
         description:
-          'Launch an installed application by its name as it appears in the Start menu ("Steam", "Discord", "Spotify", "VS Code", "Notepad") or a full path. Resolves Start-menu shortcuts, so friendly names work.',
+          'Launch ANY installed application or game by name — desktop apps ("Discord", "VS Code"), Store apps ("Calculator"), and games/launchers ("Apex Legends", "Steam", "Epic Games"). Uses the full Windows app list, so just pass the app name; it also accepts a full path. Try this directly before assuming something is not installed.',
         inputSchema: {
           type: 'object',
           properties: { target: { type: 'string' } },
@@ -161,7 +161,7 @@ export function systemTools(
       def: {
         name: 'app_list',
         description:
-          'List installed applications (from the Start menu). Use to check the exact name before launching, or when the user asks what is installed. Optional filter substring.',
+          'List installed applications and games (the full Windows app list — desktop, Store, and games). Optional filter substring to narrow it (e.g. "adobe", "game"). Prefer calling app_open directly; use this only to browse or confirm a name.',
         inputSchema: {
           type: 'object',
           properties: { filter: { type: 'string' } }
@@ -188,6 +188,41 @@ export function systemTools(
       },
       summary: (a) => String(a.query ?? ''),
       run: (a) => media.playYouTube(String(a.query))
+    },
+    {
+      def: {
+        name: 'media_control',
+        description:
+          'Control the currently playing media in the COSMOS player: pause, play, mute/unmute, skip forward/back, volume, restart, or stop. Use for "pause the song", "resume", "skip ahead", "turn it up", etc.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            action: {
+              type: 'string',
+              enum: [
+                'play',
+                'pause',
+                'toggle',
+                'mute',
+                'unmute',
+                'volume-up',
+                'volume-down',
+                'forward',
+                'back',
+                'restart',
+                'stop'
+              ]
+            }
+          },
+          required: ['action']
+        },
+        sensitive: false
+      },
+      summary: (a) => String(a.action ?? ''),
+      run: async (a) => {
+        const action = String(a.action)
+        return action === 'stop' ? media.stop() : media.control(action)
+      }
     },
     {
       def: {

@@ -1,15 +1,34 @@
 /** Text utilities for the voice pipeline. */
 
+// emoji / pictographic ranges — spoken engines mangle these, so drop them
+const EMOJI_RE =
+  /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{FE00}-\u{FE0F}\u{200D}]/gu
+
 /** Strip markdown and other unspeakable syntax before TTS. */
 export function toSpeakable(text: string): string {
-  return text
-    .replace(/```[\s\S]*?```/g, ' Code block omitted. ')
-    .replace(/`([^`]+)`/g, '$1')
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-    .replace(/https?:\/\/\S+/g, 'link')
-    .replace(/[*_#>|]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
+  return (
+    text
+      .replace(/```[\s\S]*?```/g, ' Code block omitted. ') // fenced code
+      .replace(/`([^`]+)`/g, '$1') // inline code → its text
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ') // images → nothing
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1') // links → link text only
+      .replace(/https?:\/\/\S+/g, 'link') // bare URLs → "link"
+      .replace(/^\s{0,3}#{1,6}\s+/gm, '') // heading markers
+      .replace(/^\s*>\s?/gm, '') // blockquote markers
+      .replace(/^\s*[-*+•]\s+/gm, '') // bullet list markers
+      .replace(/^\s*\d+\.\s+/gm, '') // numbered list markers
+      .replace(/^\s*\|.*\|\s*$/gm, ' ') // table rows
+      .replace(/[*_~]{1,3}([^*_~]+)[*_~]{1,3}/g, '$1') // bold/italic/strike
+      .replace(/[*_#>|`~]+/g, ' ') // any stray markers
+      .replace(EMOJI_RE, '')
+      .replace(/[ \t]+/g, ' ')
+      .replace(/\n{2,}/g, '. ') // paragraph breaks → sentence pause
+      .replace(/\n/g, ' ')
+      .replace(/\s+([.,!?;:])/g, '$1') // tidy spacing before punctuation
+      .replace(/([.!?])\s*\.+/g, '$1') // collapse doubled sentence-ends
+      .replace(/\s+/g, ' ')
+      .trim()
+  )
 }
 
 const WAKE_RE = /^\s*(?:hey|ok|okay|hi|yo)?[,\s]*(cosmos|kosmos|cosmo|cosmas)\b[,!.?\s]*/i

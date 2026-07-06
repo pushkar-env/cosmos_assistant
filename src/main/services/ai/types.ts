@@ -4,6 +4,9 @@ import type { AgentMessage, ToolCall, ToolDef } from '@shared/tools'
 export interface ProviderContext {
   apiKey: string
   baseUrl?: string
+  /** Ollama context window (num_ctx) — must fit the big system prompt +
+   *  tool definitions + tool results, or the model loses its tools */
+  numCtx?: number
 }
 
 /** One streamed model turn in the agent loop. */
