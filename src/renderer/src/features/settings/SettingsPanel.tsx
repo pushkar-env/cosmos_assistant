@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   BUNDLED_VOICES,
   DEFAULT_MODELS,
+  PROVIDER_MODELS,
   VOICE_LANGUAGES,
   type ProviderId,
   type ThemeId,
@@ -30,10 +31,36 @@ export function SettingsPanel(): React.JSX.Element {
   const { settings, update } = useSettingsStore()
   const [search, setSearch] = useState('')
   const [availableVoiceIds, setAvailableVoiceIds] = useState<string[]>([])
+  const [ollamaModels, setOllamaModels] = useState<string[]>([])
+  const [customModel, setCustomModel] = useState(false)
 
   useEffect(() => {
     void window.cosmos.voice.listAvailableVoices().then(setAvailableVoiceIds)
   }, [])
+
+  // auto-detect installed Ollama models — refetched every time the panel
+  // opens (and on provider change) so newly-pulled models show up, and a
+  // transient empty result (Ollama not warmed up yet at boot) is retried
+  // instead of leaving the dropdown stuck on a single model
+  const settingsOpen = activePanel === 'settings'
+  useEffect(() => {
+    if (settingsOpen && settings.provider === 'ollama') {
+      void window.cosmos.ai
+        .listOllamaModels()
+        .then((m) => setOllamaModels((prev) => (m.length ? m : prev)))
+    }
+  }, [settingsOpen, settings.provider])
+
+  // leave "custom" mode automatically when switching providers
+  useEffect(() => {
+    setCustomModel(false)
+  }, [settings.provider])
+
+  const setModel = (model: string): void =>
+    void update({
+      model,
+      providerModels: { ...settings.providerModels, [settings.provider]: model }
+    })
 
   // only offer voices whose model actually shipped (all 4 do, but this
   // stays correct if a build omits one); fall back to the full list until
@@ -112,18 +139,48 @@ export function SettingsPanel(): React.JSX.Element {
       {
         id: 'model',
         label: 'Model',
-        keywords: 'model name version',
-        // save the model for the current provider so it persists & restores
-        render: () =>
-          textInput(
-            settings.model,
-            (v) =>
-              void update({
-                model: v,
-                providerModels: { ...settings.providerModels, [settings.provider]: v }
-              }),
-            'model id'
+        keywords: 'model name version claude gpt gemini ollama llm dropdown custom',
+        // dropdown of popular models (installed models for Ollama), plus a
+        // "custom" escape hatch to type any model id. Saved per provider.
+        render: () => {
+          const base =
+            settings.provider === 'ollama' ? ollamaModels : PROVIDER_MODELS[settings.provider]
+          // always include the current model so it shows selected even if custom
+          const options = base.includes(settings.model)
+            ? base
+            : [settings.model, ...base].filter(Boolean)
+
+          if (customModel) {
+            return (
+              <div className="flex items-center gap-2">
+                {textInput(settings.model, setModel, DEFAULT_MODELS[settings.provider])}
+                <button
+                  onClick={() => setCustomModel(false)}
+                  className="shrink-0 rounded-lg border border-white/10 px-3 py-2 font-ui text-[10px] font-bold uppercase tracking-widest text-dim transition-colors hover:border-[var(--accent-dim)] hover:text-body"
+                >
+                  List
+                </button>
+              </div>
+            )
+          }
+          return (
+            <select
+              value={settings.model}
+              onChange={(e) => {
+                if (e.target.value === '__custom__') setCustomModel(true)
+                else setModel(e.target.value)
+              }}
+              className="w-64 rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-ui text-sm text-body focus:border-[var(--accent)] focus:outline-none"
+            >
+              {options.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+              <option value="__custom__">✎ Custom model…</option>
+            </select>
           )
+        }
       },
       {
         id: 'key-anthropic',
@@ -349,8 +406,10 @@ export function SettingsPanel(): React.JSX.Element {
         )
       }
     ]
+    // ollamaModels + customModel drive the Model row; without them the memo
+    // keeps a stale closure and the dropdown never updates
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings, update, availableVoiceIds])
+  }, [settings, update, availableVoiceIds, ollamaModels, customModel])
 
   const filtered = rows.filter(
     (r) =>

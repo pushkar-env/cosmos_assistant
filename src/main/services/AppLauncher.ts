@@ -244,11 +244,14 @@ export class AppLauncher {
 
   /**
    * Close a running application by name (process name or window title).
-   * Kills every matching process by NAME (handles multi-process apps like
-   * Chrome), then RE-QUERIES to confirm they are actually gone — so the
-   * result is truthful, never an optimistic "closed" for a survivor.
+   * GRACEFUL by default: asks each window to close (like clicking its X or
+   * File → Exit) so the app can flush unsaved data and release its own
+   * locks — force-killing is what leaves stale lock files (e.g. JetBrains'
+   * .port socket) that break the NEXT launch. Only when `force` is true
+   * (the user explicitly asked to force/kill) does it fall back to a hard
+   * Stop-Process. Always re-queries so the result is truthful.
    */
-  async close(query: string): Promise<{ ok: boolean; message: string }> {
+  async close(query: string, force = false): Promise<{ ok: boolean; message: string }> {
     if (!query.trim()) return { ok: false, message: 'No application specified' }
     // collapse spaces/hyphens/dots on BOTH sides so "Anti-Gravity",
     // "anti gravity" and "antigravity" all match a process "Antigravity"
@@ -257,15 +260,25 @@ export class AppLauncher {
 
     const script = [
       `$q='${q}'`,
+      `$force=$${force ? 'true' : 'false'}`,
       `function norm($s){ if($null -eq $s){return ''}; ($s -replace '[\\s\\-_.]','').ToLower() }`,
       `function match { Get-Process | Where-Object { $_.SessionId -ne 0 -and ((norm $_.ProcessName).Contains($q) -or ($_.MainWindowTitle -and (norm $_.MainWindowTitle).Contains($q))) } }`,
-      `$names = match | Select-Object -ExpandProperty ProcessName -Unique`,
+      `$procs = match`,
+      `$names = $procs | Select-Object -ExpandProperty ProcessName -Unique`,
       `if (-not $names) { Write-Output 'NONE'; exit }`,
-      // kill by name (all instances / child processes), twice for stubborn apps
-      `foreach ($n in $names) { Stop-Process -Name $n -Force -ErrorAction SilentlyContinue }`,
-      `Start-Sleep -Milliseconds 500`,
+      // graceful: send WM_CLOSE to each window-bearing process (like clicking X)
+      `$procs | ForEach-Object { try { $_.CloseMainWindow() | Out-Null } catch {} }`,
+      // wait up to ~6s for a clean exit
+      `for ($i=0; $i -lt 12; $i++) { Start-Sleep -Milliseconds 500; if (-not (match)) { break } }`,
       `$survivors = match | Select-Object -ExpandProperty ProcessName -Unique`,
-      `if ($survivors) { Write-Output ('PARTIAL|' + ($survivors -join ',')) } else { Write-Output ('OK|' + ($names -join ',')) }`
+      `if (-not $survivors) { Write-Output ('OK|' + ($names -join ',')); exit }`,
+      // still running: without force, leave it (likely a save/confirm prompt)
+      `if (-not $force) { Write-Output ('OPEN|' + ($survivors -join ',')); exit }`,
+      // force fallback — only when explicitly requested
+      `foreach ($n in $survivors) { Stop-Process -Name $n -Force -ErrorAction SilentlyContinue }`,
+      `Start-Sleep -Milliseconds 500`,
+      `$s2 = match | Select-Object -ExpandProperty ProcessName -Unique`,
+      `if ($s2) { Write-Output ('PARTIAL|' + ($s2 -join ',')) } else { Write-Output ('FORCED|' + ($survivors -join ',')) }`
     ].join('; ')
 
     try {
@@ -273,7 +286,7 @@ export class AppLauncher {
         execFile(
           'powershell.exe',
           ['-NoProfile', '-NonInteractive', '-Command', script],
-          { windowsHide: true, timeout: 12_000 },
+          { windowsHide: true, timeout: 15_000 },
           (err, stdout, stderr) => (err ? reject(new Error(stderr || err.message)) : resolve(stdout.trim()))
         )
       })
@@ -281,11 +294,24 @@ export class AppLauncher {
         return { ok: false, message: `No running app matching "${query}" was found — it may already be closed.` }
       }
       const [status, names] = out.split('|')
-      if (status === 'OK') return { ok: true, message: `Closed ${names.replace(/,/g, ', ')}.` }
-      // PARTIAL: some processes refused to die (elevated / protected)
+      const list = (names ?? '').replace(/,/g, ', ')
+      if (status === 'OK') return { ok: true, message: `Closed ${list}.` }
+      if (status === 'FORCED') return { ok: true, message: `Force-closed ${list}.` }
+      if (status === 'OPEN') {
+        // graceful close asked but the app is still up (unsaved-changes prompt,
+        // or no window to close) — report honestly, don't silently force
+        return {
+          ok: false,
+          message:
+            `Asked ${list} to close, but it's still running — it may be showing a ` +
+            `"save changes?" prompt, or has no window to close. Check the app; if ` +
+            `you want it killed anyway, say "force close ${query}".`
+        }
+      }
+      // PARTIAL: force couldn't kill it (elevated / protected)
       return {
         ok: false,
-        message: `Could not fully close "${query}" — ${names} is still running (it may require administrator rights).`
+        message: `Could not fully close "${query}" — ${list} is still running (it may require administrator rights).`
       }
     } catch (err) {
       return { ok: false, message: err instanceof Error ? err.message : String(err) }

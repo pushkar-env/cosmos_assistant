@@ -207,6 +207,25 @@ export const DEFAULT_MODELS: Record<ProviderId, string> = {
   ollama: 'llama3.2'
 }
 
+/**
+ * Popular models offered in each provider's picker. The list is a
+ * convenience — the field also accepts any custom model id the user
+ * types. Ollama is populated live from the local server (installed
+ * models), so its curated list is empty.
+ */
+export const PROVIDER_MODELS: Record<ProviderId, string[]> = {
+  anthropic: [
+    'claude-opus-4-8',
+    'claude-sonnet-5',
+    'claude-haiku-4-5',
+    'claude-opus-4-7',
+    'claude-fable-5'
+  ],
+  openai: ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'gpt-4.1-mini', 'o3', 'o4-mini'],
+  gemini: ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash'],
+  ollama: []
+}
+
 export const DEFAULT_SETTINGS: Settings = {
   provider: 'anthropic',
   model: DEFAULT_MODELS.anthropic,

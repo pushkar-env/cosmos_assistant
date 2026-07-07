@@ -14,6 +14,7 @@ export const IPC = {
   // renderer -> main (invoke)
   AI_CHAT: 'ai:chat',
   AI_ABORT: 'ai:abort',
+  OLLAMA_LIST_MODELS: 'ai:ollama-list-models',
   SETTINGS_GET: 'settings:get',
   SETTINGS_SET: 'settings:set',
   WEATHER_GET: 'weather:get',

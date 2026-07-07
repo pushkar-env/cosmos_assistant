@@ -55,6 +55,18 @@ export function registerIpc(getWindow: () => BrowserWindow | null, services: Ser
     services.ai.abort(requestId)
   })
 
+  ipcMain.handle(IPC.OLLAMA_LIST_MODELS, async () => {
+    const base = (services.settings.get().ollamaUrl || 'http://localhost:11434').replace(/\/$/, '')
+    try {
+      const res = await fetch(`${base}/api/tags`, { signal: AbortSignal.timeout(4000) })
+      if (!res.ok) return []
+      const data = (await res.json()) as { models?: { name?: string }[] }
+      return (data.models ?? []).map((m) => m.name).filter((n): n is string => !!n)
+    } catch {
+      return [] // ollama not running / unreachable — picker falls back gracefully
+    }
+  })
+
   ipcMain.handle(IPC.SETTINGS_GET, () => services.settings.get())
 
   ipcMain.handle(IPC.SETTINGS_SET, (_e, patch: Partial<Settings>) =>

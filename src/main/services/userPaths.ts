@@ -1,4 +1,5 @@
 import { app } from 'electron'
+import { existsSync } from 'fs'
 import { homedir } from 'os'
 import { isAbsolute, join, normalize } from 'path'
 
@@ -22,7 +23,7 @@ export function resolveUserPath(input: string): string {
   // %ENV% expansion (e.g. %USERPROFILE%, %APPDATA%)
   p = p.replace(/%([^%]+)%/g, (_, name: string) => process.env[name] ?? `%${name}%`)
 
-  if (isAbsolute(p)) return normalize(p)
+  if (isAbsolute(p)) return remapWrongUserHome(normalize(p))
 
   // leading known-folder segment → the real OS location (OneDrive-aware)
   const segs = p.split(/[\\/]+/)
@@ -32,6 +33,33 @@ export function resolveUserPath(input: string): string {
 
   // otherwise treat as relative to HOME (never the install dir)
   return normalize(join(homedir(), p))
+}
+
+/**
+ * Fixes a hallucinated home directory. Weaker models (esp. local Ollama
+ * ones) see "the user's name is Pushkar" and build a path like
+ * C:\Users\Pushkar\Desktop\… — but the real profile folder is
+ * C:\Users\user. Creating anything under a non-existent C:\Users\<name>
+ * fails with a permission error (Windows won't let you make new folders
+ * directly under C:\Users). So: when an absolute path points at
+ * C:\Users\<name>\… where <name> is NOT the real profile AND that folder
+ * doesn't exist, re-root it at the real home — mapping a known subfolder
+ * (Desktop/Documents/…) through the OS so OneDrive redirection is honored.
+ */
+function remapWrongUserHome(p: string): string {
+  const m = /^([a-zA-Z]:[\\/]+Users[\\/]+)([^\\/]+)(?:[\\/]+(.*))?$/.exec(p)
+  if (!m) return p
+  const [, prefix, name, rest = ''] = m
+  const home = homedir()
+  const realName = home.split(/[\\/]/).filter(Boolean).pop() ?? ''
+  // already the right user, or the guessed profile actually exists → leave it
+  if (name.toLowerCase() === realName.toLowerCase()) return p
+  if (existsSync(join(prefix, name))) return p
+
+  const segs = rest.split(/[\\/]+/).filter(Boolean)
+  const known = knownFolder(segs[0]?.toLowerCase())
+  if (known) return normalize(join(known, ...segs.slice(1)))
+  return normalize(join(home, ...segs))
 }
 
 function knownFolder(name: string | undefined): string | null {

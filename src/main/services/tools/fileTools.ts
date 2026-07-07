@@ -1,5 +1,5 @@
 import { shell } from 'electron'
-import { promises as fs } from 'fs'
+import { promises as fs, existsSync } from 'fs'
 import { dirname, join } from 'path'
 import { execFile } from 'child_process'
 import type { ToolSpec } from './ToolRegistry'
@@ -7,6 +7,24 @@ import { resolveUserPath } from '../userPaths'
 
 const MAX_READ_BYTES = 50_000
 const MAX_LIST_ENTRIES = 200
+
+/** turn a raw fs error into an actionable message for protected/bad paths */
+function fsError(err: unknown, target: string): Error {
+  const code = (err as NodeJS.ErrnoException).code
+  if (code === 'EPERM' || code === 'EACCES') {
+    return new Error(
+      `Permission denied at ${target}. That location is protected (Windows needs ` +
+        `admin rights there) — use a normal folder like Desktop, Documents or Downloads.`
+    )
+  }
+  if (code === 'ENOENT') {
+    return new Error(
+      `Path not available: ${target}. Use an existing folder such as Desktop, ` +
+        `Documents or Downloads (I can't create new folders directly under C:\\Users).`
+    )
+  }
+  return err instanceof Error ? err : new Error(String(err))
+}
 
 function psQuote(s: string): string {
   return `'${s.replace(/'/g, "''")}'`
@@ -102,22 +120,42 @@ export const fileTools: ToolSpec[] = [
         await fs.mkdir(dirname(file), { recursive: true })
         await fs.writeFile(file, String(a.content), 'utf-8')
       } catch (err) {
-        const code = (err as NodeJS.ErrnoException).code
-        if (code === 'EPERM' || code === 'EACCES') {
-          throw new Error(
-            `Permission denied writing to ${file}. That location is protected — ` +
-              `try a folder like Desktop, Documents or Downloads.`
-          )
-        }
-        throw err
+        throw fsError(err, file)
       }
       return `Wrote ${String(a.content).length} chars to ${file}`
     }
   },
   {
     def: {
+      name: 'open_path',
+      description:
+        'Open a local file or folder with its default handler — an .html file opens in the browser, a .txt/.md in the editor, a folder in File Explorer. Use THIS to preview or open a file or folder you just created (NOT url_open, which is only for web http(s) links, and NOT app_open, which is only for installed apps). Accepts relative paths like "Desktop/snake_game/index.html" or "~/…".',
+      inputSchema: {
+        type: 'object',
+        properties: { path: { type: 'string', description: 'File or folder path' } },
+        required: ['path']
+      },
+      sensitive: false
+    },
+    summary: (a) => String(a.path ?? ''),
+    run: async (a) => {
+      const target = resolveUserPath(String(a.path))
+      if (!existsSync(target)) {
+        throw new Error(
+          `Nothing exists at ${target}. Create the file first, then open it (use the ` +
+            `same path you wrote to).`
+        )
+      }
+      const err = await shell.openPath(target)
+      if (err) throw new Error(`Couldn't open ${target}: ${err}`)
+      return `Opened ${target}`
+    }
+  },
+  {
+    def: {
       name: 'fs_mkdir',
-      description: 'Create a folder (recursively).',
+      description:
+        'Create a folder (recursively). Prefer a relative path like "Desktop/MyFolder" or "~/MyFolder" — do NOT build a C:\\Users\\<name> path from the user\'s name; the real home is resolved for you.',
       inputSchema: {
         type: 'object',
         properties: { path: { type: 'string' } },
@@ -128,7 +166,11 @@ export const fileTools: ToolSpec[] = [
     summary: (a) => String(a.path ?? ''),
     run: async (a) => {
       const dir = resolveUserPath(String(a.path))
-      await fs.mkdir(dir, { recursive: true })
+      try {
+        await fs.mkdir(dir, { recursive: true })
+      } catch (err) {
+        throw fsError(err, dir)
+      }
       return `Created ${dir}`
     }
   },
@@ -178,7 +220,8 @@ export const fileTools: ToolSpec[] = [
   {
     def: {
       name: 'fs_move',
-      description: 'Move or rename a file or folder.',
+      description:
+        'Move or rename a file or folder. Use relative paths like "Desktop/file.txt" where possible — do NOT build a C:\\Users\\<name> path from the user\'s name; the real home is resolved for you.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -193,14 +236,18 @@ export const fileTools: ToolSpec[] = [
     run: async (a) => {
       const src = resolveUserPath(String(a.source))
       const dest = resolveUserPath(String(a.destination))
-      await fs.mkdir(dirname(dest), { recursive: true })
       try {
-        await fs.rename(src, dest)
+        await fs.mkdir(dirname(dest), { recursive: true })
+        try {
+          await fs.rename(src, dest)
+        } catch (err) {
+          // cross-drive move: copy then trash the original
+          if ((err as NodeJS.ErrnoException).code !== 'EXDEV') throw err
+          await fs.cp(src, dest, { recursive: true })
+          await shell.trashItem(src)
+        }
       } catch (err) {
-        // cross-drive move: copy then trash the original
-        if ((err as NodeJS.ErrnoException).code !== 'EXDEV') throw err
-        await fs.cp(src, dest, { recursive: true })
-        await shell.trashItem(src)
+        throw fsError(err, dest)
       }
       return `Moved to ${dest}`
     }

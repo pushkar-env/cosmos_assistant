@@ -1,9 +1,12 @@
 import { clipboard, shell } from 'electron'
 import { exec } from 'child_process'
+import { existsSync } from 'fs'
+import { fileURLToPath } from 'url'
 import { IPC } from '@shared/ipc'
 import type { NotificationPayload } from '@shared/types'
 import type { ToolSpec } from './ToolRegistry'
 import { runPs } from './fileTools'
+import { resolveUserPath } from '../userPaths'
 import { captureScreenToFile } from '../screen'
 import type { SystemStatsService } from '../SystemStatsService'
 import type { CommandService } from '../CommandService'
@@ -142,17 +145,23 @@ export function systemTools(
       def: {
         name: 'app_close',
         description:
-          'Close/quit a running application by name (e.g. "Steam", "Spotify", "Chrome"). Matches the process name or window title and terminates it.',
+          'Close/quit a running application by name (e.g. "Steam", "Spotify", "Chrome"). Closes it GRACEFULLY by default (like clicking the window\'s X / File → Exit) so the app can save and clean up — this avoids leaving stale lock files that break the app\'s next launch. If the app stays open (e.g. an unsaved-changes prompt), the result says so; only set force:true when the user explicitly asks to "force close", "kill", or "force quit" it.',
         inputSchema: {
           type: 'object',
-          properties: { target: { type: 'string' } },
+          properties: {
+            target: { type: 'string' },
+            force: {
+              type: 'boolean',
+              description: 'Hard-kill if it will not close gracefully. Only when the user explicitly asks to force/kill.'
+            }
+          },
           required: ['target']
         },
         sensitive: true
       },
-      summary: (a) => String(a.target ?? ''),
+      summary: (a) => `${String(a.target ?? '')}${a.force ? ' (force)' : ''}`,
       run: async (a) => {
-        const result = await commands.run('close-app', String(a.target))
+        const result = await commands.launcher.close(String(a.target), a.force === true)
         if (!result.ok) throw new Error(result.message ?? 'Failed to close')
         return result.message ?? `Closed ${String(a.target)}`
       }
@@ -227,7 +236,8 @@ export function systemTools(
     {
       def: {
         name: 'url_open',
-        description: 'Open a URL in the default browser.',
+        description:
+          'Open a web URL (http/https) in the default browser. For a LOCAL file or folder, prefer open_path — but this tool will also accept a local path or file:// URL and open it.',
         inputSchema: {
           type: 'object',
           properties: { url: { type: 'string' } },
@@ -237,10 +247,22 @@ export function systemTools(
       },
       summary: (a) => String(a.url ?? ''),
       run: async (a) => {
-        const url = String(a.url)
-        if (!/^https?:\/\//.test(url)) throw new Error('Only http(s) URLs are allowed')
-        await shell.openExternal(url)
-        return `Opened ${url}`
+        const raw = String(a.url).trim()
+        if (/^https?:\/\//i.test(raw)) {
+          await shell.openExternal(raw)
+          return `Opened ${raw}`
+        }
+        // tolerate a local file/folder or file:// URL — models often reach
+        // for url_open to preview something they just created
+        if (/^file:\/\//i.test(raw) || /^[a-zA-Z]:[\\/]/.test(raw) || /[\\/]/.test(raw)) {
+          const path = /^file:\/\//i.test(raw) ? fileURLToPath(raw) : raw
+          const target = resolveUserPath(path)
+          if (!existsSync(target)) throw new Error(`Nothing exists at ${target}`)
+          const err = await shell.openPath(target)
+          if (err) throw new Error(`Couldn't open ${target}: ${err}`)
+          return `Opened ${target}`
+        }
+        throw new Error('Provide an http(s) URL, or a local file path (or use open_path)')
       }
     },
     {
