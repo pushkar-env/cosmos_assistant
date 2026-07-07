@@ -146,8 +146,6 @@ export function registerIpc(getWindow: () => BrowserWindow | null, services: Ser
 
   ipcMain.handle(IPC.TTS_SYNTHESIZE, (_e, text: string) => services.tts.synthesize(text))
 
-  ipcMain.handle(IPC.VOICE_DETECT_PIPER, () => services.tts.detectPiper())
-
   ipcMain.handle(IPC.VOICE_LIST_AVAILABLE, () => services.tts.availableVoiceIds())
 
   ipcMain.handle(IPC.WINDOW_CONTROL, (_e, action: WindowControlAction) => {

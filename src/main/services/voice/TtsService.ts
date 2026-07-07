@@ -206,28 +206,6 @@ export class TtsService {
     return BUNDLED_VOICES.filter((v) => !!this.findVoiceById(v.id)).map((v) => v.id)
   }
 
-  /**
-   * Best-effort discovery of a Piper install + a voice model, so a fresh
-   * install can auto-fill the paths instead of making the user hunt for
-   * them. Searches the bundled resources first, then the COSMOS profile.
-   * Returns null if nothing found.
-   */
-  detectPiper(): PiperPaths | null {
-    const piperPath = this.findPiperExe()
-    let modelPath = this.findVoiceById(DEFAULT_PIPER_VOICE)
-    if (!modelPath) {
-      for (const root of this.piperRoots()) {
-        const any = this.findFirst(root, (n) => n.toLowerCase().endsWith('.onnx'), 3)
-        if (any) {
-          modelPath = any
-          break
-        }
-      }
-    }
-    if (!piperPath || !modelPath) return null
-    return { piperPath, piperModelPath: modelPath }
-  }
-
   /** shallow recursive search for the first file whose name matches */
   private findFirst(dir: string, match: (name: string) => boolean, depth: number): string {
     if (depth < 0 || !existsSync(dir)) return ''

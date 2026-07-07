@@ -81,6 +81,11 @@ tray** — closing the window keeps it running in the background. Ship an update
 running `npm run dist` again.
 
 > [!NOTE]
+> The installer bundles the **offline Piper voices** (~270 MB), which are kept out of git.
+> `npm run dist` fetches them automatically (`predist` → `npm run setup:piper`); on a fresh
+> clone the first build just needs an internet connection.
+
+> [!NOTE]
 > Your API keys, memory, and settings live encrypted in `%APPDATA%\COSMOS` (Windows
 > DPAPI). Dev mode and the installed app **share that folder**, so you enter keys once
 > and they survive updates and reinstalls.
@@ -104,17 +109,25 @@ Switch between any of these instantly — keys never leave the main process.
 
 | Provider | Models | Notes |
 |:--|:--|:--|
-| **Anthropic** | Claude | Full tool use + vision |
-| **OpenAI** | GPT | Full tool use + vision |
-| **Google** | Gemini | Full tool use + vision |
-| **Ollama** | Llama 3.1, Qwen, Mistral… | **Fully offline**, tool use on supported models |
+| **Anthropic** | Claude (Opus / Sonnet / Haiku) | Full tool use + vision |
+| **OpenAI** | GPT (4o / 4.1 / o-series) | Full tool use + vision |
+| **Google** | Gemini (2.5 / 2.0) | Full tool use + vision |
+| **Ollama** | Qwen, Llama, Mistral… | **Fully offline**, tool use on supported models |
+
+Pick the model per provider from a **dropdown of popular models** in *Settings* — or type
+any custom id. For **Ollama**, your locally-installed models are **auto-detected**. Change
+model mid-conversation and the chat keeps going — the new model picks up the full history.
 
 ---
 
 ## 🎙️ Voice
 
-- **Speaks out of the box** with the built-in Windows voice — upgrade to
-  **ElevenLabs** (premium) or **Piper** (offline neural TTS) in *Settings → Voice*.
+- **Speaks out of the box** — ships with **bundled offline neural voices** (Piper), so
+  there's nothing to install: **English** (female / male) and **Hindi** (Priyamvada /
+  Pratham). Choose a **language and voice** in *Settings → Voice*, or switch to the
+  zero-setup Windows voice or premium **ElevenLabs**.
+- **Natural pacing** — sentences, line breaks, and questions get human-like pauses
+  instead of a robotic monotone, and speech starts while the reply is still streaming.
 - **Push-to-talk** (`Ctrl+J`) or fully **hands-free**: enable it and just say
   *"Cosmos, …"* — a local voice-activity detector segments your speech and only
   utterances addressed to Cosmos are executed.
@@ -140,8 +153,9 @@ With Claude, GPT, or Gemini selected, COSMOS has **real hands**:
 **🗂️ Files & System**
 - List / read / write / search / move files
 - Delete to Recycle Bin, zip / unzip
+- Open files & folders in their default app
 - Run PowerShell commands
-- Launch & **close** apps, open URLs
+- Launch apps, **close them gracefully**, open URLs
 - Volume, power (sleep / restart / shutdown)
 - Clipboard, screenshots, live telemetry
 
@@ -220,6 +234,8 @@ Open the **Vault** (`◈`) to:
 
 | | Feature |
 |:--:|:--|
+| 💬 | **Chats** — multiple saved conversations; create, switch, rename, and delete, all persisted to disk |
+| ▤ | **App Centre** — browse every installed app & game (with icons) and launch it in one click |
 | ▦ | **Dashboard** — live telemetry, weather, today's activity, quick actions |
 | ✎ | **Workspace** — persistent encrypted notes the agents can write into |
 | ◔ | **Notifications** — glass toasts + a center; COSMOS can alert you proactively |
@@ -280,7 +296,8 @@ src/
 ```bash
 npm run dev         # dev mode with hot reload
 npm run build       # production bundles into out/
-npm run dist        # build the Windows installer → release/
+npm run dist        # build the Windows installer → release/ (bundles Piper voices)
+npm run setup:piper # fetch the Piper runtime + voices into resources/ (auto-runs before dist)
 npm run typecheck   # strict TypeScript across main + renderer
 npm run start       # preview the production build
 ```
