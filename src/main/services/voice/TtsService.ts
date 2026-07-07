@@ -1,10 +1,16 @@
 import { app } from 'electron'
 import { execFile, spawn } from 'child_process'
-import { mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'fs'
-import { join } from 'path'
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'fs'
+import { dirname, join } from 'path'
 import { randomUUID } from 'crypto'
-import type { SynthesisResult } from '@shared/types'
+import { BUNDLED_VOICES, DEFAULT_PIPER_VOICE, type SynthesisResult, type VoiceSettings } from '@shared/types'
 import type { SettingsService } from '../SettingsService'
+
+/** where a user-installed or bundled Piper typically lives */
+export interface PiperPaths {
+  piperPath: string
+  piperModelPath: string
+}
 
 /**
  * Text-to-speech with three providers:
@@ -26,8 +32,10 @@ export class TtsService {
     switch (voice.ttsProvider) {
       case 'elevenlabs':
         return this.elevenLabs(clean, voice.elevenLabsKey, voice.elevenLabsVoiceId)
-      case 'piper':
-        return this.piper(clean, voice.piperPath, voice.piperModelPath)
+      case 'piper': {
+        const resolved = this.resolvePiper(voice)
+        return this.piper(clean, resolved.piperPath, resolved.piperModelPath)
+      }
       case 'windows':
       default:
         return this.windowsSapi(clean)
@@ -63,12 +71,49 @@ export class TtsService {
     if (!modelPath || !existsSync(modelPath)) {
       throw new Error('Piper voice model (.onnx) not found — set its path in Settings → Voice')
     }
+    // Piper's phonemizer needs espeak-ng-data + its DLLs. They ship next
+    // to piper.exe, so run FROM that directory and point --espeak_data at
+    // it explicitly — this is what makes it work regardless of the app's
+    // (packaged) working directory. If the folder isn't there we still
+    // try without the flag rather than failing outright.
+    const exeDir = dirname(exePath)
+    const espeakData = join(exeDir, 'espeak-ng-data')
+    const args = ['-m', modelPath, '-f']
     const outFile = this.tempFile('wav')
+    args.push(outFile)
+    if (existsSync(espeakData)) args.push('--espeak_data', espeakData)
+
     return new Promise((resolve, reject) => {
-      const proc = spawn(exePath, ['-m', modelPath, '-f', outFile], { windowsHide: true })
-      proc.on('error', (err) => reject(new Error(`Piper failed to start: ${err.message}`)))
+      let stderr = ''
+      let settled = false
+      const proc = spawn(exePath, args, { windowsHide: true, cwd: exeDir })
+      const timer = setTimeout(() => {
+        if (settled) return
+        settled = true
+        proc.kill()
+        rmSync(outFile, { force: true })
+        reject(new Error('Piper timed out after 30s'))
+      }, 30_000)
+      const fail = (msg: string): void => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        rmSync(outFile, { force: true })
+        reject(new Error(msg))
+      }
+      proc.stderr?.on('data', (d) => {
+        stderr += String(d)
+      })
+      proc.on('error', (err) => fail(`Piper failed to start: ${err.message}`))
       proc.on('close', (code) => {
-        if (code !== 0) return reject(new Error(`Piper exited with code ${code}`))
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        if (code !== 0 || !existsSync(outFile)) {
+          rmSync(outFile, { force: true })
+          const detail = stderr.trim().split('\n').pop() || `exit code ${code}`
+          return reject(new Error(`Piper failed: ${detail}`))
+        }
         try {
           const data = readFileSync(outFile)
           rmSync(outFile, { force: true })
@@ -77,9 +122,132 @@ export class TtsService {
           reject(err instanceof Error ? err : new Error(String(err)))
         }
       })
+      proc.stdin.on('error', () => {
+        /* piper may exit before we finish writing — handled by close/error */
+      })
       proc.stdin.write(text)
       proc.stdin.end()
     })
+  }
+
+  /** candidate roots that may contain piper.exe + voices, best first */
+  private piperRoots(): string[] {
+    return [
+      join(process.resourcesPath ?? '', 'piper'), // bundled — always present
+      join(app.getPath('userData'), 'piper'), // user's COSMOS profile
+      app.isPackaged ? '' : join(app.getAppPath(), 'resources', 'piper') // dev
+    ].filter(Boolean)
+  }
+
+  /** locate piper.exe across the candidate roots */
+  private findPiperExe(): string {
+    for (const root of this.piperRoots()) {
+      const exe = join(root, 'piper.exe')
+      if (existsSync(exe)) return exe
+      const nested = this.findFirst(root, (n) => n.toLowerCase() === 'piper.exe', 3)
+      if (nested) return nested
+    }
+    return ''
+  }
+
+  /** locate a bundled voice model by its id (file stem) across the roots */
+  private findVoiceById(voiceId: string): string {
+    for (const root of this.piperRoots()) {
+      const direct = join(root, 'voices', `${voiceId}.onnx`)
+      if (existsSync(direct)) return direct
+    }
+    return ''
+  }
+
+  /**
+   * Resolve the piper exe + model to actually use, in priority order:
+   *  1. a valid custom override (advanced users who set explicit paths)
+   *  2. the selected bundled voice, resolved live from resourcesPath — no
+   *     absolute path is stored, so it works on any machine
+   *  3. any voice we can find (last-ditch), so playback never dies silently
+   * The exe always comes from the bundled/found piper.exe.
+   */
+  private resolvePiper(voice: VoiceSettings): PiperPaths {
+    // 1. explicit custom override, only if both paths still exist
+    if (
+      voice.piperPath &&
+      existsSync(voice.piperPath) &&
+      voice.piperModelPath &&
+      existsSync(voice.piperModelPath)
+    ) {
+      return { piperPath: voice.piperPath, piperModelPath: voice.piperModelPath }
+    }
+
+    const piperPath = this.findPiperExe()
+    // 2. the selected voice id → its bundled .onnx
+    const voiceId = voice.piperVoiceId || DEFAULT_PIPER_VOICE
+    let modelPath = this.findVoiceById(voiceId)
+    // 3. fall back to the default voice, then to ANY voice present
+    if (!modelPath && voiceId !== DEFAULT_PIPER_VOICE) {
+      modelPath = this.findVoiceById(DEFAULT_PIPER_VOICE)
+    }
+    if (!modelPath) {
+      for (const root of this.piperRoots()) {
+        const any = this.findFirst(join(root, 'voices'), (n) => n.toLowerCase().endsWith('.onnx'), 2)
+        if (any) {
+          modelPath = any
+          break
+        }
+      }
+    }
+    return { piperPath, piperModelPath: modelPath }
+  }
+
+  /**
+   * Which bundled voice ids are actually present on disk — the renderer
+   * uses this to only offer voices that will really play.
+   */
+  availableVoiceIds(): string[] {
+    return BUNDLED_VOICES.filter((v) => !!this.findVoiceById(v.id)).map((v) => v.id)
+  }
+
+  /**
+   * Best-effort discovery of a Piper install + a voice model, so a fresh
+   * install can auto-fill the paths instead of making the user hunt for
+   * them. Searches the bundled resources first, then the COSMOS profile.
+   * Returns null if nothing found.
+   */
+  detectPiper(): PiperPaths | null {
+    const piperPath = this.findPiperExe()
+    let modelPath = this.findVoiceById(DEFAULT_PIPER_VOICE)
+    if (!modelPath) {
+      for (const root of this.piperRoots()) {
+        const any = this.findFirst(root, (n) => n.toLowerCase().endsWith('.onnx'), 3)
+        if (any) {
+          modelPath = any
+          break
+        }
+      }
+    }
+    if (!piperPath || !modelPath) return null
+    return { piperPath, piperModelPath: modelPath }
+  }
+
+  /** shallow recursive search for the first file whose name matches */
+  private findFirst(dir: string, match: (name: string) => boolean, depth: number): string {
+    if (depth < 0 || !existsSync(dir)) return ''
+    let entries: import('fs').Dirent[]
+    try {
+      entries = readdirSync(dir, { withFileTypes: true })
+    } catch {
+      return ''
+    }
+    // files first so a match in this dir wins over deeper ones
+    for (const e of entries) {
+      if (e.isFile() && match(e.name)) return join(dir, e.name)
+    }
+    for (const e of entries) {
+      if (e.isDirectory()) {
+        const found = this.findFirst(join(dir, e.name), match, depth - 1)
+        if (found) return found
+      }
+    }
+    return ''
   }
 
   private windowsSapi(text: string): Promise<SynthesisResult> {

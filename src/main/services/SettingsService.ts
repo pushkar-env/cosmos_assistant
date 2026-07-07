@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import { join, dirname } from 'path'
-import { DEFAULT_SETTINGS, type Settings } from '@shared/types'
+import { BUNDLED_VOICES, DEFAULT_SETTINGS, type Settings } from '@shared/types'
 import { decryptOrNull, encryptText, isEncrypted } from './secureText'
 
 type SecretKey = 'anthropic' | 'openai' | 'gemini' | 'elevenLabsKey'
@@ -166,6 +166,18 @@ export class SettingsService {
     // migrate the old hard-coded Ollama default → the new one
     if (merged.providerModels.ollama === 'llama3.1') merged.providerModels.ollama = 'llama3.2'
     if (merged.provider === 'ollama' && merged.model === 'llama3.1') merged.model = 'llama3.2'
+    // migrate old absolute Piper paths → the bundled voice picker: if the
+    // stored model path names a bundled voice, adopt it as piperVoiceId and
+    // drop the absolute paths so the new voice dropdown drives synthesis
+    if (raw.voice?.piperVoiceId === undefined && merged.voice.piperModelPath) {
+      const stem = merged.voice.piperModelPath.replace(/\\/g, '/').split('/').pop()?.replace(/\.onnx$/i, '')
+      const known = BUNDLED_VOICES.find((v) => v.id === stem)
+      if (known) {
+        merged.voice.piperVoiceId = known.id
+        merged.voice.piperPath = ''
+        merged.voice.piperModelPath = ''
+      }
+    }
     this.resolveSecret(merged, 'anthropic', merged.apiKeys.anthropic)
     this.resolveSecret(merged, 'openai', merged.apiKeys.openai)
     this.resolveSecret(merged, 'gemini', merged.apiKeys.gemini)

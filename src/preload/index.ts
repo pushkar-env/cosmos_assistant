@@ -88,7 +88,10 @@ export const cosmosApi = {
     transcribe: (audio: ArrayBuffer, mime: string): Promise<TranscriptionResult> =>
       ipcRenderer.invoke(IPC.STT_TRANSCRIBE, audio, mime),
     synthesize: (text: string): Promise<SynthesisResult> =>
-      ipcRenderer.invoke(IPC.TTS_SYNTHESIZE, text)
+      ipcRenderer.invoke(IPC.TTS_SYNTHESIZE, text),
+    detectPiper: (): Promise<{ piperPath: string; piperModelPath: string } | null> =>
+      ipcRenderer.invoke(IPC.VOICE_DETECT_PIPER),
+    listAvailableVoices: (): Promise<string[]> => ipcRenderer.invoke(IPC.VOICE_LIST_AVAILABLE)
   },
   notes: {
     list: (): Promise<NoteMeta[]> => ipcRenderer.invoke(IPC.NOTES_LIST),

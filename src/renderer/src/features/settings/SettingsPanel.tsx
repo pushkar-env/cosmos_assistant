@@ -1,14 +1,18 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
+  BUNDLED_VOICES,
   DEFAULT_MODELS,
+  VOICE_LANGUAGES,
   type ProviderId,
   type ThemeId,
-  type TtsProviderId
+  type TtsProviderId,
+  type VoiceLanguageId
 } from '@shared/types'
 import { THEMES } from '@/core/theme/themes'
 import { useSettingsStore } from '@/core/stores/useSettingsStore'
 import { useUIStore } from '@/core/stores/useUIStore'
+import { useNotificationStore } from '@/core/stores/useNotificationStore'
 import { useVoiceStore } from '@/features/voice/useVoiceStore'
 import { sound } from '@/core/sound/SoundEngine'
 import { Glass } from '@/shared/ui/Glass'
@@ -25,6 +29,30 @@ export function SettingsPanel(): React.JSX.Element {
   const setPanel = useUIStore((s) => s.setPanel)
   const { settings, update } = useSettingsStore()
   const [search, setSearch] = useState('')
+  const [availableVoiceIds, setAvailableVoiceIds] = useState<string[]>([])
+
+  useEffect(() => {
+    void window.cosmos.voice.listAvailableVoices().then(setAvailableVoiceIds)
+  }, [])
+
+  // only offer voices whose model actually shipped (all 4 do, but this
+  // stays correct if a build omits one); fall back to the full list until
+  // the async check returns so the dropdown is never empty
+  const voices =
+    availableVoiceIds.length > 0
+      ? BUNDLED_VOICES.filter((v) => availableVoiceIds.includes(v.id))
+      : BUNDLED_VOICES
+  const currentVoice = voices.find((v) => v.id === settings.voice.piperVoiceId) ?? voices[0]
+  const currentLang: VoiceLanguageId = currentVoice?.language ?? 'en'
+
+  // selecting a voice also clears any legacy custom path so the id wins
+  const selectVoice = (id: string): void =>
+    void update({ voice: { ...settings.voice, piperVoiceId: id, piperPath: '', piperModelPath: '' } })
+
+  const selectLanguage = (lang: VoiceLanguageId): void => {
+    const first = voices.find((v) => v.language === lang)
+    if (first) selectVoice(first.id)
+  }
 
   const rows = useMemo((): SettingRow[] => {
     const textInput = (
@@ -34,6 +62,9 @@ export function SettingsPanel(): React.JSX.Element {
       password = false
     ): React.JSX.Element => (
       <input
+        // key on the value so a programmatic fill (e.g. Detect) remounts
+        // the uncontrolled input and shows the new path
+        key={value}
         type={password ? 'password' : 'text'}
         defaultValue={value}
         onBlur={(e) => onChange(e.target.value)}
@@ -280,29 +311,46 @@ export function SettingsPanel(): React.JSX.Element {
           )
       },
       {
-        id: 'piper-path',
-        label: 'Piper Executable',
-        keywords: 'piper exe path offline tts',
-        render: () =>
-          textInput(
-            settings.voice.piperPath,
-            (v) => void update({ voice: { ...settings.voice, piperPath: v } }),
-            'C:\\tools\\piper\\piper.exe'
-          )
+        id: 'piper-language',
+        label: 'Voice Language',
+        keywords: 'piper voice language english hindi offline tts neural bundled',
+        render: () => (
+          <select
+            value={currentLang}
+            onChange={(e) => selectLanguage(e.target.value as VoiceLanguageId)}
+            className="w-64 rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-ui text-sm text-body focus:border-[var(--accent)] focus:outline-none"
+          >
+            {VOICE_LANGUAGES.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.label}
+              </option>
+            ))}
+          </select>
+        )
       },
       {
-        id: 'piper-model',
-        label: 'Piper Voice Model',
-        keywords: 'piper model onnx voice offline tts',
-        render: () =>
-          textInput(
-            settings.voice.piperModelPath,
-            (v) => void update({ voice: { ...settings.voice, piperModelPath: v } }),
-            'C:\\tools\\piper\\en_US-….onnx'
-          )
+        id: 'piper-voice',
+        label: 'Piper Voice',
+        keywords: 'piper voice select male female hindi english neural offline bundled hfc pratham priyamvada',
+        render: () => (
+          <select
+            value={currentVoice?.id ?? ''}
+            onChange={(e) => selectVoice(e.target.value)}
+            className="w-64 rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-ui text-sm text-body focus:border-[var(--accent)] focus:outline-none"
+          >
+            {voices
+              .filter((v) => v.language === currentLang)
+              .map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.label}
+                </option>
+              ))}
+          </select>
+        )
       }
     ]
-  }, [settings, update])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings, update, availableVoiceIds])
 
   const filtered = rows.filter(
     (r) =>

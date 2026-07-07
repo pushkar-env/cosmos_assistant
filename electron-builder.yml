@@ -10,6 +10,12 @@ files:
   - node_modules/systeminformation/**
   - node_modules/playwright-core/**
 asar: true
+# Piper (neural offline TTS) ships INSIDE the app so it's always present
+# and accessible regardless of the user profile / install location —
+# lands at <install>/resources/piper (process.resourcesPath/piper).
+extraResources:
+  - from: resources/piper
+    to: piper
 win:
   target:
     - target: nsis

@@ -314,6 +314,9 @@ if (!gotLock) {
     void memory.init()
     void plugins.load()
 
+    // Piper voices are bundled in resources and resolved live from the
+    // selected voice id (TtsService.resolvePiper) — nothing to auto-fill.
+
     // CTRL+SPACE anywhere: summon COSMOS and toggle the command palette
     globalShortcut.register('CommandOrControl+Space', () => {
       if (!mainWindow) return

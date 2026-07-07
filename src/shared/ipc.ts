@@ -21,6 +21,8 @@ export const IPC = {
   WINDOW_CONTROL: 'window:control',
   STT_TRANSCRIBE: 'voice:transcribe',
   TTS_SYNTHESIZE: 'voice:synthesize',
+  VOICE_DETECT_PIPER: 'voice:detect-piper',
+  VOICE_LIST_AVAILABLE: 'voice:list-available',
   TOOL_APPROVAL_RESPONSE: 'ai:tool-approval-response',
   HISTORY_GET: 'history:get',
   HISTORY_NEW: 'history:new',

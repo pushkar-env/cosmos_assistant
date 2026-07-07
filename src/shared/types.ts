@@ -51,6 +51,38 @@ export interface WeatherInfo {
 
 export type TtsProviderId = 'windows' | 'elevenlabs' | 'piper'
 
+export type VoiceLanguageId = 'en' | 'hi'
+
+/** A neural voice bundled inside the app (see resources/piper/voices). */
+export interface PiperVoiceDef {
+  /** file stem, e.g. 'en_US-hfc_female-medium' → voices/<id>.onnx */
+  id: string
+  language: VoiceLanguageId
+  /** short label shown in the voice dropdown */
+  label: string
+  gender: 'male' | 'female'
+}
+
+export const VOICE_LANGUAGES: { id: VoiceLanguageId; label: string }[] = [
+  { id: 'en', label: 'English' },
+  { id: 'hi', label: 'हिन्दी · Hindi' }
+]
+
+/**
+ * Voices shipped with the app. Their .onnx files live in
+ * resources/piper/voices and are resolved at runtime from
+ * process.resourcesPath, so no absolute path is ever stored — the app
+ * works on any machine with zero configuration.
+ */
+export const BUNDLED_VOICES: PiperVoiceDef[] = [
+  { id: 'en_US-hfc_female-medium', language: 'en', label: 'Female · HFC', gender: 'female' },
+  { id: 'en_US-hfc_male-medium', language: 'en', label: 'Male · HFC', gender: 'male' },
+  { id: 'hi_IN-priyamvada-medium', language: 'hi', label: 'Priyamvada · Female', gender: 'female' },
+  { id: 'hi_IN-pratham-medium', language: 'hi', label: 'Pratham · Male', gender: 'male' }
+]
+
+export const DEFAULT_PIPER_VOICE = 'en_US-hfc_female-medium'
+
 export interface VoiceSettings {
   /** speak assistant replies aloud (typed or spoken input) */
   voiceReplies: boolean
@@ -59,9 +91,11 @@ export interface VoiceSettings {
   ttsProvider: TtsProviderId
   elevenLabsKey: string
   elevenLabsVoiceId: string
-  /** path to piper.exe (offline TTS, user-installed) */
+  /** selected bundled voice id (resolved from resources at runtime) */
+  piperVoiceId: string
+  /** OPTIONAL override: absolute path to a custom piper.exe (advanced) */
   piperPath: string
-  /** path to a piper .onnx voice model */
+  /** OPTIONAL override: absolute path to a custom .onnx voice (advanced) */
   piperModelPath: string
 }
 
@@ -71,6 +105,7 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   ttsProvider: 'windows',
   elevenLabsKey: '',
   elevenLabsVoiceId: '21m00Tcm4TlvDq8ikWAM',
+  piperVoiceId: DEFAULT_PIPER_VOICE,
   piperPath: '',
   piperModelPath: ''
 }

@@ -3,6 +3,7 @@ import { MicRecorder } from '@/core/voice/MicRecorder'
 import { SpeechPlayer } from '@/core/voice/SpeechPlayer'
 import { subscribeAssistantEvents, useAssistantStore } from '@/core/stores/useAssistantStore'
 import { useSettingsStore } from '@/core/stores/useSettingsStore'
+import { useNotificationStore } from '@/core/stores/useNotificationStore'
 import { sound } from '@/core/sound/SoundEngine'
 import {
   SentenceChunker,
@@ -38,6 +39,8 @@ const player = new SpeechPlayer()
 const synthQueue: { text: string; pauseMs: number }[] = []
 let synthesizing = false
 
+let lastSynthErrorAt = 0
+
 async function pumpSynthQueue(): Promise<void> {
   if (synthesizing) return
   synthesizing = true
@@ -47,8 +50,21 @@ async function pumpSynthQueue(): Promise<void> {
       const { data } = await window.cosmos.voice.synthesize(text)
       player.enqueue(data, pauseMs)
     } catch (err) {
-      console.error('[voice] synthesis failed:', err)
+      const message = err instanceof Error ? err.message : String(err)
+      console.error('[voice] synthesis failed:', message)
       synthQueue.length = 0
+      // don't let TTS fail silently — the user needs to know WHY there's
+      // no voice (e.g. a Piper path/exe problem). Throttle so one broken
+      // response doesn't spam a toast per sentence.
+      const now = Date.now()
+      if (now - lastSynthErrorAt > 4000) {
+        lastSynthErrorAt = now
+        useNotificationStore.getState().push({
+          title: 'Voice playback failed',
+          body: `${message}. Check Settings → Voice.`,
+          kind: 'error'
+        })
+      }
     }
   }
   synthesizing = false
