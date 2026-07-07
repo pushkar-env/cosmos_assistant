@@ -13,6 +13,7 @@ import type {
   ChatMessage,
   ChatRequest,
   CommandResult,
+  ConversationMeta,
   InstalledApp,
   MemoryCategory,
   MemoryItem,
@@ -63,9 +64,18 @@ export const cosmosApi = {
   },
   history: {
     get: (): Promise<ChatMessage[]> => ipcRenderer.invoke(IPC.HISTORY_GET),
-    new: (): Promise<void> => ipcRenderer.invoke(IPC.HISTORY_NEW),
+    new: (): Promise<number> => ipcRenderer.invoke(IPC.HISTORY_NEW),
     clearAll: (): Promise<void> => ipcRenderer.invoke(IPC.HISTORY_CLEAR_ALL),
     count: (): Promise<number> => ipcRenderer.invoke(IPC.HISTORY_COUNT)
+  },
+  sessions: {
+    list: (): Promise<ConversationMeta[]> => ipcRenderer.invoke(IPC.SESSIONS_LIST),
+    active: (): Promise<number> => ipcRenderer.invoke(IPC.SESSIONS_ACTIVE),
+    switch: (id: number): Promise<ChatMessage[]> => ipcRenderer.invoke(IPC.SESSIONS_SWITCH, id),
+    delete: (id: number): Promise<{ activeId: number; messages: ChatMessage[] }> =>
+      ipcRenderer.invoke(IPC.SESSIONS_DELETE, id),
+    rename: (id: number, title: string): Promise<void> =>
+      ipcRenderer.invoke(IPC.SESSIONS_RENAME, id, title)
   },
   vault: {
     listMemories: (): Promise<MemoryItem[]> => ipcRenderer.invoke(IPC.MEMORY_LIST),

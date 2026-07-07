@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { AssistantState, ChatMessage } from '@shared/types'
+import type { AssistantState, ChatMessage, ConversationMeta } from '@shared/types'
 import { useSettingsStore } from './useSettingsStore'
 import { sound } from '@/core/sound/SoundEngine'
 import { voiceSignal } from '@/core/voice/voiceSignal'
@@ -42,6 +42,10 @@ interface AssistantStore {
   state: AssistantState
   messages: UIMessage[]
   activeRequestId: string | null
+  /** all saved chat sessions, most-recent first */
+  sessions: ConversationMeta[]
+  /** the session currently shown in the chat panel */
+  currentSessionId: number | null
   init: () => void
   send: (text: string) => Promise<void>
   interrupt: () => void
@@ -50,6 +54,14 @@ interface AssistantStore {
   /** wipe every stored conversation from disk, then start fresh */
   clearAllHistory: () => Promise<void>
   setState: (state: AssistantState) => void
+  /** reload the sessions list from disk */
+  loadSessions: () => Promise<void>
+  /** open a saved session by id */
+  switchSession: (id: number) => Promise<void>
+  /** delete a session; falls back to another (or a fresh one) */
+  deleteSession: (id: number) => Promise<void>
+  /** give a session a custom title */
+  renameSession: (id: number, title: string) => Promise<void>
 }
 
 let initialized = false
@@ -60,12 +72,14 @@ export const useAssistantStore = create<AssistantStore>((set, get) => ({
   state: 'idle',
   messages: [],
   activeRequestId: null,
+  sessions: [],
+  currentSessionId: null,
 
   init: () => {
     if (initialized) return
     initialized = true
 
-    // restore the persisted conversation
+    // restore the persisted conversation + the sessions list
     void window.cosmos.history.get().then((history) => {
       if (history.length && get().messages.length === 0) {
         set({
@@ -73,6 +87,8 @@ export const useAssistantStore = create<AssistantStore>((set, get) => ({
         })
       }
     })
+    void window.cosmos.sessions.active().then((id) => set({ currentSessionId: id }))
+    void get().loadSessions()
 
     window.cosmos.tools.onEvent(({ requestId, callId, tool, status, summary, agent }) => {
       if (requestId !== get().activeRequestId) return
@@ -134,6 +150,8 @@ export const useAssistantStore = create<AssistantStore>((set, get) => ({
       })
       notify({ type: 'done' })
       sound.play('success')
+      // the first message names the session; keep the list fresh
+      void get().loadSessions()
     })
 
     window.cosmos.ai.onError(({ requestId, message }) => {
@@ -205,14 +223,50 @@ export const useAssistantStore = create<AssistantStore>((set, get) => ({
   clear: () => {
     get().interrupt()
     set({ messages: [] })
-    void window.cosmos.history.new()
+    void window.cosmos.history.new().then((id) => {
+      set({ currentSessionId: id })
+      void get().loadSessions()
+    })
   },
 
   clearAllHistory: async () => {
     get().interrupt()
-    set({ messages: [] })
+    set({ messages: [], sessions: [] })
     await window.cosmos.history.clearAll()
+    await window.cosmos.sessions.active().then((id) => set({ currentSessionId: id }))
+    await get().loadSessions()
   },
 
-  setState: (state) => set({ state })
+  setState: (state) => set({ state }),
+
+  loadSessions: async () => {
+    const sessions = await window.cosmos.sessions.list()
+    set({ sessions })
+  },
+
+  switchSession: async (id) => {
+    if (id === get().currentSessionId) return
+    get().interrupt()
+    const history = await window.cosmos.sessions.switch(id)
+    set({
+      currentSessionId: id,
+      messages: history.map((m) => ({ ...m, id: nextId() }))
+    })
+  },
+
+  deleteSession: async (id) => {
+    const wasCurrent = id === get().currentSessionId
+    if (wasCurrent) get().interrupt()
+    const { activeId, messages } = await window.cosmos.sessions.delete(id)
+    // only swap the visible transcript when the OPEN session was deleted
+    if (wasCurrent) {
+      set({ currentSessionId: activeId, messages: messages.map((m) => ({ ...m, id: nextId() })) })
+    }
+    await get().loadSessions()
+  },
+
+  renameSession: async (id, title) => {
+    await window.cosmos.sessions.rename(id, title)
+    await get().loadSessions()
+  }
 }))

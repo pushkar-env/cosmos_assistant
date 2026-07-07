@@ -37,9 +37,9 @@ Thumbs.db
 scratch-*
 *.local
 
-# Bundled Piper runtime + voice (~89 MB) — shipped via electron-builder
-# extraResources so the installer always contains Piper. Kept out of git
-# to avoid bloating the repo; regenerate locally before `npm run dist` by
-# copying piper.exe + its DLLs + espeak-ng-data and one .onnx voice into
-# resources/piper/ (see docs). CI/other machines must restore it too.
+# Bundled Piper runtime + voice models (~270 MB) — shipped via
+# electron-builder extraResources so the installer always contains Piper.
+# Kept out of git (large, third-party). Restored from upstream by
+# `npm run setup:piper`, which also runs automatically before `npm run dist`
+# (predist hook). See scripts/fetch-piper.mjs.
 resources/piper/

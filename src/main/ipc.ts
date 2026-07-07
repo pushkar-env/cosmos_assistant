@@ -79,6 +79,18 @@ export function registerIpc(getWindow: () => BrowserWindow | null, services: Ser
 
   ipcMain.handle(IPC.HISTORY_COUNT, () => services.memory.conversationCount())
 
+  ipcMain.handle(IPC.SESSIONS_LIST, () => services.memory.listConversations())
+
+  ipcMain.handle(IPC.SESSIONS_ACTIVE, () => services.memory.activeConversationId())
+
+  ipcMain.handle(IPC.SESSIONS_SWITCH, (_e, id: number) => services.memory.switchConversation(id))
+
+  ipcMain.handle(IPC.SESSIONS_DELETE, (_e, id: number) => services.memory.deleteConversation(id))
+
+  ipcMain.handle(IPC.SESSIONS_RENAME, (_e, id: number, title: string) =>
+    services.memory.renameConversation(id, title)
+  )
+
   ipcMain.handle(IPC.MEMORY_LIST, () => services.memory.listMemories())
 
   ipcMain.handle(IPC.MEMORY_ADD, (_e, content: string, category: MemoryCategory) =>

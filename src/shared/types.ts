@@ -11,6 +11,15 @@ export interface ChatMessage {
   content: string
 }
 
+/** A saved chat session, shown in the sessions list. */
+export interface ConversationMeta {
+  id: number
+  /** derived from the first user message, or a custom rename */
+  title: string
+  updatedAt: string
+  messageCount: number
+}
+
 export interface ChatRequest {
   requestId: string
   provider: ProviderId

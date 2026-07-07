@@ -1,7 +1,15 @@
 import { app } from 'electron'
 import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { join } from 'path'
-import type { AuditEntry, ChatMessage, MemoryCategory, MemoryItem, Note, NoteMeta } from '@shared/types'
+import type {
+  AuditEntry,
+  ChatMessage,
+  ConversationMeta,
+  MemoryCategory,
+  MemoryItem,
+  Note,
+  NoteMeta
+} from '@shared/types'
 import { decryptText, encryptText } from './secureText'
 import { cosine, type EmbeddingService } from './EmbeddingService'
 
@@ -79,6 +87,9 @@ export class MemoryService {
           updated_at TEXT NOT NULL
         );
       `)
+      // multi-session columns (added on upgrade for existing databases)
+      this.addColumnIfMissing('conversations', 'title', 'TEXT')
+      this.addColumnIfMissing('conversations', 'updated_at', 'TEXT')
       const last = this.db
         .prepare('SELECT id FROM conversations ORDER BY id DESC LIMIT 1')
         .get() as { id: number } | undefined
@@ -117,24 +128,132 @@ export class MemoryService {
   append(role: ChatMessage['role'], content: string): void {
     if (!content.trim()) return
     if (this.db) {
+      const now = new Date().toISOString()
       this.db
         .prepare(
           'INSERT INTO messages (conversation_id, role, content, created_at) VALUES (?, ?, ?, ?)'
         )
-        .run(this.conversationId, role, encryptText(content), new Date().toISOString())
+        .run(this.conversationId, role, encryptText(content), now)
+      // first user message names the session; every message bumps its time
+      const conv = this.db
+        .prepare('SELECT title FROM conversations WHERE id = ?')
+        .get(this.conversationId) as { title: string | null } | undefined
+      if (role === 'user' && !conv?.title) {
+        const title = content.trim().replace(/\s+/g, ' ').slice(0, 80)
+        this.db
+          .prepare('UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?')
+          .run(encryptText(title), now, this.conversationId)
+      } else {
+        this.db
+          .prepare('UPDATE conversations SET updated_at = ? WHERE id = ?')
+          .run(now, this.conversationId)
+      }
       return
     }
     this.json.messages.push({ role, content })
     this.persistJson()
   }
 
-  newConversation(): void {
+  /** id of the session currently being read/written */
+  activeConversationId(): number {
+    return this.conversationId
+  }
+
+  /** every saved session, most-recently-updated first */
+  listConversations(): ConversationMeta[] {
     if (this.db) {
-      this.conversationId = this.createConversation()
-      return
+      const rows = this.db
+        .prepare(
+          `SELECT c.id AS id, c.title AS title, c.started_at AS started_at, c.updated_at AS updated_at,
+                  (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id) AS msg_count,
+                  (SELECT content FROM messages m WHERE m.conversation_id = c.id AND m.role = 'user'
+                     ORDER BY m.id LIMIT 1) AS first_user
+             FROM conversations c
+            ORDER BY COALESCE(c.updated_at, c.started_at) DESC`
+        )
+        .all() as {
+        id: number
+        title: string | null
+        started_at: string
+        updated_at: string | null
+        msg_count: number
+        first_user: string | null
+      }[]
+      // hide empty sessions except the one we're actively in (the user's
+      // brand-new "New chat" should still appear at the top)
+      return rows
+        .filter((r) => r.msg_count > 0 || r.id === this.conversationId)
+        .map((r) => ({
+          id: r.id,
+          title: this.titleFor(r.title, r.first_user),
+          updatedAt: r.updated_at ?? r.started_at,
+          messageCount: r.msg_count
+        }))
+    }
+    const first = this.json.messages.find((m) => m.role === 'user')?.content ?? null
+    return this.json.messages.length > 0
+      ? [{ id: 1, title: this.titleFor(null, first), updatedAt: new Date().toISOString(), messageCount: this.json.messages.length }]
+      : []
+  }
+
+  /** make `id` the active session and return its messages */
+  switchConversation(id: number): ChatMessage[] {
+    if (this.db) {
+      const exists = this.db.prepare('SELECT id FROM conversations WHERE id = ?').get(id)
+      if (exists) this.conversationId = id
+      return this.history()
+    }
+    return this.json.messages
+  }
+
+  /**
+   * Delete a session. If it was the active one, fall back to the most
+   * recent remaining session (or a fresh empty one). Returns the resulting
+   * active id + its messages so the UI can re-render immediately.
+   */
+  deleteConversation(id: number): { activeId: number; messages: ChatMessage[] } {
+    if (this.db) {
+      this.db.prepare('DELETE FROM messages WHERE conversation_id = ?').run(id)
+      this.db.prepare('DELETE FROM conversations WHERE id = ?').run(id)
+      if (id === this.conversationId) {
+        const last = this.db
+          .prepare('SELECT id FROM conversations ORDER BY COALESCE(updated_at, started_at) DESC LIMIT 1')
+          .get() as { id: number } | undefined
+        this.conversationId = last?.id ?? this.createConversation()
+      }
+      return { activeId: this.conversationId, messages: this.history() }
     }
     this.json.messages = []
     this.persistJson()
+    return { activeId: 1, messages: [] }
+  }
+
+  /** give a session a custom title */
+  renameConversation(id: number, title: string): void {
+    const clean = title.trim().slice(0, 80)
+    if (!clean) return
+    if (this.db) {
+      this.db.prepare('UPDATE conversations SET title = ? WHERE id = ?').run(encryptText(clean), id)
+    }
+  }
+
+  /**
+   * Start a new session — but reuse the current one if it's still empty,
+   * so repeatedly hitting "New chat" doesn't spawn blank sessions.
+   * Returns the id to make active.
+   */
+  newConversation(): number {
+    if (this.db) {
+      const count = this.db
+        .prepare('SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ?')
+        .get(this.conversationId) as { n: number }
+      if (count.n === 0) return this.conversationId
+      this.conversationId = this.createConversation()
+      return this.conversationId
+    }
+    this.json.messages = []
+    this.persistJson()
+    return 1
   }
 
   /** how many stored conversations have at least one message */
@@ -157,6 +276,16 @@ export class MemoryService {
     }
     this.json.messages = []
     this.persistJson()
+  }
+
+  /** first-user-message or custom title → a display label */
+  private titleFor(storedTitle: string | null, firstUserEnc: string | null): string {
+    if (storedTitle) return decryptText(storedTitle) || 'New chat'
+    if (firstUserEnc) {
+      const text = decryptText(firstUserEnc).trim().replace(/\s+/g, ' ')
+      return text ? (text.length > 40 ? `${text.slice(0, 40)}…` : text) : 'New chat'
+    }
+    return 'New chat'
   }
 
   // ── long-term memories ─────────────────────────────────────────
@@ -343,10 +472,20 @@ export class MemoryService {
   }
 
   private createConversation(): number {
-    const result = this.db!.prepare('INSERT INTO conversations (started_at) VALUES (?)').run(
-      new Date().toISOString()
-    ) as { lastInsertRowid: number | bigint }
+    const now = new Date().toISOString()
+    const result = this.db!.prepare(
+      'INSERT INTO conversations (started_at, updated_at) VALUES (?, ?)'
+    ).run(now, now) as { lastInsertRowid: number | bigint }
     return Number(result.lastInsertRowid)
+  }
+
+  /** add a column to an existing table if the schema predates it */
+  private addColumnIfMissing(table: string, column: string, type: string): void {
+    if (!this.db) return
+    const cols = this.db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]
+    if (!cols.some((c) => c.name === column)) {
+      this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`)
+    }
   }
 
   private persistJson(): void {

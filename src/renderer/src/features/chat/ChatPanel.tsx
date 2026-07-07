@@ -7,6 +7,7 @@ import { useVoiceStore } from '@/features/voice/useVoiceStore'
 import { MicButton } from '@/features/voice/MicButton'
 import { ToolCard } from './ToolCard'
 import { ApprovalCard } from './ApprovalCard'
+import { SessionList } from './SessionList'
 import { Glass } from '@/shared/ui/Glass'
 import { StatusDot } from '@/shared/ui/StatusDot'
 import { Markdown } from '@/shared/ui/Markdown'
@@ -20,6 +21,9 @@ const PROVIDERS: { id: ProviderId; label: string }[] = [
 
 export function ChatPanel(): React.JSX.Element {
   const { messages, state, send, clear } = useAssistantStore()
+  const sessions = useAssistantStore((s) => s.sessions)
+  const currentSessionId = useAssistantStore((s) => s.currentSessionId)
+  const [sessionsOpen, setSessionsOpen] = useState(false)
   const { settings, update } = useSettingsStore()
   const voiceError = useVoiceStore((s) => s.error)
   const micMode = useVoiceStore((s) => s.micMode)
@@ -67,8 +71,42 @@ export function ChatPanel(): React.JSX.Element {
       transition={{ delay: 0.3, duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
     >
       <Glass className="flex max-h-full min-h-[70%] flex-col overflow-hidden">
+        {/* sessions bar */}
+        <div className="relative flex items-center gap-2 border-b border-white/5 px-4 py-2">
+          <button
+            onClick={() => setSessionsOpen((o) => !o)}
+            title="Chats — switch, rename, delete"
+            className={`flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1 font-ui text-xs text-dim transition-colors hover:bg-white/5 hover:text-body ${
+              sessionsOpen ? 'bg-white/5 text-body' : ''
+            }`}
+          >
+            <span className="text-sm leading-none">☰</span>
+            <span className="truncate font-semibold">
+              {sessions.find((s) => s.id === currentSessionId)?.title ?? 'New chat'}
+            </span>
+            <span className="ml-auto shrink-0 text-[9px]">▾</span>
+          </button>
+          <button
+            onClick={clear}
+            disabled={messages.length === 0}
+            title="New chat"
+            className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 font-ui text-xs font-semibold uppercase tracking-widest text-dim transition-colors hover:bg-white/5 hover:text-body disabled:pointer-events-none disabled:opacity-30"
+          >
+            <span className="text-sm leading-none">+</span> New
+          </button>
+          <StatusDot active={busy} />
+          {sessionsOpen && (
+            <>
+              <div className="fixed inset-0 z-20" onClick={() => setSessionsOpen(false)} />
+              <AnimatePresence>
+                <SessionList onClose={() => setSessionsOpen(false)} />
+              </AnimatePresence>
+            </>
+          )}
+        </div>
+
         {/* provider switcher */}
-        <div className="flex items-center gap-1 border-b border-white/5 px-4 py-3">
+        <div className="flex items-center gap-1 border-b border-white/5 px-4 py-2">
           {PROVIDERS.map((p) => (
             <button
               key={p.id}
@@ -82,17 +120,6 @@ export function ChatPanel(): React.JSX.Element {
               {p.label}
             </button>
           ))}
-          <div className="ml-auto flex items-center gap-2">
-            <button
-              onClick={clear}
-              disabled={messages.length === 0}
-              title="New chat (clears the current conversation)"
-              className="flex items-center gap-1 rounded-md px-2 py-1 font-ui text-xs font-semibold uppercase tracking-widest text-dim transition-colors hover:bg-white/5 hover:text-body disabled:pointer-events-none disabled:opacity-30"
-            >
-              <span className="text-sm leading-none">+</span> New
-            </button>
-            <StatusDot active={busy} />
-          </div>
         </div>
 
         {/* transcript */}
