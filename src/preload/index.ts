@@ -13,6 +13,7 @@ import type {
   ChatMessage,
   ChatRequest,
   CommandResult,
+  InstalledApp,
   MemoryCategory,
   MemoryItem,
   Note,
@@ -98,6 +99,12 @@ export const cosmosApi = {
   },
   plugins: {
     get: (): Promise<PluginManifest[]> => ipcRenderer.invoke(IPC.PLUGINS_GET)
+  },
+  apps: {
+    list: (refresh?: boolean): Promise<InstalledApp[]> =>
+      ipcRenderer.invoke(IPC.APPS_LIST, refresh),
+    launch: (app: InstalledApp): Promise<CommandResult> =>
+      ipcRenderer.invoke(IPC.APPS_LAUNCH, app)
   },
   app: {
     onPaletteToggle: (cb: () => void): Unsubscribe => subscribe(IPC.PALETTE_TOGGLE, cb),

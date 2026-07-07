@@ -44,6 +44,9 @@ try {
   /* appData unavailable this early on some platforms; default is fine */
 }
 
+// dev only: expose CDP so tooling can inspect the running renderer
+if (!app.isPackaged) app.commandLine.appendSwitch('remote-debugging-port', '9223')
+
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let isQuitting = false
@@ -229,7 +232,13 @@ function migrateFromJarvisX(): void {
   try {
     const oldSettings = join(oldDir, 'jarvis-settings.json')
     const newSettings = join(newDir, 'cosmos-settings.json')
-    if (existsSync(oldSettings) && !existsSync(newSettings)) {
+    // never resurrect pre-rename settings when COSMOS settings exist in
+    // any form — SettingsService recovers from its .bak on its own
+    if (
+      existsSync(oldSettings) &&
+      !existsSync(newSettings) &&
+      !existsSync(`${newSettings}.bak`)
+    ) {
       const s = JSON.parse(readFileSync(oldSettings, 'utf-8')) as Record<string, unknown>
       const apiKeys = (s.apiKeys ?? {}) as Record<string, unknown>
       s.apiKeys = {

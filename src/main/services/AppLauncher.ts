@@ -1,7 +1,8 @@
-import { shell } from 'electron'
+import { app, shell } from 'electron'
 import { execFile } from 'child_process'
 import { promises as fs } from 'fs'
 import { join } from 'path'
+import type { InstalledApp } from '@shared/types'
 
 type LaunchKind = 'appid' | 'url' | 'lnk'
 
@@ -44,6 +45,7 @@ const ALIASES: Record<string, string> = {
  */
 export class AppLauncher {
   private cache: AppEntry[] | null = null
+  private catalogCache: InstalledApp[] | null = null
 
   async launch(query: string): Promise<{ ok: boolean; message: string }> {
     const q = query.trim()
@@ -89,6 +91,52 @@ export class AppLauncher {
     } catch (err) {
       return { ok: false, message: err instanceof Error ? err.message : String(err) }
     }
+  }
+
+  /** launch a specific catalog entry (App Centre tiles — no fuzzy matching) */
+  launchEntry(entry: InstalledApp): Promise<{ ok: boolean; message: string }> {
+    return this.dispatch({ name: entry.name, kind: entry.kind, target: entry.target })
+  }
+
+  /**
+   * The deduplicated, user-presentable app list for the App Centre:
+   * noise (uninstallers, web shortcuts, help files) is dropped, names are
+   * unique, and .lnk entries carry their real icon as a data URL.
+   */
+  async catalog(refresh = false): Promise<InstalledApp[]> {
+    if (refresh) {
+      this.cache = null
+      this.catalogCache = null
+    }
+    if (this.catalogCache) return this.catalogCache
+
+    const noise = /uninstall|readme|help|documentation|website|support|^www\./i
+    const byName = new Map<string, AppEntry>()
+    for (const e of await this.index()) {
+      if (noise.test(e.name)) continue
+      if (e.kind === 'url' && /^https?:\/\//i.test(e.target)) continue // web shortcut, not an app
+      const key = collapse(e.name)
+      const existing = byName.get(key)
+      // prefer the .lnk twin — it's the one we can pull an icon from
+      if (!existing || (existing.kind !== 'lnk' && e.kind === 'lnk')) byName.set(key, e)
+    }
+
+    const items = [...byName.values()].sort((a, b) => a.name.localeCompare(b.name))
+    this.catalogCache = await Promise.all(
+      items.map(async (e): Promise<InstalledApp> => {
+        let icon: string | undefined
+        if (e.kind === 'lnk') {
+          try {
+            const img = await app.getFileIcon(e.target, { size: 'large' })
+            if (!img.isEmpty()) icon = img.toDataURL()
+          } catch {
+            /* no icon — the tile falls back to a letter */
+          }
+        }
+        return { name: e.name, kind: e.kind, target: e.target, icon }
+      })
+    )
+    return this.catalogCache
   }
 
   /** every installed app name (for the model / diagnostics) */

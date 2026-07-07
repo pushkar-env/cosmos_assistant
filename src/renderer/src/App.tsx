@@ -19,6 +19,7 @@ import { SettingsPanel } from '@/features/settings/SettingsPanel'
 import { VaultPanel } from '@/features/vault/VaultPanel'
 import { DashboardPanel } from '@/features/dashboard/DashboardPanel'
 import { WorkspacePanel } from '@/features/workspace/WorkspacePanel'
+import { AppCenterPanel } from '@/features/appcenter/AppCenterPanel'
 import { Toasts } from '@/features/notifications/Toasts'
 import { NotificationCenter } from '@/features/notifications/NotificationCenter'
 import { MiniView } from '@/features/compact/MiniView'
@@ -133,6 +134,7 @@ export default function App(): React.JSX.Element {
           <VaultPanel />
           <DashboardPanel />
           <WorkspacePanel />
+          <AppCenterPanel />
           <NotificationCenter />
           <Toasts />
         </motion.main>

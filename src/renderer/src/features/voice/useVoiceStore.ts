@@ -4,7 +4,13 @@ import { SpeechPlayer } from '@/core/voice/SpeechPlayer'
 import { subscribeAssistantEvents, useAssistantStore } from '@/core/stores/useAssistantStore'
 import { useSettingsStore } from '@/core/stores/useSettingsStore'
 import { sound } from '@/core/sound/SoundEngine'
-import { SentenceChunker, extractWakeCommand, toSpeakable } from './speech'
+import {
+  SentenceChunker,
+  extractWakeCommand,
+  pauseAfterMs,
+  toSpeakable,
+  type ChunkBoundary
+} from './speech'
 
 type MicMode = 'off' | 'ptt' | 'handsfree'
 type MicStatus = 'idle' | 'listening' | 'transcribing'
@@ -29,17 +35,17 @@ const recorder = new MicRecorder()
 const player = new SpeechPlayer()
 
 /** serial TTS pipeline: sentences in, ordered audio out */
-const synthQueue: string[] = []
+const synthQueue: { text: string; pauseMs: number }[] = []
 let synthesizing = false
 
 async function pumpSynthQueue(): Promise<void> {
   if (synthesizing) return
   synthesizing = true
   while (synthQueue.length > 0) {
-    const text = synthQueue.shift()!
+    const { text, pauseMs } = synthQueue.shift()!
     try {
       const { data } = await window.cosmos.voice.synthesize(text)
-      player.enqueue(data)
+      player.enqueue(data, pauseMs)
     } catch (err) {
       console.error('[voice] synthesis failed:', err)
       synthQueue.length = 0
@@ -48,10 +54,12 @@ async function pumpSynthQueue(): Promise<void> {
   synthesizing = false
 }
 
-function speak(text: string): void {
+function speak(text: string, boundary: ChunkBoundary = 'sentence'): void {
   const speakable = toSpeakable(text)
   if (!speakable) return
-  synthQueue.push(speakable)
+  // pacing is judged on the raw text — markdown structure (headings,
+  // paragraph breaks) carries pause cues that toSpeakable strips
+  synthQueue.push({ text: speakable, pauseMs: pauseAfterMs(text, boundary) })
   void pumpSynthQueue()
 }
 

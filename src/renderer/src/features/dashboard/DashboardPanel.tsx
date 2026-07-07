@@ -46,6 +46,7 @@ export function DashboardPanel(): React.JSX.Element {
   const quick = [
     { label: 'New Chat', run: () => { useAssistantStore.getState().clear(); setPanel('none') } },
     { label: 'Speak (Ctrl+J)', run: () => { setPanel('none'); void useVoiceStore.getState().togglePushToTalk() } },
+    { label: 'App Centre', run: () => setPanel('apps') },
     { label: 'Workspace', run: () => setPanel('workspace') },
     { label: 'Vault', run: () => setPanel('vault') },
     { label: 'Compact Mode', run: () => useUIStore.getState().toggleCompact() }
@@ -97,7 +98,7 @@ export function DashboardPanel(): React.JSX.Element {
                 />
               </div>
 
-              <div className="mt-5 grid grid-cols-5 gap-2">
+              <div className="mt-5 grid grid-cols-6 gap-2">
                 {quick.map((q) => (
                   <button
                     key={q.label}

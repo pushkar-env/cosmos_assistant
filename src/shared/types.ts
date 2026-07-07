@@ -206,3 +206,13 @@ export interface CommandResult {
   ok: boolean
   message?: string
 }
+
+/** An installed application, listed in the App Centre. */
+export interface InstalledApp {
+  name: string
+  /** how it launches: registered app id, protocol URL, or a .lnk shortcut */
+  kind: 'appid' | 'url' | 'lnk'
+  target: string
+  /** PNG data URL extracted from the shortcut, when resolvable */
+  icon?: string
+}

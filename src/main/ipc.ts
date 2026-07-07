@@ -5,7 +5,13 @@ import {
   type WindowControlAction,
   type WindowMode
 } from '@shared/ipc'
-import type { ChatRequest, MemoryCategory, Settings, SystemCommandId } from '@shared/types'
+import type {
+  ChatRequest,
+  InstalledApp,
+  MemoryCategory,
+  Settings,
+  SystemCommandId
+} from '@shared/types'
 import type { AIService } from './services/ai/AIService'
 import type { SettingsService } from './services/SettingsService'
 import type { WeatherService } from './services/WeatherService'
@@ -94,6 +100,14 @@ export function registerIpc(getWindow: () => BrowserWindow | null, services: Ser
   ipcMain.handle(IPC.NOTES_DELETE, (_e, id: number) => services.memory.deleteNote(id))
 
   ipcMain.handle(IPC.PLUGINS_GET, () => services.plugins.list())
+
+  ipcMain.handle(IPC.APPS_LIST, (_e, refresh?: boolean) =>
+    services.commands.launcher.catalog(refresh)
+  )
+
+  ipcMain.handle(IPC.APPS_LAUNCH, (_e, app: InstalledApp) =>
+    services.commands.launcher.launchEntry(app)
+  )
 
   ipcMain.handle(IPC.WINDOW_SET_MODE, (_e, mode: WindowMode) => services.window.setMode(mode))
 

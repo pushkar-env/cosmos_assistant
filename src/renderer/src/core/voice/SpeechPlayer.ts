@@ -5,17 +5,26 @@ interface PlayerEvents {
   onDrained: () => void
 }
 
+interface QueuedClip {
+  data: ArrayBuffer
+  /** silence to hold after this clip before the next one starts */
+  pauseAfterMs: number
+}
+
 /**
  * Sequential playback queue for synthesized speech. Buffers are decoded
  * with WebAudio and routed through an AnalyserNode so the orb's speaking
- * animation follows the real audio envelope. `stop()` is instant —
- * barge-in interruption depends on it.
+ * animation follows the real audio envelope. Each clip can carry a pause
+ * that is held after it finishes, so sentence and paragraph boundaries
+ * breathe like natural speech. `stop()` is instant — barge-in
+ * interruption depends on it.
  */
 export class SpeechPlayer {
   private ctx: AudioContext | null = null
   private analyser: AnalyserNode | null = null
-  private queue: ArrayBuffer[] = []
+  private queue: QueuedClip[] = []
   private current: AudioBufferSourceNode | null = null
+  private pauseTimer: ReturnType<typeof setTimeout> | null = null
   private playing = false
   private raf = 0
   private events: PlayerEvents | null = null
@@ -28,14 +37,18 @@ export class SpeechPlayer {
     this.events = events
   }
 
-  enqueue(data: ArrayBuffer): void {
+  enqueue(data: ArrayBuffer, pauseAfterMs = 0): void {
     if (data.byteLength === 0) return
-    this.queue.push(data)
+    this.queue.push({ data, pauseAfterMs })
     if (!this.playing) void this.playNext()
   }
 
   stop(): void {
     this.queue = []
+    if (this.pauseTimer !== null) {
+      clearTimeout(this.pauseTimer)
+      this.pauseTimer = null
+    }
     if (this.current) {
       this.current.onended = null
       try {
@@ -49,8 +62,8 @@ export class SpeechPlayer {
   }
 
   private async playNext(): Promise<void> {
-    const data = this.queue.shift()
-    if (!data) {
+    const clip = this.queue.shift()
+    if (!clip) {
       this.endPlayback()
       this.events?.onDrained()
       return
@@ -66,7 +79,7 @@ export class SpeechPlayer {
 
     let buffer: AudioBuffer
     try {
-      buffer = await this.ctx.decodeAudioData(data.slice(0))
+      buffer = await this.ctx.decodeAudioData(clip.data.slice(0))
     } catch {
       // skip undecodable chunk, keep the queue moving
       void this.playNext()
@@ -85,10 +98,26 @@ export class SpeechPlayer {
     source.connect(this.analyser!)
     source.onended = () => {
       this.current = null
-      void this.playNext()
+      this.holdPause(clip.pauseAfterMs)
     }
     this.current = source
     source.start()
+  }
+
+  /**
+   * Hold silence between clips. The speaking state stays on so the orb
+   * doesn't flicker to idle mid-utterance; the analyser reads silence,
+   * so its level falls to zero on its own.
+   */
+  private holdPause(ms: number): void {
+    if (ms <= 0) {
+      void this.playNext()
+      return
+    }
+    this.pauseTimer = setTimeout(() => {
+      this.pauseTimer = null
+      void this.playNext()
+    }, ms)
   }
 
   private watchLevel(): void {

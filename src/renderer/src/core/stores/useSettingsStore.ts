@@ -14,9 +14,20 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   loaded: false,
 
   init: async () => {
-    const settings = await window.cosmos.settings.get()
-    applyTheme(settings.theme)
-    set({ settings, loaded: true })
+    // a transient IPC failure here would strand the whole session on
+    // DEFAULT_SETTINGS (wrong voice, no keys) — retry before giving up
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const settings = await window.cosmos.settings.get()
+        applyTheme(settings.theme)
+        set({ settings, loaded: true })
+        return
+      } catch (err) {
+        console.error(`[settings] load attempt ${attempt + 1} failed:`, err)
+        await new Promise((r) => setTimeout(r, 300 * (attempt + 1)))
+      }
+    }
+    console.error('[settings] all load attempts failed — running on defaults')
   },
 
   update: async (patch) => {

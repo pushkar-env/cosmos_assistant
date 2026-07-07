@@ -29,6 +29,14 @@ const cmd = window.cosmos.commands
 export function buildActions(): Action[] {
   return [
     // ── apps ──
+    {
+      id: 'open-app-centre',
+      title: 'Open App Centre',
+      subtitle: 'Browse and launch every installed app',
+      keywords: ['apps', 'app centre', 'app center', 'applications', 'programs', 'installed', 'launcher', 'games'],
+      section: 'apps',
+      run: () => useUIStore.getState().setPanel('apps')
+    },
     app('notepad', 'Open Notepad', 'notepad'),
     app('calc', 'Open Calculator', 'calc'),
     app('explorer', 'Open File Explorer', 'explorer'),

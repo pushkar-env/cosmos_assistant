@@ -36,6 +36,8 @@ export const IPC = {
   NOTES_SAVE: 'notes:save',
   NOTES_DELETE: 'notes:delete',
   PLUGINS_GET: 'plugins:get',
+  APPS_LIST: 'apps:list',
+  APPS_LAUNCH: 'apps:launch',
   WINDOW_SET_MODE: 'window:set-mode',
   WINDOW_MODE_CHANGED: 'window:mode-changed',
   APP_QUIT: 'app:quit',
