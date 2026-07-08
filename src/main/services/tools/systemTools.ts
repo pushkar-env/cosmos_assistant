@@ -5,7 +5,6 @@ import { fileURLToPath } from 'url'
 import { IPC } from '@shared/ipc'
 import type { NotificationPayload } from '@shared/types'
 import type { ToolSpec } from './ToolRegistry'
-import { runPs } from './fileTools'
 import { resolveUserPath } from '../userPaths'
 import { captureScreenToFile } from '../screen'
 import type { SystemStatsService } from '../SystemStatsService'
@@ -277,28 +276,42 @@ export function systemTools(
     },
     {
       def: {
-        name: 'volume',
-        description: 'Adjust system volume: up/down by steps (each ≈2%), or toggle mute.',
+        name: 'get_time',
+        description:
+          "Get the current local date and time on the user's PC (and its timezone). Use for \"what time is it\", \"what's today's date\", \"what day is it\". Optionally pass an IANA timezone (e.g. \"America/New_York\", \"Asia/Kolkata\") to get the time there instead.",
         inputSchema: {
           type: 'object',
           properties: {
-            action: { type: 'string', enum: ['up', 'down', 'mute'] },
-            steps: { type: 'number', description: 'For up/down, default 5' }
-          },
-          required: ['action']
+            timezone: {
+              type: 'string',
+              description: 'Optional IANA timezone name, e.g. "Europe/London". Omit for local time.'
+            }
+          }
         },
         sensitive: false
       },
-      summary: (a) => `${String(a.action ?? '')}${a.steps ? ` ×${Number(a.steps)}` : ''}`,
+      summary: (a) => (a.timezone ? `time in ${String(a.timezone)}` : 'current time'),
       run: async (a) => {
-        const action = String(a.action)
-        const steps = Math.min(Math.max(Number(a.steps) || 5, 1), 50)
-        const key = action === 'mute' ? 173 : action === 'down' ? 174 : 175
-        const count = action === 'mute' ? 1 : steps
-        await runPs(
-          `$w = New-Object -ComObject WScript.Shell; 1..${count} | ForEach-Object { $w.SendKeys([char]${key}) }`
-        )
-        return action === 'mute' ? 'Toggled mute.' : `Volume ${action} by ~${steps * 2}%.`
+        const localTz = Intl.DateTimeFormat().resolvedOptions().timeZone
+        const tz = a.timezone ? String(a.timezone) : localTz
+        const opts: Intl.DateTimeFormatOptions = {
+          timeZone: tz,
+          weekday: 'long',
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit',
+          second: '2-digit',
+          hour12: true
+        }
+        try {
+          const stamp = new Date().toLocaleString('en-US', opts)
+          return `${stamp} (${tz})`
+        } catch {
+          // invalid timezone → fall back to local
+          return `${new Date().toLocaleString('en-US', { ...opts, timeZone: localTz })} (${localTz})`
+        }
       }
     },
     {

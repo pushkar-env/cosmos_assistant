@@ -117,7 +117,9 @@ export const useAssistantStore = create<AssistantStore>((set, get) => ({
       // its unique callId — never gate on activeRequestId. A barge-in or an
       // early onDone nulls activeRequestId, and if the terminal event lands
       // after that the card would otherwise stay stuck spinning on "running".
-      const idx = messages.findIndex((m) => m.tool?.callId === callId)
+      // Resolve the MOST-RECENT matching card (findLast) so that even if two
+      // cards ever share a callId, the still-running one gets closed.
+      const idx = messages.findLastIndex((m) => m.tool?.callId === callId)
       if (idx !== -1) {
         const card = messages[idx]
         messages[idx] = { ...card, tool: { ...card.tool!, status } }
@@ -217,10 +219,12 @@ export const useAssistantStore = create<AssistantStore>((set, get) => ({
 
   interrupt: () => {
     const { activeRequestId } = get()
-    if (activeRequestId) {
-      void window.cosmos.ai.abort(activeRequestId)
-      set({ state: 'idle', activeRequestId: null })
-    }
+    // abort the in-flight request if there is one, but ALWAYS land on idle —
+    // Stop can also be pressed while merely speaking a finished reply (no
+    // active request), and it must still reset the state so the button flips
+    // back to "Send".
+    if (activeRequestId) void window.cosmos.ai.abort(activeRequestId)
+    set({ state: 'idle', activeRequestId: null })
     notify({ type: 'error' }) // clears any queued speech
   },
 

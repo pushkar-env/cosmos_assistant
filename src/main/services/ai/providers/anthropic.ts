@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { AIProvider } from '../types'
 import { sseEvents, raiseForStatus } from '../types'
 import type { AgentMessage, ToolCall } from '@shared/tools'
@@ -79,7 +80,7 @@ export const anthropicProvider: AIProvider = {
         case 'content_block_start':
           if (event.content_block?.type === 'tool_use') {
             pending = {
-              id: event.content_block.id ?? `tool-${calls.length}`,
+              id: event.content_block.id ?? randomUUID(),
               name: event.content_block.name ?? '',
               json: ''
             }

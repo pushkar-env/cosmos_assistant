@@ -3,6 +3,7 @@ import type { ProviderId } from '@shared/types'
 import type { ToolCall, ToolDef } from '@shared/tools'
 import { fileTools } from './fileTools'
 import { systemTools } from './systemTools'
+import { systemControlTools } from './systemControlTools'
 import { memoryTools } from './memoryTools'
 import { browserTools } from './browserTools'
 import { creatorTools } from './creatorTools'
@@ -57,6 +58,7 @@ export class ToolRegistry {
     for (const spec of [
       ...fileTools,
       ...systemTools(deps.stats, deps.commands, deps.media),
+      ...systemControlTools(),
       ...memoryTools(deps.memory),
       ...browserTools(deps.browser),
       ...creatorTools(deps)

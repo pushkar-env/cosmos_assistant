@@ -7,7 +7,7 @@ import { useNotificationStore } from '@/core/stores/useNotificationStore'
 import { sound } from '@/core/sound/SoundEngine'
 import {
   SentenceChunker,
-  extractWakeCommand,
+  resolveHandsFree,
   pauseAfterMs,
   toSpeakable,
   type ChunkBoundary
@@ -38,16 +38,35 @@ const player = new SpeechPlayer()
 /** serial TTS pipeline: sentences in, ordered audio out */
 const synthQueue: { text: string; pauseMs: number }[] = []
 let synthesizing = false
+/**
+ * Bumped by clearSpeech (barge-in / Stop). A synthesis that was already in
+ * flight when speech was cleared must NOT enqueue its audio afterwards — that
+ * would restart the player and flip the assistant back to "speaking" (leaving
+ * the Stop button stuck). Each pump iteration captures the epoch and discards
+ * its result if the epoch moved on.
+ */
+let speechEpoch = 0
 
 let lastSynthErrorAt = 0
+
+/**
+ * After a bare "Cosmos" (we answer "Yes?"), the actual command is often the
+ * NEXT segment because the voice-activity detector cut the pause after the
+ * wake word. During this window we accept that next utterance as the command
+ * without requiring the wake word again. 0 = no window open.
+ */
+let followUpUntil = 0
+const FOLLOW_UP_MS = 12_000
 
 async function pumpSynthQueue(): Promise<void> {
   if (synthesizing) return
   synthesizing = true
   while (synthQueue.length > 0) {
     const { text, pauseMs } = synthQueue.shift()!
+    const epoch = speechEpoch
     try {
       const { data } = await window.cosmos.voice.synthesize(text)
+      if (epoch !== speechEpoch) break // cleared mid-synth → drop the stray audio
       player.enqueue(data, pauseMs)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
@@ -85,6 +104,7 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
   const chunker = new SentenceChunker(speak)
 
   const clearSpeech = (): void => {
+    speechEpoch++ // invalidate any synthesis currently in flight
     chunker.reset()
     synthQueue.length = 0
     player.stop()
@@ -107,15 +127,21 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
         }
         return
       }
-      // hands-free: only utterances addressed to Cosmos are executed
-      const command = extractWakeCommand(text)
-      if (command === null) return
+      // hands-free: an utterance must address Cosmos — EXCEPT within the
+      // follow-up window right after a bare "Cosmos", where the VAD likely
+      // split the command into this next segment.
+      const action = resolveHandsFree(text, followUpUntil > Date.now())
+      if (action.kind === 'ignore') return // not addressed / echo → keep window as-is
+      followUpUntil = 0 // acting on this utterance → close the window
       set({ lastHeard: text, error: null })
       clearSpeech()
-      if (command) {
-        await useAssistantStore.getState().send(command)
+      if (action.kind === 'command') {
+        await useAssistantStore.getState().send(action.text)
       } else {
-        speak('Yes?') // bare "Cosmos" — acknowledge and keep listening
+        // bare "Cosmos": acknowledge, then listen for the command in the next
+        // segment without needing the wake word again
+        speak('Yes?')
+        followUpUntil = Date.now() + FOLLOW_UP_MS
       }
     } catch (err) {
       set({

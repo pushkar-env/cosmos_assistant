@@ -151,13 +151,13 @@ With Claude, GPT, or Gemini selected, COSMOS has **real hands**:
 <td valign="top" width="50%">
 
 **🗂️ Files & System**
-- List / read / write / search / move files
-- Delete to Recycle Bin, zip / unzip
-- Open files & folders in their default app
-- Run PowerShell commands
-- Launch apps, **close them gracefully**, open URLs
-- Volume, power (sleep / restart / shutdown)
-- Clipboard, screenshots, live telemetry
+- List / read / write / search / move / delete files **anywhere**
+- Delete to Recycle Bin, zip / unzip, open in default app
+- **1-click PC cleanup** — clear temp, caches & crash dumps
+- **Empty the Recycle Bin**
+- **Hardware & settings** — Wi-Fi, Bluetooth, volume, brightness
+- Launch apps, **close them gracefully**, open URLs, PowerShell
+- Power (sleep / restart / shutdown), clipboard, screenshots, telemetry
 
 </td>
 <td valign="top" width="50%">

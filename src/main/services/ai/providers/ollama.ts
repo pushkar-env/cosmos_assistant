@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { AIProvider } from '../types'
 import { ndjsonLines } from '../types'
 import type { AgentMessage, ToolCall } from '@shared/tools'
@@ -101,7 +102,10 @@ export const ollamaProvider: AIProvider = {
       for (const tc of chunk.message?.tool_calls ?? []) {
         if (tc.function?.name) {
           calls.push({
-            id: `ollama-${calls.length}-${tc.function.name}`,
+            // globally-unique: an index-based id resets each round, so the same
+            // tool called across rounds would collide and leave the second
+            // tool card stuck "running" in the UI.
+            id: randomUUID(),
             name: tc.function.name,
             args: tc.function.arguments ?? {}
           })

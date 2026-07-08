@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { AIProvider } from '../types'
 import { sseEvents, raiseForStatus } from '../types'
 import type { AgentMessage, ToolCall, ToolDef } from '@shared/tools'
@@ -80,7 +81,9 @@ export const geminiProvider: AIProvider = {
         if (part.text) emit(part.text)
         if (part.functionCall?.name) {
           calls.push({
-            id: `gemini-${calls.length}-${part.functionCall.name}`,
+            // globally-unique so the same tool across rounds never collides
+            // (an index-based id resets per round → stuck "running" cards)
+            id: randomUUID(),
             name: part.functionCall.name,
             args: part.functionCall.args ?? {}
           })

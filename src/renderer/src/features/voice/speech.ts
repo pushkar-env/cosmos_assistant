@@ -90,6 +90,32 @@ export function extractWakeCommand(transcript: string): string | null {
   return transcript.slice(match[0].length).trim()
 }
 
+/** the "Yes?" prompt echoing back into the mic — ignore these as follow-ups */
+const ECHO_RE = /^(yes|yeah|yep|ok|okay)[.!?]?$/i
+
+export type HandsFreeAction =
+  | { kind: 'ignore' }
+  | { kind: 'prompt' } // bare "Cosmos" → answer "Yes?" and open a follow-up window
+  | { kind: 'command'; text: string }
+
+/**
+ * Decide what a hands-free transcript means. `inFollowUp` is true when we just
+ * answered a bare "Cosmos" with "Yes?" — in that window the next utterance is
+ * the command even without the wake word (the VAD usually splits "Cosmos …
+ * command" into two segments). The "Yes?" echo is ignored so it doesn't get
+ * mistaken for the command.
+ */
+export function resolveHandsFree(transcript: string, inFollowUp: boolean): HandsFreeAction {
+  const wake = extractWakeCommand(transcript)
+  if (wake === null) {
+    if (!inFollowUp) return { kind: 'ignore' }
+    const t = transcript.trim()
+    if (!t || ECHO_RE.test(t)) return { kind: 'ignore' } // echo/empty → keep waiting
+    return { kind: 'command', text: t }
+  }
+  return wake ? { kind: 'command', text: wake } : { kind: 'prompt' }
+}
+
 /**
  * Accumulates streaming deltas and emits complete sentences. The first
  * sentence is released early so speech starts fast; later ones batch a

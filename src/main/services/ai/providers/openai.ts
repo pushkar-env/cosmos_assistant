@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { AIProvider } from '../types'
 import { sseEvents, raiseForStatus } from '../types'
 import type { AgentMessage, ToolCall } from '@shared/tools'
@@ -95,14 +96,14 @@ export const openaiProvider: AIProvider = {
 
     const calls: ToolCall[] = [...pending.entries()]
       .sort(([a], [b]) => a - b)
-      .map(([i, e]) => {
+      .map(([, e]) => {
         let args: Record<string, unknown> = {}
         try {
           args = e.json ? (JSON.parse(e.json) as Record<string, unknown>) : {}
         } catch {
           /* malformed args → empty */
         }
-        return { id: e.id || `call-${i}`, name: e.name, args }
+        return { id: e.id || randomUUID(), name: e.name, args }
       })
     return { calls }
   }
