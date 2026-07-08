@@ -10,8 +10,16 @@ function collapse(s: string): string {
   return s.toLowerCase().replace(/[\s\-_.]+/g, '')
 }
 
+/** stable 0-359 hue from an app name, so its monogram colour never changes */
+function hueOf(name: string): number {
+  let h = 0
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360
+  return h
+}
+
 function AppTile({ app }: { app: InstalledApp }): React.JSX.Element {
   const [busy, setBusy] = useState(false)
+  const hue = useMemo(() => hueOf(app.name), [app.name])
 
   const launch = async (): Promise<void> => {
     if (busy) return
@@ -40,10 +48,23 @@ function AppTile({ app }: { app: InstalledApp }): React.JSX.Element {
     >
       <div className="flex h-11 w-11 items-center justify-center">
         {app.icon ? (
-          <img src={app.icon} alt="" draggable={false} className="h-10 w-10 object-contain" />
+          <img
+            src={app.icon}
+            alt=""
+            draggable={false}
+            className="h-10 w-10 object-contain transition-transform duration-200 group-hover:scale-105"
+            style={{ filter: 'drop-shadow(0 2px 6px rgba(0,0,0,0.45))' }}
+          />
         ) : (
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-white/10 bg-white/5 font-display text-base font-bold text-dim group-hover:text-body">
-            {app.name.slice(0, 1).toUpperCase()}
+          <div
+            className="flex h-10 w-10 items-center justify-center rounded-[11px] font-display text-lg font-bold text-white/95 shadow-md transition-transform duration-200 group-hover:scale-105"
+            style={{
+              background: `linear-gradient(140deg, hsl(${hue} 62% 52%), hsl(${(hue + 42) % 360} 58% 38%))`,
+              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.22), 0 2px 6px rgba(0,0,0,0.4)'
+            }}
+          >
+            {app.name.replace(/[^\p{L}\p{N}]/gu, '').slice(0, 1).toUpperCase() ||
+              app.name.slice(0, 1).toUpperCase()}
           </div>
         )}
       </div>

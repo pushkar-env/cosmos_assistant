@@ -53,6 +53,8 @@ let isQuitting = false
 let windowMode: WindowMode = 'full'
 /** bounds of the last full-size window, restored when leaving compact/orb */
 let fullBounds: Electron.Rectangle | null = null
+/** full mode opens maximized by default; remember if the user un-maximized it */
+let fullMaximized = true
 
 const MODE_SIZES = {
   full: { width: 1500, height: 940 },
@@ -104,7 +106,19 @@ function createWindow(): void {
     }
   })
 
-  mainWindow.on('ready-to-show', () => mainWindow?.show())
+  mainWindow.on('ready-to-show', () => {
+    // open full-screen (maximized) by default
+    if (windowMode === 'full') mainWindow?.maximize()
+    mainWindow?.show()
+  })
+
+  // track the user's own maximize/restore while in full mode
+  mainWindow.on('maximize', () => {
+    if (windowMode === 'full') fullMaximized = true
+  })
+  mainWindow.on('unmaximize', () => {
+    if (windowMode === 'full') fullMaximized = false
+  })
 
   // external links open in the OS browser, never inside the shell
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -132,7 +146,9 @@ function setWindowMode(mode: WindowMode): void {
   if (!mainWindow) return
   const wasFull = windowMode === 'full'
   if (wasFull && mode !== 'full' && !mainWindow.isMinimized()) {
-    fullBounds = mainWindow.getBounds()
+    // remember how full mode was left so we can restore it exactly
+    fullMaximized = mainWindow.isMaximized()
+    if (!fullMaximized) fullBounds = mainWindow.getBounds()
   }
   windowMode = mode
   const size = MODE_SIZES[mode]
@@ -141,9 +157,11 @@ function setWindowMode(mode: WindowMode): void {
     mainWindow.setAlwaysOnTop(false)
     mainWindow.setMinimumSize(1100, 700)
     mainWindow.setResizable(true)
-    if (fullBounds) mainWindow.setBounds(fullBounds)
+    if (fullMaximized) mainWindow.maximize()
+    else if (fullBounds) mainWindow.setBounds(fullBounds)
     else mainWindow.setSize(size.width, size.height)
   } else {
+    if (mainWindow.isMaximized()) mainWindow.unmaximize() // shrink cleanly to the widget
     // compact / orb: small, pinned, parked bottom-right of the display
     mainWindow.setResizable(false)
     mainWindow.setMinimumSize(size.width, size.height)

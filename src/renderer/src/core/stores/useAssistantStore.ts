@@ -91,10 +91,11 @@ export const useAssistantStore = create<AssistantStore>((set, get) => ({
     void get().loadSessions()
 
     window.cosmos.tools.onEvent(({ requestId, callId, tool, status, summary, agent }) => {
-      if (requestId !== get().activeRequestId) return
       const messages = [...get().messages]
 
       if (status === 'running') {
+        // only spawn a card for the request currently on screen
+        if (requestId !== get().activeRequestId) return
         // close the current streaming bubble so tool cards keep
         // chronological order, then open a fresh bubble for what follows
         const last = messages[messages.length - 1]
@@ -112,7 +113,10 @@ export const useAssistantStore = create<AssistantStore>((set, get) => ({
         return
       }
 
-      // completion: update the matching card in place
+      // Completion (ok / error / denied): always resolve the matching card by
+      // its unique callId — never gate on activeRequestId. A barge-in or an
+      // early onDone nulls activeRequestId, and if the terminal event lands
+      // after that the card would otherwise stay stuck spinning on "running".
       const idx = messages.findIndex((m) => m.tool?.callId === callId)
       if (idx !== -1) {
         const card = messages[idx]
