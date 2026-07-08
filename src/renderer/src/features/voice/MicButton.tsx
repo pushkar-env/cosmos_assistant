@@ -1,29 +1,34 @@
 import { motion, AnimatePresence } from 'framer-motion'
 import { useVoiceStore } from './useVoiceStore'
+import { useSettingsStore } from '@/core/stores/useSettingsStore'
 
 /**
- * Mic control for the chat composer. Click (or Ctrl+J) for push-to-talk;
- * the ring pulses while listening, spins while transcribing.
+ * Mic control for the chat composer. When hands-free is on, the button
+ * pauses/resumes it; otherwise it's push-to-talk (or Ctrl+J). The ring
+ * pulses while listening, spins while transcribing.
  */
 export function MicButton(): React.JSX.Element {
   const micMode = useVoiceStore((s) => s.micMode)
   const micStatus = useVoiceStore((s) => s.micStatus)
-  const toggle = useVoiceStore((s) => s.togglePushToTalk)
+  const toggle = useVoiceStore((s) => s.toggleMic)
+  const handsFreeEnabled = useSettingsStore((s) => s.settings.voice.handsFree)
 
   const listening = micStatus === 'listening'
   const transcribing = micStatus === 'transcribing'
   const active = micMode !== 'off'
 
+  const title = handsFreeEnabled
+    ? micMode === 'handsfree'
+      ? 'Hands-free active — say "Cosmos…" (click to pause the mic)'
+      : 'Hands-free paused — click to resume listening'
+    : listening
+      ? 'Listening — click when done (Ctrl+J)'
+      : 'Speak to COSMOS (Ctrl+J)'
+
   return (
     <button
       onClick={() => void toggle()}
-      title={
-        micMode === 'handsfree'
-          ? 'Hands-free active — say "Cosmos…"'
-          : listening
-            ? 'Listening — click when done (Ctrl+J)'
-            : 'Speak to COSMOS (Ctrl+J)'
-      }
+      title={title}
       className="relative flex h-[42px] w-[42px] items-center justify-center rounded-lg border transition-colors"
       style={{
         borderColor: active ? 'var(--accent)' : 'rgba(255,255,255,0.1)',

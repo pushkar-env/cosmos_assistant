@@ -126,6 +126,10 @@ model mid-conversation and the chat keeps going — the new model picks up the f
   there's nothing to install: **English** (female / male) and **Hindi** (Priyamvada /
   Pratham). Choose a **language and voice** in *Settings → Voice*, or switch to the
   zero-setup Windows voice or premium **ElevenLabs**.
+- **Fully bilingual (हिन्दी)** — pick a Hindi voice and the *whole* conversation is
+  Hindi: your speech is transcribed in Devanagari, COSMOS replies in natural Hindi, and
+  it's spoken back in a Hindi voice — while every command and tool still works
+  (*"आवाज़ कम करो"*, *"यूट्यूब पर believer चलाओ"*). Works with local **and** cloud models.
 - **Natural pacing** — sentences, line breaks, and questions get human-like pauses
   instead of a robotic monotone, and speech starts while the reply is still streaming.
 - **Push-to-talk** (`Ctrl+J`) or fully **hands-free**: enable it and just say

@@ -92,6 +92,17 @@ export const BUNDLED_VOICES: PiperVoiceDef[] = [
 
 export const DEFAULT_PIPER_VOICE = 'en_US-hfc_female-medium'
 
+/** BCP-47 code Whisper expects for each conversation language. */
+export const VOICE_LANGUAGE_CODES: Record<VoiceLanguageId, string> = {
+  en: 'en',
+  hi: 'hi'
+}
+
+/** The conversation language implied by the selected bundled voice. */
+export function voiceLanguageOf(voiceId: string): VoiceLanguageId {
+  return BUNDLED_VOICES.find((v) => v.id === voiceId)?.language ?? 'en'
+}
+
 export interface VoiceSettings {
   /** speak assistant replies aloud (typed or spoken input) */
   voiceReplies: boolean

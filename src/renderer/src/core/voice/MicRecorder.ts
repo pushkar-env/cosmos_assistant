@@ -1,8 +1,10 @@
 import { voiceSignal } from './voiceSignal'
 
 export interface SegmentHandlers {
-  /** a complete speech segment was captured */
-  onSegment: (blob: Blob) => void
+  /** a complete speech segment was captured. `duringSpeech` is true when the
+   *  assistant was speaking while it was captured — i.e. it's likely the
+   *  assistant's own voice echoing back, not the user. */
+  onSegment: (blob: Blob, duringSpeech: boolean) => void
   onError: (err: Error) => void
 }
 
@@ -35,6 +37,9 @@ const HANDS_FREE: SegmenterOptions = {
   maxSegmentMs: 30_000
 }
 
+/** VAD analysis cadence (ms). A timer, not rAF, so it survives window blur. */
+const TICK_MS = 40
+
 /**
  * Continuous microphone capture with energy-based voice activity
  * detection. The recorder runs uninterrupted, so segments always contain
@@ -48,7 +53,7 @@ export class MicRecorder {
   private analyser: AnalyserNode | null = null
   private recorder: MediaRecorder | null = null
   private chunks: Blob[] = []
-  private raf = 0
+  private timer: ReturnType<typeof setInterval> | null = null
   private running = false
 
   private segmentStartedAt = 0
@@ -56,6 +61,10 @@ export class MicRecorder {
   private lastLoudAt = 0
   private hadSpeech = false
   private lastFrameAt = 0
+  /** did the assistant speak at any point during the current segment? */
+  private heardWhileSpeaking = false
+  /** assistant speaking-state on the previous frame (edge detection) */
+  private lastSpeaking = false
 
   get active(): boolean {
     return this.running
@@ -79,15 +88,26 @@ export class MicRecorder {
     this.analyser = this.ctx.createAnalyser()
     this.analyser.fftSize = 1024
     source.connect(this.analyser)
+    // an AudioContext often starts suspended (auto-start with no user gesture)
+    if (this.ctx.state === 'suspended') await this.ctx.resume().catch(() => {})
 
     this.running = true
+    this.lastFrameAt = 0
     this.beginSegment(handlers)
 
     const timeData = new Float32Array(this.analyser.fftSize)
 
-    const frame = (now: number): void => {
-      if (!this.running || !this.analyser) return
-      const dt = this.lastFrameAt ? now - this.lastFrameAt : 16
+    // NB: a setInterval (not requestAnimationFrame) drives VAD — rAF is paused
+    // when the window is hidden and throttled when it's unfocused, which is
+    // exactly when hands-free must keep listening. We also re-resume the
+    // AudioContext each tick: Chromium suspends it when the window is
+    // backgrounded, which silently freezes the analyser until a manual restart.
+    const tick = (): void => {
+      if (!this.running || !this.analyser || !this.ctx) return
+      if (this.ctx.state === 'suspended') void this.ctx.resume().catch(() => {})
+
+      const now = performance.now()
+      const dt = this.lastFrameAt ? now - this.lastFrameAt : TICK_MS
       this.lastFrameAt = now
 
       this.analyser.getFloatTimeDomainData(timeData)
@@ -95,6 +115,20 @@ export class MicRecorder {
       for (let i = 0; i < timeData.length; i++) sum += timeData[i] * timeData[i]
       const rms = Math.sqrt(sum / timeData.length)
       voiceSignal.level = Math.min(1, rms * 8)
+
+      // Track the assistant's own voice so it's never treated as user input.
+      // While it speaks, flag the segment as echo; the instant it stops, discard
+      // the echo-tainted segment and start clean, so a wake word spoken right
+      // after a reply isn't thrown away together with the echo.
+      const speakingNow = voiceSignal.speaking
+      if (speakingNow) {
+        this.heardWhileSpeaking = true
+      } else if (this.lastSpeaking) {
+        this.lastSpeaking = false
+        this.cutSegment(false, handlers) // discard echo → beginSegment (fresh)
+        return
+      }
+      this.lastSpeaking = speakingNow
 
       const loud = rms > opts.threshold
       if (loud) {
@@ -113,15 +147,17 @@ export class MicRecorder {
       } else if (!this.hadSpeech && segmentAge >= opts.idleRecycleMs) {
         this.cutSegment(false, handlers)
       }
-
-      this.raf = requestAnimationFrame(frame)
     }
-    this.raf = requestAnimationFrame(frame)
+    this.timer = setInterval(tick, TICK_MS)
   }
 
   stop(): void {
     this.running = false
-    cancelAnimationFrame(this.raf)
+    if (this.timer !== null) {
+      clearInterval(this.timer)
+      this.timer = null
+    }
+    this.lastSpeaking = false
     voiceSignal.level = 0
     if (this.recorder && this.recorder.state !== 'inactive') {
       this.recorder.onstop = null
@@ -146,6 +182,7 @@ export class MicRecorder {
     this.chunks = []
     this.hadSpeech = false
     this.speechMs = 0
+    this.heardWhileSpeaking = false
     this.segmentStartedAt = performance.now()
     this.lastLoudAt = performance.now()
 
@@ -163,9 +200,10 @@ export class MicRecorder {
   private cutSegment(emit: boolean, handlers: SegmentHandlers): void {
     const rec = this.recorder
     if (!rec || rec.state === 'inactive') return
+    const duringSpeech = this.heardWhileSpeaking
     rec.onstop = () => {
       if (emit && this.chunks.length > 0) {
-        handlers.onSegment(new Blob(this.chunks, { type: rec.mimeType }))
+        handlers.onSegment(new Blob(this.chunks, { type: rec.mimeType }), duringSpeech)
       }
       // seamlessly roll into the next segment while still running
       if (this.running) this.beginSegment(handlers)

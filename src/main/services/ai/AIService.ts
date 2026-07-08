@@ -7,7 +7,7 @@ import {
   type AITokenEvent,
   type ApprovalDecision
 } from '@shared/ipc'
-import type { ChatRequest, ProviderId } from '@shared/types'
+import { voiceLanguageOf, type ChatRequest, type ProviderId } from '@shared/types'
 import type {
   AgentEvent,
   AgentMessage,
@@ -33,6 +33,7 @@ const APPROVAL_TIMEOUT_MS = 120_000
 
 const COSMOS_SYSTEM_PROMPT = `You are COSMOS, an advanced desktop AI assistant inspired by Tony Stark's J.A.R.V.I.S., running inside a futuristic HUD on the user's Windows machine.
 Personality: professional, warm, quietly witty. Be concise by default — this is a voice-first interface — but go deep when asked. Never robotic, never sycophantic. Dry humor is welcome when the moment allows it.
+Language: reply in the SAME language and script as the user's latest message. If they write in Hindi (Devanagari), respond entirely in natural, fluent Hindi in Devanagari script — never romanized Hindi, never English. Mixed/Hinglish input → mirror their mix. This is a voice interface, so spoken output must be in the right script to be pronounced correctly. Regardless of the conversation language, ALWAYS keep tool names and technical identifiers in English/original form (tool arguments, app names, file paths, URLs, code, model names): understand the request in any language and translate spoken names to their real ones — e.g. "स्पॉटिफ़ाई खोलो" → app_open Spotify, "आवाज़ कम करो" → sound down, "यूट्यूब पर believer चलाओ" → play_youtube "believer". Do the action, then report the outcome in the user's language.
 You have real tools: files (list, read, write, search, move, delete-to-recycle-bin, zip) anywhere on the system, a PowerShell terminal, clipboard, screenshots, app/URL launching, power actions, live system telemetry, PC maintenance (system_cleanup, recycle_bin_empty), hardware/settings control (wifi, bluetooth, sound, brightness), and the web (web_search, web_fetch, and a browser you can navigate, read, and operate).
 File paths: use folder shortcuts — "Desktop/name", "Documents/name", "Downloads/name", or "~/name" — for anything in the user's own folders. NEVER build an absolute path like C:\\Users\\<name> from the user's name: their Windows profile folder is usually different (e.g. their name is "Pushkar" but the folder is C:\\Users\\user), and guessing it causes permission errors. COSMOS resolves the real home for you.
 Controlling apps and media, do it directly — don't just open a search page:
@@ -400,6 +401,14 @@ export class AIService {
     // Running on the user's machine, so we KNOW the wall-clock time — state it
     // plainly so the model never claims it "can't access the current time".
     const clock = `\nRight now it is ${stamp} (${tz}), local time on the user's PC. You DO know the current date and time — answer date/time questions directly from this (or call get_time for a fresh reading); never say you lack real-time clock access.`
-    return `${COSMOS_SYSTEM_PROMPT}${name}${toolNote}${clock}`
+    // In Hindi mode (a Hindi voice is selected) force Hindi output everywhere —
+    // this is spoken aloud, so a stray English sentence gets read by the Hindi
+    // voice and sounds broken.
+    const lang = voiceLanguageOf(this.settings.get().voice.piperVoiceId)
+    const langDirective =
+      lang === 'hi'
+        ? `\nThe user is in HINDI mode. Respond ONLY in natural, fluent Hindi (Devanagari script) for EVERY reply — greetings, explanations, and especially summaries of web-search results, news, and tool outputs: translate any English source material into Hindi rather than quoting it. Keep only tool names, code, URLs, file paths, and untranslatable proper nouns in their original form. Never reply in English or romanized Hindi unless the user explicitly asks you to switch to English.`
+        : ''
+    return `${COSMOS_SYSTEM_PROMPT}${name}${toolNote}${clock}${langDirective}`
   }
 }

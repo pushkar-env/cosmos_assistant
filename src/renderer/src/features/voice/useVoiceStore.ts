@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { voiceLanguageOf } from '@shared/types'
 import { MicRecorder } from '@/core/voice/MicRecorder'
 import { SpeechPlayer } from '@/core/voice/SpeechPlayer'
 import { subscribeAssistantEvents, useAssistantStore } from '@/core/stores/useAssistantStore'
@@ -22,6 +23,9 @@ interface VoiceStore {
   lastHeard: string | null
   error: string | null
   init: () => void
+  /** what the composer mic button does: pause/resume hands-free when it's the
+   *  active mode, otherwise a push-to-talk session */
+  toggleMic: () => Promise<void>
   /** Ctrl+J / mic button: one listening session, auto-stops on silence */
   togglePushToTalk: () => Promise<void>
   /** always-on "Cosmos …" mode */
@@ -110,8 +114,13 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
     player.stop()
   }
 
-  const handleTranscript = async (blob: Blob): Promise<void> => {
+  const handleTranscript = async (blob: Blob, duringSpeech = false): Promise<void> => {
     const mode = get().micMode
+    // Hands-free: drop anything the mic caught while COSMOS was speaking — it's
+    // the assistant's own TTS echoing back (echo cancellation is imperfect for
+    // WebAudio output), which Whisper otherwise mis-hears as "Cosmos" and fires
+    // a spurious "Yes?". (PTT is user-initiated, so it's never dropped.)
+    if (mode === 'handsfree' && duringSpeech) return
     set({ micStatus: mode === 'ptt' ? 'transcribing' : get().micStatus })
     try {
       const { text } = await window.cosmos.voice.transcribe(await blob.arrayBuffer(), blob.type)
@@ -138,9 +147,10 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
       if (action.kind === 'command') {
         await useAssistantStore.getState().send(action.text)
       } else {
-        // bare "Cosmos": acknowledge, then listen for the command in the next
-        // segment without needing the wake word again
-        speak('Yes?')
+        // bare "Cosmos": acknowledge (in the conversation language), then
+        // listen for the command in the next segment without the wake word
+        const hindi = voiceLanguageOf(useSettingsStore.getState().settings.voice.piperVoiceId) === 'hi'
+        speak(hindi ? 'जी?' : 'Yes?')
         followUpUntil = Date.now() + FOLLOW_UP_MS
       }
     } catch (err) {
@@ -156,7 +166,7 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
   }
 
   const handlers = {
-    onSegment: (blob: Blob) => void handleTranscript(blob),
+    onSegment: (blob: Blob, duringSpeech: boolean) => void handleTranscript(blob, duringSpeech),
     onError: (err: Error) => {
       recorder.stop()
       set({ micMode: 'off', micStatus: 'idle', error: err.message })
@@ -201,6 +211,28 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
       if (useSettingsStore.getState().settings.voice.handsFree) {
         void get().setHandsFree(true)
       }
+    },
+
+    toggleMic: async () => {
+      // When hands-free is the user's active mode, the composer mic button is a
+      // pause/resume for it — it must NOT drop into push-to-talk. Only when
+      // hands-free is off does the button act as push-to-talk.
+      const handsFreeEnabled = useSettingsStore.getState().settings.voice.handsFree
+      if (handsFreeEnabled) {
+        if (get().micMode === 'handsfree') {
+          recorder.stop()
+          clearSpeech()
+          set({ micMode: 'off', micStatus: 'idle' })
+          useAssistantStore.getState().setState('idle')
+        } else {
+          // resume hands-free listening (the setting stays on)
+          set({ micMode: 'handsfree', micStatus: 'listening', error: null })
+          await recorder.start(true, handlers)
+          if (!recorder.active) set({ micMode: 'off', micStatus: 'idle' })
+        }
+        return
+      }
+      await get().togglePushToTalk()
     },
 
     togglePushToTalk: async () => {

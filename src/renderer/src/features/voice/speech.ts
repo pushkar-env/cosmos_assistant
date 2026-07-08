@@ -63,6 +63,9 @@ function punctuationPause(text: string): number {
       return 480
     case '!':
       return 410
+    case '।': // Devanagari danda — a full stop in Hindi
+    case '॥':
+      return 360
     case '.':
       return 360
     case ':':
@@ -78,20 +81,32 @@ function punctuationPause(text: string): number {
 
 const LIST_ITEM_RE = /^\s*(?:[-*+•]|\d+[.)])\s/
 
-const WAKE_RE = /^\s*(?:hey|ok|okay|hi|yo)?[,\s]*(cosmos|kosmos|cosmo|cosmas)\b[,!.?\s]*/i
+// Latin forms of the wake word (with a word boundary so "cosmopolitan" is safe).
+const WAKE_RE =
+  /^\s*(?:hey|ok|okay|hi|yo|हे|अरे|ओके)?[,\s]*(?:cosmos|kosmos|cosmo|cosmas)\b[\s,!.?।]*/i
+
+// When transcribing Hindi, Whisper writes the spoken English "Cosmos" in
+// Devanagari and the exact vowel signs vary wildly (कॉसमॉस, कोसमोस, कॉस्मॉस,
+// कॉज़मॉस, कासमास…). Rather than enumerate spellings, match the STABLE consonant
+// skeleton क–[स/श/ष/ज]–म–[स/श/ष/ज] with any combining marks between/after.
+const DVM = '[\\u0900-\\u0903\\u093C\\u093E-\\u094F]' // Devanagari combining marks
+const DEVA_WAKE_RE = new RegExp(
+  // optional short leading interjection (अरे/हे/नमस्ते…) then the क–स–म–स skeleton
+  `^\\s*(?:[\\u0904-\\u097F]{1,6}[\\s,।]+)?क${DVM}*[सशषज]${DVM}*म${DVM}*[सशषज]${DVM}*[\\s,।!.?]*`
+)
 
 /**
  * Hands-free wake check: the utterance must address Cosmos.
  * Returns the command with the wake phrase stripped, or null.
  */
 export function extractWakeCommand(transcript: string): string | null {
-  const match = WAKE_RE.exec(transcript)
+  const match = WAKE_RE.exec(transcript) ?? DEVA_WAKE_RE.exec(transcript)
   if (!match) return null
   return transcript.slice(match[0].length).trim()
 }
 
-/** the "Yes?" prompt echoing back into the mic — ignore these as follow-ups */
-const ECHO_RE = /^(yes|yeah|yep|ok|okay)[.!?]?$/i
+/** the "Yes?"/"जी?" prompt echoing back into the mic — ignore as a follow-up */
+const ECHO_RE = /^(yes|yeah|yep|ok|okay|जी|हाँ|हां|हा)[.!?।]?$/i
 
 export type HandsFreeAction =
   | { kind: 'ignore' }
@@ -179,7 +194,10 @@ export class SentenceChunker {
       return { at: brk.index + 1, boundary: 'line' }
     }
 
-    const re = /[.!?…][)"']?(?:\s|$)/g
+    // sentence enders: Latin .!?… plus the Devanagari danda ।/॥ (Hindi). The
+    // danda may or may not be followed by whitespace, so it also ends a chunk
+    // on its own.
+    const re = /(?:[.!?…][)"']?(?:\s|$)|[।॥]\s*)/g
     let match: RegExpExecArray | null
     while ((match = re.exec(this.buffer)) !== null) {
       const end = match.index + match[0].length
