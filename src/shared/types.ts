@@ -98,6 +98,25 @@ export const VOICE_LANGUAGE_CODES: Record<VoiceLanguageId, string> = {
   hi: 'hi'
 }
 
+/** ElevenLabs TTS models offered in Settings (all multilingual — Hindi + English). */
+export const ELEVEN_MODELS: { id: string; label: string }[] = [
+  { id: 'eleven_multilingual_v2', label: 'Multilingual v2 — best quality (Hindi + English)' },
+  { id: 'eleven_turbo_v2_5', label: 'Turbo v2.5 — fast, multilingual (½ credits)' },
+  { id: 'eleven_flash_v2_5', label: 'Flash v2.5 — fastest, low latency (½ credits)' }
+]
+
+export const DEFAULT_ELEVEN_MODEL = 'eleven_turbo_v2_5'
+
+/** A voice fetched from the user's ElevenLabs account. */
+export interface ElevenVoice {
+  id: string
+  name: string
+  /** e.g. 'american', 'british', 'indian' when the account tags it */
+  accent?: string
+  /** ISO language when tagged (multilingual voices handle any language) */
+  language?: string
+}
+
 /** The conversation language implied by the selected bundled voice. */
 export function voiceLanguageOf(voiceId: string): VoiceLanguageId {
   return BUNDLED_VOICES.find((v) => v.id === voiceId)?.language ?? 'en'
@@ -108,9 +127,17 @@ export interface VoiceSettings {
   voiceReplies: boolean
   /** always-on mic: VAD segments speech, only "Cosmos …" utterances execute */
   handsFree: boolean
+  /**
+   * Unified conversation language — drives speech-to-text transcription, the
+   * reply language, and the wake-word acknowledgement. Independent of the TTS
+   * engine (ElevenLabs multilingual voices speak both en + hi).
+   */
+  language: VoiceLanguageId
   ttsProvider: TtsProviderId
   elevenLabsKey: string
   elevenLabsVoiceId: string
+  /** ElevenLabs model id (see ELEVEN_MODELS) */
+  elevenLabsModel: string
   /** selected bundled voice id (resolved from resources at runtime) */
   piperVoiceId: string
   /** OPTIONAL override: absolute path to a custom piper.exe (advanced) */
@@ -122,9 +149,11 @@ export interface VoiceSettings {
 export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   voiceReplies: true,
   handsFree: false,
+  language: 'en',
   ttsProvider: 'windows',
   elevenLabsKey: '',
   elevenLabsVoiceId: '21m00Tcm4TlvDq8ikWAM',
+  elevenLabsModel: DEFAULT_ELEVEN_MODEL,
   piperVoiceId: DEFAULT_PIPER_VOICE,
   piperPath: '',
   piperModelPath: ''

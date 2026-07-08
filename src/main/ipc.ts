@@ -148,6 +148,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, services: Ser
 
   ipcMain.handle(IPC.VOICE_LIST_AVAILABLE, () => services.tts.availableVoiceIds())
 
+  ipcMain.handle(IPC.ELEVEN_LIST_VOICES, () => services.tts.listElevenLabsVoices())
+
   ipcMain.handle(IPC.WINDOW_CONTROL, (_e, action: WindowControlAction) => {
     const win = getWindow()
     if (!win) return

@@ -1,4 +1,4 @@
-import { VOICE_LANGUAGE_CODES, voiceLanguageOf, type TranscriptionResult } from '@shared/types'
+import { VOICE_LANGUAGE_CODES, type TranscriptionResult } from '@shared/types'
 import type { SettingsService } from '../SettingsService'
 
 /**
@@ -20,7 +20,7 @@ export class SttService {
     // comes back as Devanagari (not romanized/translated into English). Uses
     // the /transcriptions endpoint (same-language) — NOT /translations, which
     // always forces English.
-    const lang = VOICE_LANGUAGE_CODES[voiceLanguageOf(settings.voice.piperVoiceId)]
+    const lang = VOICE_LANGUAGE_CODES[settings.voice.language]
 
     const form = new FormData()
     const ext = mime.includes('webm') ? 'webm' : mime.includes('ogg') ? 'ogg' : 'wav'

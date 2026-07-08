@@ -1,5 +1,4 @@
 import { create } from 'zustand'
-import { voiceLanguageOf } from '@shared/types'
 import { MicRecorder } from '@/core/voice/MicRecorder'
 import { SpeechPlayer } from '@/core/voice/SpeechPlayer'
 import { subscribeAssistantEvents, useAssistantStore } from '@/core/stores/useAssistantStore'
@@ -156,7 +155,7 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
       } else {
         // bare "Cosmos": acknowledge (in the conversation language), then
         // listen for the command in the next segment without the wake word
-        const hindi = voiceLanguageOf(useSettingsStore.getState().settings.voice.piperVoiceId) === 'hi'
+        const hindi = useSettingsStore.getState().settings.voice.language === 'hi'
         speak(hindi ? 'जी?' : 'Yes?')
         followUpUntil = Date.now() + FOLLOW_UP_MS
       }

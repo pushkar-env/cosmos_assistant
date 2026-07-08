@@ -7,7 +7,7 @@ import {
   type AITokenEvent,
   type ApprovalDecision
 } from '@shared/ipc'
-import { voiceLanguageOf, type ChatRequest, type ProviderId } from '@shared/types'
+import type { ChatRequest, ProviderId } from '@shared/types'
 import type {
   AgentEvent,
   AgentMessage,
@@ -404,7 +404,7 @@ export class AIService {
     // In Hindi mode (a Hindi voice is selected) force Hindi output everywhere —
     // this is spoken aloud, so a stray English sentence gets read by the Hindi
     // voice and sounds broken.
-    const lang = voiceLanguageOf(this.settings.get().voice.piperVoiceId)
+    const lang = this.settings.get().voice.language
     const langDirective =
       lang === 'hi'
         ? `\nThe user is in HINDI mode. Respond ONLY in natural, fluent Hindi (Devanagari script) for EVERY reply — greetings, explanations, and especially summaries of web-search results, news, and tool outputs: translate any English source material into Hindi rather than quoting it. Keep only tool names, code, URLs, file paths, and untranslatable proper nouns in their original form. Never reply in English or romanized Hindi unless the user explicitly asks you to switch to English.`

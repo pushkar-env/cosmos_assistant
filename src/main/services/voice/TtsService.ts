@@ -3,7 +3,14 @@ import { execFile, spawn } from 'child_process'
 import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'fs'
 import { dirname, join } from 'path'
 import { randomUUID } from 'crypto'
-import { BUNDLED_VOICES, DEFAULT_PIPER_VOICE, type SynthesisResult, type VoiceSettings } from '@shared/types'
+import {
+  BUNDLED_VOICES,
+  DEFAULT_ELEVEN_MODEL,
+  DEFAULT_PIPER_VOICE,
+  type ElevenVoice,
+  type SynthesisResult,
+  type VoiceSettings
+} from '@shared/types'
 import type { SettingsService } from '../SettingsService'
 
 /** where a user-installed or bundled Piper typically lives */
@@ -31,7 +38,7 @@ export class TtsService {
     const voice = this.settings.get().voice
     switch (voice.ttsProvider) {
       case 'elevenlabs':
-        return this.elevenLabs(clean, voice.elevenLabsKey, voice.elevenLabsVoiceId)
+        return this.elevenLabs(clean, voice.elevenLabsKey, voice.elevenLabsVoiceId, voice.elevenLabsModel)
       case 'piper': {
         const resolved = this.resolvePiper(voice)
         return this.piper(clean, resolved.piperPath, resolved.piperModelPath)
@@ -42,8 +49,14 @@ export class TtsService {
     }
   }
 
-  private async elevenLabs(text: string, key: string, voiceId: string): Promise<SynthesisResult> {
+  private async elevenLabs(
+    text: string,
+    key: string,
+    voiceId: string,
+    model: string
+  ): Promise<SynthesisResult> {
     if (!key) throw new Error('ElevenLabs API key is not set (Settings → Voice)')
+    if (!voiceId) throw new Error('No ElevenLabs voice selected (Settings → Voice)')
     const res = await fetch(
       `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}?output_format=mp3_44100_128`,
       {
@@ -51,7 +64,7 @@ export class TtsService {
         headers: { 'xi-api-key': key, 'content-type': 'application/json' },
         body: JSON.stringify({
           text,
-          model_id: 'eleven_turbo_v2_5',
+          model_id: model || DEFAULT_ELEVEN_MODEL,
           voice_settings: { stability: 0.5, similarity_boost: 0.75 }
         }),
         signal: AbortSignal.timeout(30_000)
@@ -62,6 +75,30 @@ export class TtsService {
       throw new Error(`ElevenLabs error ${res.status}: ${detail || res.statusText}`)
     }
     return { data: await res.arrayBuffer(), mime: 'audio/mpeg' }
+  }
+
+  /** List the voices on the user's ElevenLabs account for the Settings picker. */
+  async listElevenLabsVoices(): Promise<ElevenVoice[]> {
+    const key = this.settings.get().voice.elevenLabsKey
+    if (!key) return []
+    try {
+      const res = await fetch('https://api.elevenlabs.io/v1/voices', {
+        headers: { 'xi-api-key': key },
+        signal: AbortSignal.timeout(15_000)
+      })
+      if (!res.ok) return []
+      const data = (await res.json()) as {
+        voices?: { voice_id: string; name: string; labels?: Record<string, string> }[]
+      }
+      return (data.voices ?? []).map((v) => ({
+        id: v.voice_id,
+        name: v.name,
+        accent: v.labels?.accent,
+        language: v.labels?.language
+      }))
+    } catch {
+      return [] // network/key issue — dropdown falls back to a manual id field
+    }
   }
 
   private piper(text: string, exePath: string, modelPath: string): Promise<SynthesisResult> {

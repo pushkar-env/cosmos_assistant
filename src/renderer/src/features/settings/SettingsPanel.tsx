@@ -3,8 +3,10 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   BUNDLED_VOICES,
   DEFAULT_MODELS,
+  ELEVEN_MODELS,
   PROVIDER_MODELS,
   VOICE_LANGUAGES,
+  type ElevenVoice,
   type ProviderId,
   type ThemeId,
   type TtsProviderId,
@@ -22,6 +24,8 @@ interface SettingRow {
   id: string
   label: string
   keywords: string
+  /** hide the row when false (engine-specific rows) */
+  when?: boolean
   render: () => React.JSX.Element
 }
 
@@ -31,12 +35,26 @@ export function SettingsPanel(): React.JSX.Element {
   const { settings, update } = useSettingsStore()
   const [search, setSearch] = useState('')
   const [availableVoiceIds, setAvailableVoiceIds] = useState<string[]>([])
+  const [elevenVoices, setElevenVoices] = useState<ElevenVoice[]>([])
   const [ollamaModels, setOllamaModels] = useState<string[]>([])
   const [customModel, setCustomModel] = useState(false)
 
   useEffect(() => {
     void window.cosmos.voice.listAvailableVoices().then(setAvailableVoiceIds)
   }, [])
+
+  // fetch the ElevenLabs account voices when the panel is open on that engine
+  // (and whenever the key changes), so the voice picker lists real voices
+  const elevenKey = settings.voice.elevenLabsKey
+  const settingsOpenForEleven =
+    activePanel === 'settings' && settings.voice.ttsProvider === 'elevenlabs'
+  useEffect(() => {
+    if (settingsOpenForEleven && elevenKey) {
+      void window.cosmos.voice
+        .listElevenLabsVoices()
+        .then((v) => setElevenVoices((prev) => (v.length ? v : prev)))
+    }
+  }, [settingsOpenForEleven, elevenKey])
 
   // auto-detect installed Ollama models — refetched every time the panel
   // opens (and on provider change) so newly-pulled models show up, and a
@@ -69,17 +87,35 @@ export function SettingsPanel(): React.JSX.Element {
     availableVoiceIds.length > 0
       ? BUNDLED_VOICES.filter((v) => availableVoiceIds.includes(v.id))
       : BUNDLED_VOICES
-  const currentVoice = voices.find((v) => v.id === settings.voice.piperVoiceId) ?? voices[0]
-  const currentLang: VoiceLanguageId = currentVoice?.language ?? 'en'
+  const lang = settings.voice.language
+  // the Piper voice shown always matches the chosen language
+  const currentVoice =
+    voices.find((v) => v.id === settings.voice.piperVoiceId && v.language === lang) ??
+    voices.find((v) => v.language === lang) ??
+    voices[0]
 
   // selecting a voice also clears any legacy custom path so the id wins
   const selectVoice = (id: string): void =>
     void update({ voice: { ...settings.voice, piperVoiceId: id, piperPath: '', piperModelPath: '' } })
 
-  const selectLanguage = (lang: VoiceLanguageId): void => {
-    const first = voices.find((v) => v.language === lang)
-    if (first) selectVoice(first.id)
+  // unified language: sets STT + reply language, and keeps the Piper voice in-language
+  const selectLanguage = (next: VoiceLanguageId): void => {
+    const piperVoice = voices.find((v) => v.language === next)?.id ?? settings.voice.piperVoiceId
+    void update({
+      voice: {
+        ...settings.voice,
+        language: next,
+        piperVoiceId: piperVoice,
+        piperPath: '',
+        piperModelPath: ''
+      }
+    })
   }
+
+  const setElevenVoiceId = (id: string): void =>
+    void update({ voice: { ...settings.voice, elevenLabsVoiceId: id } })
+  const setElevenModel = (m: string): void =>
+    void update({ voice: { ...settings.voice, elevenLabsModel: m } })
 
   const rows = useMemo((): SettingRow[] => {
     const textInput = (
@@ -325,6 +361,24 @@ export function SettingsPanel(): React.JSX.Element {
           toggle(settings.voice.handsFree, (v) => void useVoiceStore.getState().setHandsFree(v))
       },
       {
+        id: 'voice-language',
+        label: 'Conversation Language',
+        keywords: 'voice language english hindi हिंदी conversation speech stt reply unified',
+        render: () => (
+          <select
+            value={lang}
+            onChange={(e) => selectLanguage(e.target.value as VoiceLanguageId)}
+            className="w-64 rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-ui text-sm text-body focus:border-[var(--accent)] focus:outline-none"
+          >
+            {VOICE_LANGUAGES.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.label}
+              </option>
+            ))}
+          </select>
+        )
+      },
+      {
         id: 'tts-provider',
         label: 'Voice Engine',
         keywords: 'voice tts engine elevenlabs piper windows sapi speech synthesis',
@@ -339,8 +393,8 @@ export function SettingsPanel(): React.JSX.Element {
             className="w-64 rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-ui text-sm text-body focus:border-[var(--accent)] focus:outline-none"
           >
             <option value="windows">Windows — built-in (offline)</option>
-            <option value="elevenlabs">ElevenLabs — premium (API key)</option>
-            <option value="piper">Piper — neural (offline, needs install)</option>
+            <option value="elevenlabs">ElevenLabs — premium multilingual (API key)</option>
+            <option value="piper">Piper — neural (offline, bundled)</option>
           </select>
         )
       },
@@ -348,38 +402,61 @@ export function SettingsPanel(): React.JSX.Element {
         id: 'elevenlabs-key',
         label: 'ElevenLabs API Key',
         keywords: 'elevenlabs api key voice tts secret',
+        when: settings.voice.ttsProvider === 'elevenlabs',
         render: () =>
           textInput(
             settings.voice.elevenLabsKey,
             (v) => void update({ voice: { ...settings.voice, elevenLabsKey: v } }),
-            'xi-…',
+            'xi-… or sk-…',
             true
           )
       },
       {
         id: 'elevenlabs-voice',
-        label: 'ElevenLabs Voice ID',
-        keywords: 'elevenlabs voice id tts',
+        label: 'ElevenLabs Voice',
+        keywords: 'elevenlabs voice id tts janet multilingual dropdown account',
+        when: settings.voice.ttsProvider === 'elevenlabs',
+        // a dropdown of the account's voices when we could fetch them; a plain
+        // id field otherwise (no/invalid key, offline) so it's never a dead end
         render: () =>
-          textInput(
-            settings.voice.elevenLabsVoiceId,
-            (v) => void update({ voice: { ...settings.voice, elevenLabsVoiceId: v } }),
-            'voice id'
+          elevenVoices.length > 0 ? (
+            <select
+              value={
+                elevenVoices.some((v) => v.id === settings.voice.elevenLabsVoiceId)
+                  ? settings.voice.elevenLabsVoiceId
+                  : ''
+              }
+              onChange={(e) => setElevenVoiceId(e.target.value)}
+              className="w-64 rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-ui text-sm text-body focus:border-[var(--accent)] focus:outline-none"
+            >
+              {!elevenVoices.some((v) => v.id === settings.voice.elevenLabsVoiceId) && (
+                <option value="">Select a voice…</option>
+              )}
+              {elevenVoices.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.name}
+                  {v.accent ? ` · ${v.accent}` : ''}
+                </option>
+              ))}
+            </select>
+          ) : (
+            textInput(settings.voice.elevenLabsVoiceId, setElevenVoiceId, 'voice id (add key to list)')
           )
       },
       {
-        id: 'piper-language',
-        label: 'Voice Language',
-        keywords: 'piper voice language english hindi offline tts neural bundled',
+        id: 'elevenlabs-model',
+        label: 'ElevenLabs Model',
+        keywords: 'elevenlabs model turbo flash multilingual v2 quality latency credits',
+        when: settings.voice.ttsProvider === 'elevenlabs',
         render: () => (
           <select
-            value={currentLang}
-            onChange={(e) => selectLanguage(e.target.value as VoiceLanguageId)}
+            value={settings.voice.elevenLabsModel}
+            onChange={(e) => setElevenModel(e.target.value)}
             className="w-64 rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-ui text-sm text-body focus:border-[var(--accent)] focus:outline-none"
           >
-            {VOICE_LANGUAGES.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.label}
+            {ELEVEN_MODELS.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label}
               </option>
             ))}
           </select>
@@ -389,6 +466,7 @@ export function SettingsPanel(): React.JSX.Element {
         id: 'piper-voice',
         label: 'Piper Voice',
         keywords: 'piper voice select male female hindi english neural offline bundled hfc pratham priyamvada',
+        when: settings.voice.ttsProvider === 'piper',
         render: () => (
           <select
             value={currentVoice?.id ?? ''}
@@ -396,7 +474,7 @@ export function SettingsPanel(): React.JSX.Element {
             className="w-64 rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-ui text-sm text-body focus:border-[var(--accent)] focus:outline-none"
           >
             {voices
-              .filter((v) => v.language === currentLang)
+              .filter((v) => v.language === lang)
               .map((v) => (
                 <option key={v.id} value={v.id}>
                   {v.label}
@@ -406,15 +484,16 @@ export function SettingsPanel(): React.JSX.Element {
         )
       }
     ]
-    // ollamaModels + customModel drive the Model row; without them the memo
-    // keeps a stale closure and the dropdown never updates
+    // ollamaModels + customModel + elevenVoices drive their dropdowns; without
+    // them the memo keeps a stale closure and the dropdown never updates
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings, update, availableVoiceIds, ollamaModels, customModel])
+  }, [settings, update, availableVoiceIds, elevenVoices, ollamaModels, customModel])
 
   const filtered = rows.filter(
     (r) =>
-      !search.trim() ||
-      `${r.label} ${r.keywords}`.toLowerCase().includes(search.trim().toLowerCase())
+      r.when !== false &&
+      (!search.trim() ||
+        `${r.label} ${r.keywords}`.toLowerCase().includes(search.trim().toLowerCase()))
   )
 
   return (

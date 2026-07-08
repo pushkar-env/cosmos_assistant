@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import { join, dirname } from 'path'
-import { BUNDLED_VOICES, DEFAULT_SETTINGS, type Settings } from '@shared/types'
+import { BUNDLED_VOICES, DEFAULT_SETTINGS, voiceLanguageOf, type Settings } from '@shared/types'
 import { decryptOrNull, encryptText, isEncrypted } from './secureText'
 
 type SecretKey = 'anthropic' | 'openai' | 'gemini' | 'elevenLabsKey'
@@ -177,6 +177,11 @@ export class SettingsService {
         merged.voice.piperPath = ''
         merged.voice.piperModelPath = ''
       }
+    }
+    // migrate: seed the new unified conversation language from the previously
+    // selected voice (a Hindi Piper voice → 'hi') so existing users keep it
+    if (raw.voice?.language === undefined) {
+      merged.voice.language = voiceLanguageOf(merged.voice.piperVoiceId)
     }
     this.resolveSecret(merged, 'anthropic', merged.apiKeys.anthropic)
     this.resolveSecret(merged, 'openai', merged.apiKeys.openai)

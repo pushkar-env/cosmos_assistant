@@ -4,7 +4,6 @@ import gsap from 'gsap'
 import { sound } from '@/core/sound/SoundEngine'
 import { useUIStore } from '@/core/stores/useUIStore'
 import { useSettingsStore } from '@/core/stores/useSettingsStore'
-import { voiceLanguageOf } from '@shared/types'
 import { useVoiceStore } from '@/features/voice/useVoiceStore'
 import { BootParticles } from './BootParticles'
 
@@ -15,7 +14,7 @@ function speakWelcome(): void {
   const hour = new Date().getHours()
   const name = settings.userName ? ` ${settings.userName}` : ''
 
-  if (voiceLanguageOf(settings.voice.piperVoiceId) === 'hi') {
+  if (settings.voice.language === 'hi') {
     const part =
       hour < 5 ? 'शुभ रात्रि' : hour < 12 ? 'सुप्रभात' : hour < 18 ? 'नमस्कार' : 'शुभ संध्या'
     useVoiceStore

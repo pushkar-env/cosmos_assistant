@@ -14,6 +14,7 @@ import type {
   ChatRequest,
   CommandResult,
   ConversationMeta,
+  ElevenVoice,
   InstalledApp,
   MemoryCategory,
   MemoryItem,
@@ -100,7 +101,9 @@ export const cosmosApi = {
       ipcRenderer.invoke(IPC.STT_TRANSCRIBE, audio, mime),
     synthesize: (text: string): Promise<SynthesisResult> =>
       ipcRenderer.invoke(IPC.TTS_SYNTHESIZE, text),
-    listAvailableVoices: (): Promise<string[]> => ipcRenderer.invoke(IPC.VOICE_LIST_AVAILABLE)
+    listAvailableVoices: (): Promise<string[]> => ipcRenderer.invoke(IPC.VOICE_LIST_AVAILABLE),
+    listElevenLabsVoices: (): Promise<ElevenVoice[]> =>
+      ipcRenderer.invoke(IPC.ELEVEN_LIST_VOICES)
   },
   notes: {
     list: (): Promise<NoteMeta[]> => ipcRenderer.invoke(IPC.NOTES_LIST),
