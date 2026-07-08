@@ -116,16 +116,17 @@ export class MicRecorder {
       const rms = Math.sqrt(sum / timeData.length)
       voiceSignal.level = Math.min(1, rms * 8)
 
-      // Track the assistant's own voice so it's never treated as user input.
-      // While it speaks, flag the segment as echo; the instant it stops, discard
-      // the echo-tainted segment and start clean, so a wake word spoken right
-      // after a reply isn't thrown away together with the echo.
+      // Flag segments that overlap the assistant's own playback (the store's
+      // echo filter decides whether they're echo or the user talking over it).
+      // The instant playback ends, cut the current segment: if it heard speech,
+      // hand it over — the user may have started their command during the tail —
+      // otherwise discard silently and start clean.
       const speakingNow = voiceSignal.speaking
       if (speakingNow) {
         this.heardWhileSpeaking = true
       } else if (this.lastSpeaking) {
         this.lastSpeaking = false
-        this.cutSegment(false, handlers) // discard echo → beginSegment (fresh)
+        this.cutSegment(this.hadSpeech, handlers) // → beginSegment (fresh)
         return
       }
       this.lastSpeaking = speakingNow

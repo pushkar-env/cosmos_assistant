@@ -91,8 +91,10 @@ const WAKE_RE =
 // skeleton क–[स/श/ष/ज]–म–[स/श/ष/ज] with any combining marks between/after.
 const DVM = '[\\u0900-\\u0903\\u093C\\u093E-\\u094F]' // Devanagari combining marks
 const DEVA_WAKE_RE = new RegExp(
-  // optional short leading interjection (अरे/हे/नमस्ते…) then the क–स–म–स skeleton
-  `^\\s*(?:[\\u0904-\\u097F]{1,6}[\\s,।]+)?क${DVM}*[सशषज]${DVM}*म${DVM}*[सशषज]${DVM}*[\\s,।!.?]*`
+  // up to two short leading interjections (अरे/हाँ/ओके/नमस्ते…) then the
+  // क–स–म–स consonant skeleton (क or ग — Whisper wobbles on the hard C).
+  // The prefix class spans the whole block incl. combining marks (हाँ has ँ).
+  `^\\s*(?:[\\u0900-\\u097F]{1,8}[\\s,।]+){0,2}[कग]${DVM}*[सशषज]${DVM}*म${DVM}*[सशषज]${DVM}*[\\s,।!.?]*`
 )
 
 /**
@@ -107,6 +109,54 @@ export function extractWakeCommand(transcript: string): string | null {
 
 /** the "Yes?"/"जी?" prompt echoing back into the mic — ignore as a follow-up */
 const ECHO_RE = /^(yes|yeah|yep|ok|okay|जी|हाँ|हां|हा)[.!?।]?$/i
+
+const ECHO_WINDOW_MS = 30_000
+
+function tokenize(s: string): string[] {
+  return s
+    .toLowerCase()
+    .replace(/[।॥.!?,;:"'“”‘’()\-–—]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+}
+
+/**
+ * Content-based echo detection. The mic inevitably picks up the assistant's
+ * own TTS (AEC is imperfect for WebAudio output), but we KNOW what it said —
+ * so instead of blindly dropping every segment that overlaps playback (which
+ * also swallowed the user's real speech and made hands-free feel deaf at the
+ * wrong moment), we transcribe and drop only transcripts whose words mostly
+ * match recently spoken text. Genuine user speech over playback passes
+ * through — enabling wake-word barge-in.
+ */
+export class EchoTracker {
+  private entries: { tokens: string[]; at: number }[] = []
+
+  /** record text the assistant is about to speak */
+  note(text: string): void {
+    const tokens = tokenize(text)
+    const cutoff = Date.now() - ECHO_WINDOW_MS
+    this.entries = this.entries.filter((e) => e.at >= cutoff)
+    if (tokens.length) this.entries.push({ tokens, at: Date.now() })
+  }
+
+  /** does this transcript look like our own speech leaking back in? */
+  isEcho(transcript: string): boolean {
+    const tokens = tokenize(transcript)
+    if (tokens.length === 0) return true // captured noise → nothing to act on
+    const cutoff = Date.now() - ECHO_WINDOW_MS
+    const spoken = new Set<string>()
+    for (const e of this.entries) {
+      if (e.at >= cutoff) for (const t of e.tokens) spoken.add(t)
+    }
+    if (spoken.size === 0) return false
+    let hits = 0
+    for (const t of tokens) if (spoken.has(t)) hits++
+    // 1-2 words must ALL be recently-spoken to count as echo; longer
+    // transcripts count as echo when they're mostly our own words
+    return tokens.length <= 2 ? hits === tokens.length : hits / tokens.length >= 0.6
+  }
+}
 
 export type HandsFreeAction =
   | { kind: 'ignore' }

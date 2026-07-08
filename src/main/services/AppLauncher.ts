@@ -476,16 +476,27 @@ $out | ConvertTo-Json -Compress`
    */
   async close(query: string, force = false): Promise<{ ok: boolean; message: string }> {
     if (!query.trim()) return { ok: false, message: 'No application specified' }
-    // collapse spaces/hyphens/dots on BOTH sides so "Anti-Gravity",
-    // "anti gravity" and "antigravity" all match a process "Antigravity"
-    const q = collapse(query).replace(/'/g, "''")
-    if (!q) return { ok: false, message: 'No application specified' }
+    // Match candidates: the collapsed query PLUS its alias expansion, so an
+    // abbreviation the model passes ("VS Code" → "vscode") still finds the real
+    // process/window ("Code" / "Visual Studio Code" → "visualstudiocode"). Uses
+    // the same ALIASES table as launch, so open and close understand one name.
+    // collapse() strips spaces/hyphens/dots so "Anti-Gravity" == "antigravity".
+    const ql = query.trim().toLowerCase()
+    const cands = new Set<string>()
+    const addCand = (s: string): void => {
+      const c = collapse(s)
+      if (c) cands.add(c.replace(/'/g, "''"))
+    }
+    addCand(query)
+    if (ALIASES[ql]) addCand(ALIASES[ql])
+    if (cands.size === 0) return { ok: false, message: 'No application specified' }
+    const qsLiteral = [...cands].map((c) => `'${c}'`).join(',')
 
     const script = [
-      `$q='${q}'`,
+      `$qs=@(${qsLiteral})`,
       `$force=$${force ? 'true' : 'false'}`,
       `function norm($s){ if($null -eq $s){return ''}; ($s -replace '[\\s\\-_.]','').ToLower() }`,
-      `function match { Get-Process | Where-Object { $_.SessionId -ne 0 -and ((norm $_.ProcessName).Contains($q) -or ($_.MainWindowTitle -and (norm $_.MainWindowTitle).Contains($q))) } }`,
+      `function match { Get-Process | Where-Object { $ok=$false; if($_.SessionId -ne 0){ $pn=norm $_.ProcessName; $wt=norm $_.MainWindowTitle; foreach($q in $qs){ if($pn.Contains($q) -or ($wt -and $wt.Contains($q))){ $ok=$true; break } } }; $ok } }`,
       `$procs = match`,
       `$names = $procs | Select-Object -ExpandProperty ProcessName -Unique`,
       `if (-not $names) { Write-Output 'NONE'; exit }`,

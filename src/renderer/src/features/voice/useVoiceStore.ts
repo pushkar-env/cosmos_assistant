@@ -7,6 +7,7 @@ import { useSettingsStore } from '@/core/stores/useSettingsStore'
 import { useNotificationStore } from '@/core/stores/useNotificationStore'
 import { sound } from '@/core/sound/SoundEngine'
 import {
+  EchoTracker,
   SentenceChunker,
   resolveHandsFree,
   pauseAfterMs,
@@ -93,9 +94,13 @@ async function pumpSynthQueue(): Promise<void> {
   synthesizing = false
 }
 
+/** everything COSMOS says, so mic pickups of its own voice can be recognized */
+const echoTracker = new EchoTracker()
+
 function speak(text: string, boundary: ChunkBoundary = 'sentence'): void {
   const speakable = toSpeakable(text)
   if (!speakable) return
+  echoTracker.note(speakable)
   // pacing is judged on the raw text — markdown structure (headings,
   // paragraph breaks) carries pause cues that toSpeakable strips
   synthQueue.push({ text: speakable, pauseMs: pauseAfterMs(text, boundary) })
@@ -116,14 +121,16 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
 
   const handleTranscript = async (blob: Blob, duringSpeech = false): Promise<void> => {
     const mode = get().micMode
-    // Hands-free: drop anything the mic caught while COSMOS was speaking — it's
-    // the assistant's own TTS echoing back (echo cancellation is imperfect for
-    // WebAudio output), which Whisper otherwise mis-hears as "Cosmos" and fires
-    // a spurious "Yes?". (PTT is user-initiated, so it's never dropped.)
-    if (mode === 'handsfree' && duringSpeech) return
     set({ micStatus: mode === 'ptt' ? 'transcribing' : get().micStatus })
     try {
       const { text } = await window.cosmos.voice.transcribe(await blob.arrayBuffer(), blob.type)
+      // Hands-free: a segment that overlapped COSMOS's own speech may just be
+      // its TTS echoing back — but it may equally be the USER talking over it
+      // (e.g. answering right after "जी?" before playback fully ends). Dropping
+      // all of these made hands-free feel randomly deaf, so instead compare the
+      // transcript against what was actually spoken and drop only real echoes.
+      // Genuine speech passes through → wake-word barge-in works.
+      if (mode === 'handsfree' && duringSpeech && echoTracker.isEcho(text)) return
       if (mode === 'ptt') {
         recorder.stop()
         set({ micMode: 'off', micStatus: 'idle' })
