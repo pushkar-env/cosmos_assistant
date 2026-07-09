@@ -1,4 +1,4 @@
-import { VOICE_LANGUAGE_CODES, type TranscriptionResult } from '@shared/types'
+import type { TranscriptionResult } from '@shared/types'
 import type { SettingsService } from '../SettingsService'
 
 /**
@@ -16,19 +16,24 @@ export class SttService {
       throw new Error('Voice input needs an OpenAI API key (Settings → OpenAI API Key)')
     }
 
-    // Transcribe in the user's chosen conversation language so Hindi speech
-    // comes back as Devanagari (not romanized/translated into English). Uses
-    // the /transcriptions endpoint (same-language) — NOT /translations, which
-    // always forces English.
-    const lang = VOICE_LANGUAGE_CODES[settings.voice.language]
+    // The conversation language is authoritative. For an ENGLISH conversation
+    // use Whisper's /translations endpoint: ANY spoken language (incl. Hindi)
+    // comes back as English. For a HINDI conversation, transcribe with the hi
+    // hint (Hindi speech → Devanagari); a spoken-English utterance stays English
+    // here and is translated into Hindi downstream (in the assistant store).
+    const target = settings.voice.language
+    const endpoint =
+      target === 'en'
+        ? 'https://api.openai.com/v1/audio/translations'
+        : 'https://api.openai.com/v1/audio/transcriptions'
 
     const form = new FormData()
     const ext = mime.includes('webm') ? 'webm' : mime.includes('ogg') ? 'ogg' : 'wav'
     form.append('file', new Blob([audio], { type: mime }), `speech.${ext}`)
     form.append('model', 'whisper-1')
-    form.append('language', lang)
+    if (target !== 'en') form.append('language', 'hi')
 
-    const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+    const res = await fetch(endpoint, {
       method: 'POST',
       headers: { authorization: `Bearer ${key}` },
       body: form,

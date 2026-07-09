@@ -7,7 +7,13 @@ import {
   type AITokenEvent,
   type ApprovalDecision
 } from '@shared/ipc'
-import type { ChatRequest, ProviderId } from '@shared/types'
+import type {
+  AssistantMode,
+  ChatRequest,
+  NotificationPayload,
+  ProviderId,
+  VoiceLanguageId
+} from '@shared/types'
 import type {
   AgentEvent,
   AgentMessage,
@@ -145,20 +151,21 @@ export class AIService {
     }
 
     const messages: AgentMessage[] = [...req.messages]
-    // Reply language follows the USER'S MESSAGE — if it's in Devanagari it's a
-    // Hindi turn (regardless of the voice-language setting, which may say 'en'
-    // while the user typed Hindi). The setting also forces Hindi mode (e.g. for
-    // spoken Hindi that STT already produced as Devanagari).
-    const hindiMode =
-      /[ऀ-ॿ]/.test(lastUser?.content ?? '') || s.voice.language === 'hi'
-    const system = this.buildSystemPrompt(s.userName, provider.supportsTools, hindiMode) + recalled
+    // Reply language = the language of the user's LATEST message: Devanagari →
+    // Hindi, otherwise English. PURELY message-based so an English query always
+    // gets an English reply (even mid-conversation after Hindi turns, and
+    // regardless of the voice-language setting), and a Hindi query gets Hindi.
+    const hindiMode = /[ऀ-ॿ]/.test(lastUser?.content ?? '')
+    const mode: AssistantMode = req.mode ?? 'chat'
+    const system =
+      this.buildSystemPrompt(s.userName, provider.supportsTools, hindiMode, mode) + recalled
     const toolDefs = provider.supportsTools ? this.tools.defs() : undefined
-    // Small local models drift back to English when a tool returns English
-    // text (the tool output is the most-recent context). In Hindi mode we
-    // re-assert the reply language right after tool results so it stays Hindi.
-    const hindiReminder = hindiMode
-      ? '\n\n[Language: reply to the user ENTIRELY in Hindi (Devanagari). Any English in this tool output must be translated into Hindi — do NOT answer in English, and do NOT invent facts if the tool failed.]'
-      : ''
+    // Small local models drift to the other language when a tool returns text
+    // in it, or when the conversation history is in it. Re-assert the reply
+    // language right after tool results (recency) so it stays consistent.
+    const langReminder = hindiMode
+      ? '\n\n[Language: reply to the user ENTIRELY in Hindi (Devanagari). Translate any English in this tool output into Hindi — do NOT answer in English, and do NOT invent facts if the tool failed.]'
+      : '\n\n[Language: reply to the user in ENGLISH. Do NOT switch to Hindi/Devanagari, and do NOT invent facts if the tool failed.]'
 
     let fullText = ''
     const emit = (delta: string): void => {
@@ -171,6 +178,7 @@ export class AIService {
       }
     }
 
+    let researchUsed = false
     try {
       for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
         const textBefore = fullText
@@ -181,6 +189,7 @@ export class AIService {
           controller.signal
         )
         if (calls.length === 0) break
+        if (calls.some((c) => c.name === 'research')) researchUsed = true
 
         messages.push({
           role: 'assistant-tools',
@@ -188,12 +197,17 @@ export class AIService {
           calls
         })
         const results = await this.executeCalls(calls, execCtx)
-        if (hindiReminder && results.length > 0) {
-          results[results.length - 1].result += hindiReminder
+        if (results.length > 0) {
+          results[results.length - 1].result += langReminder
         }
         messages.push({ role: 'tool-results', results })
       }
       this.memory.append('assistant', fullText)
+      // Research mode (and Ultra when it decided to research) → persist the
+      // detailed answer to Notes so the user keeps it.
+      if (fullText.trim() && (mode === 'research' || (mode === 'ultra' && researchUsed))) {
+        this.saveResearchNote(win, lastUser?.content ?? '', fullText)
+      }
       this.finish(win, req.requestId)
     } catch (err) {
       if (controller.signal.aborted) {
@@ -212,6 +226,41 @@ export class AIService {
 
   abort(requestId: string): void {
     this.inflight.get(requestId)?.abort()
+  }
+
+  /**
+   * Translate text into the conversation language (used when the user's query
+   * is in a different language than their setting). Uses the current provider/
+   * model with no tools. Returns the original text on any failure.
+   */
+  async translate(text: string, target: VoiceLanguageId): Promise<string> {
+    const clean = text.trim()
+    if (!clean) return clean
+    const s = this.settings.get()
+    const provider = this.providers[s.provider]
+    const langName = target === 'hi' ? 'Hindi (Devanagari script)' : 'English'
+    const system =
+      `You are a translation engine. Translate the user's message into ${langName}. ` +
+      `Output ONLY the translated text — no quotes, no commentary, no notes. Preserve the ` +
+      `meaning, tone, intent and any instruction. Keep proper nouns, code, URLs, file paths ` +
+      `and numbers intact. If it is already in ${langName}, return it unchanged.`
+    let out = ''
+    try {
+      await provider.streamChat(
+        { model: s.model, system, messages: [{ role: 'user', content: clean }], tools: undefined },
+        this.providerCtx(s.provider),
+        (d) => {
+          out += d
+        },
+        new AbortController().signal
+      )
+    } catch (err) {
+      console.error('[ai] translate failed:', err)
+      return clean
+    }
+    const ci = out.lastIndexOf('</think>') // strip reasoning models' scratchpad
+    if (ci >= 0) out = out.slice(ci + 8)
+    return out.trim() || clean
   }
 
   resolveApproval(approvalId: string, decision: ApprovalDecision): void {
@@ -397,7 +446,47 @@ export class AIService {
     }
   }
 
-  private buildSystemPrompt(userName: string, hasTools: boolean, hindiMode: boolean): string {
+  private modeDirective(mode: AssistantMode): string {
+    switch (mode) {
+      case 'agent':
+        return `\nMODE: AGENT. Treat the request as a task to accomplish, not just a question. Think in steps, use your tools proactively, and delegate focused sub-tasks to specialist agents (the delegate tool) when it helps. Carry the task through to completion, then briefly report what you did and the result.`
+      case 'research':
+        return `\nMODE: RESEARCH. The user wants a thorough, well-sourced answer. ALWAYS call the research tool first (recency:true for current/news topics). Then write a COMPREHENSIVE, well-structured report: begin with a title as a markdown H1 heading (e.g. "# <topic>"), then organized sections with headings, key findings, specifics (names, numbers, dates), and cite the sources you used. Be detailed and substantive — several paragraphs. (Your report is saved to the user's Notes automatically.)`
+      case 'ultra':
+        return `\nMODE: ULTRA — you choose the approach. Silently decide which fits the request: (a) CHAT — a quick conversational answer; (b) AGENT — a multi-step task, so plan and use tools/delegate; or (c) RESEARCH — a question needing depth or current info, so call the research tool and write a detailed, well-structured report (start with a "# title" heading; it gets saved to Notes). Pick the lightest approach that fully satisfies the request, and act — don't announce which mode you picked.`
+      case 'chat':
+      default:
+        return `\nMODE: CHAT. Be conversational and direct. Answer succinctly and naturally. Still look up current facts with your tools when the question needs them, but don't over-plan, delegate, or pad the reply.`
+    }
+  }
+
+  private saveResearchNote(win: BrowserWindow, query: string, content: string): void {
+    try {
+      // title: the report's first markdown heading, else the user's question
+      const heading = /^\s*#{1,3}\s+(.+?)\s*$/m.exec(content)?.[1]
+      const title = (heading || query || 'Research')
+        .replace(/[*_`#]/g, '')
+        .trim()
+        .slice(0, 80)
+      this.memory.saveNote(null, title, content)
+      if (!win.isDestroyed()) {
+        win.webContents.send(IPC.NOTIFY, {
+          title: 'Saved to Notes',
+          body: title,
+          kind: 'success'
+        } satisfies NotificationPayload)
+      }
+    } catch (err) {
+      console.error('[ai] failed to save research note:', err)
+    }
+  }
+
+  private buildSystemPrompt(
+    userName: string,
+    hasTools: boolean,
+    hindiMode: boolean,
+    mode: AssistantMode
+  ): string {
     const name = userName ? `\nThe user's name is ${userName}.` : ''
     const toolNote = hasTools
       ? ''
@@ -421,7 +510,7 @@ export class AIService {
     // voice and sounds broken.
     const langDirective = hindiMode
       ? `\nThis is a HINDI conversation. Respond ONLY in natural, fluent Hindi (Devanagari script) for EVERY reply — greetings, explanations, and especially summaries of web-search results, news, and tool outputs: translate any English source material into Hindi rather than quoting it. Keep only tool names, code, URLs, file paths, and untranslatable proper nouns in their original form. Never reply in English or romanized Hindi unless the user explicitly asks you to switch to English.`
-      : ''
-    return `${COSMOS_SYSTEM_PROMPT}${name}${toolNote}${clock}${langDirective}`
+      : `\nThe user's latest message is in English, so reply in English. Do NOT reply in Hindi or Devanagari script — even if earlier messages in this conversation, tool outputs, or recalled memories are in Hindi. Always match the language of the user's latest message.`
+    return `${COSMOS_SYSTEM_PROMPT}${name}${toolNote}${clock}${langDirective}${this.modeDirective(mode)}`
   }
 }

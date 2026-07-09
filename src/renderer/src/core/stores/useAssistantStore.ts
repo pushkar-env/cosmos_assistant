@@ -193,15 +193,12 @@ export const useAssistantStore = create<AssistantStore>((set, get) => ({
     get().interrupt()
 
     const { settings } = useSettingsStore.getState()
+    const target = settings.voice.language // the conversation language (en | hi)
     const requestId = nextId()
-    const userMsg: UIMessage = { id: nextId(), role: 'user', content: trimmed }
+    const userMsgId = nextId()
+    // show the message immediately (original text) so the UI is responsive
+    const userMsg: UIMessage = { id: userMsgId, role: 'user', content: trimmed }
     const assistantMsg: UIMessage = { id: nextId(), role: 'assistant', content: '' }
-
-    const history: ChatMessage[] = [...get().messages, userMsg]
-      .filter((m) => !m.error && !m.tool && m.content !== '')
-      .map(({ role, content }) => ({ role, content }))
-      .slice(-CONTEXT_WINDOW)
-
     set({
       messages: [...get().messages, userMsg, assistantMsg],
       state: 'thinking',
@@ -209,11 +206,40 @@ export const useAssistantStore = create<AssistantStore>((set, get) => ({
     })
     sound.play('activate')
 
+    // The conversation language is authoritative: if the query is in another
+    // language, translate it into `target` — the chat then shows the translated
+    // query and the assistant answers in that language (text + voice).
+    let content = trimmed
+    const queryLang = /[ऀ-ॿ]/.test(trimmed) ? 'hi' : 'en'
+    if (queryLang !== target) {
+      try {
+        const t = (await window.cosmos.ai.translate(trimmed, target)).trim()
+        if (t) {
+          content = t
+          set({
+            messages: get().messages.map((m) => (m.id === userMsgId ? { ...m, content } : m))
+          })
+        }
+      } catch {
+        /* translation unavailable — send the original */
+      }
+      // a barge-in may have superseded this request while we were translating
+      if (get().activeRequestId !== requestId) return
+    }
+
+    // build history from the (translated) messages, dropping the empty
+    // assistant placeholder we just added
+    const history: ChatMessage[] = get()
+      .messages.filter((m) => !m.error && !m.tool && m.content !== '')
+      .map(({ role, content }) => ({ role, content }))
+      .slice(-CONTEXT_WINDOW)
+
     await window.cosmos.ai.chat({
       requestId,
       provider: settings.provider,
       model: settings.model,
-      messages: history
+      messages: history,
+      mode: settings.assistantMode
     })
   },
 

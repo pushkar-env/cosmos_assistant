@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { DEFAULT_MODELS, type ProviderId } from '@shared/types'
+import { ASSISTANT_MODES, DEFAULT_MODELS, type ProviderId } from '@shared/types'
 import { useAssistantStore } from '@/core/stores/useAssistantStore'
 import { useSettingsStore } from '@/core/stores/useSettingsStore'
 import { useVoiceStore } from '@/features/voice/useVoiceStore'
@@ -207,6 +207,23 @@ export function ChatPanel(): React.JSX.Element {
 
         {/* composer */}
         <div className="border-t border-white/5 p-3">
+          {/* mode selector: Chat / Agent / Research / Ultra */}
+          <div className="mb-2 flex items-center gap-1">
+            {ASSISTANT_MODES.map((m) => (
+              <button
+                key={m.id}
+                onClick={() => void update({ assistantMode: m.id })}
+                title={m.hint}
+                className={`flex-1 rounded-md px-1.5 py-1 font-ui text-[10px] font-bold uppercase tracking-wider transition-colors ${
+                  settings.assistantMode === m.id
+                    ? 'border border-[var(--accent-dim)] bg-white/5 text-[var(--accent-bright)]'
+                    : 'border border-transparent text-dim hover:bg-white/5 hover:text-body'
+                }`}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
           {(voiceError || micMode === 'handsfree') && (
             <p
               className={`mb-2 px-1 font-mono text-[10px] uppercase tracking-widest ${

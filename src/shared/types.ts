@@ -20,12 +20,29 @@ export interface ConversationMeta {
   messageCount: number
 }
 
+/**
+ * How the assistant approaches a turn:
+ *  - chat     — conversational, direct answers (still looks up current facts)
+ *  - agent    — task execution: plans, uses tools, delegates to sub-agents
+ *  - research — always researches, writes a detailed report, saves it to Notes
+ *  - ultra    — auto-decides between chat / agent / research per query
+ */
+export type AssistantMode = 'chat' | 'agent' | 'research' | 'ultra'
+
+export const ASSISTANT_MODES: { id: AssistantMode; label: string; hint: string }[] = [
+  { id: 'chat', label: 'Chat', hint: 'Conversational, quick answers' },
+  { id: 'agent', label: 'Agent', hint: 'Plans & executes multi-step tasks with tools' },
+  { id: 'research', label: 'Research', hint: 'Deep research → detailed report, saved to Notes' },
+  { id: 'ultra', label: 'Ultra', hint: 'Auto-picks chat, agent, or research per query' }
+]
+
 export interface ChatRequest {
   requestId: string
   provider: ProviderId
   model: string
   messages: ChatMessage[]
   system?: string
+  mode?: AssistantMode
 }
 
 export interface GpuInfo {
@@ -185,6 +202,8 @@ export interface Settings {
   location: { lat: number | null; lon: number | null; label: string }
   voice: VoiceSettings
   mediaPlayer: MediaPlayerMode
+  /** how the assistant approaches each turn (chat/agent/research/ultra) */
+  assistantMode: AssistantMode
   /** tools granted permanent approval ("Always allow") */
   alwaysAllowTools: string[]
 }
@@ -279,6 +298,7 @@ export const DEFAULT_SETTINGS: Settings = {
   location: { lat: null, lon: null, label: '' },
   voice: DEFAULT_VOICE_SETTINGS,
   mediaPlayer: 'dedicated',
+  assistantMode: 'chat',
   alwaysAllowTools: []
 }
 

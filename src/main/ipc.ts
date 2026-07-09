@@ -10,7 +10,8 @@ import type {
   InstalledApp,
   MemoryCategory,
   Settings,
-  SystemCommandId
+  SystemCommandId,
+  VoiceLanguageId
 } from '@shared/types'
 import type { AIService } from './services/ai/AIService'
 import type { SettingsService } from './services/SettingsService'
@@ -54,6 +55,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null, services: Ser
   ipcMain.handle(IPC.AI_ABORT, (_e, requestId: string) => {
     services.ai.abort(requestId)
   })
+
+  ipcMain.handle(IPC.AI_TRANSLATE, (_e, text: string, target: VoiceLanguageId) =>
+    services.ai.translate(text, target)
+  )
 
   ipcMain.handle(IPC.OLLAMA_LIST_MODELS, async () => {
     const base = (services.settings.get().ollamaUrl || 'http://localhost:11434').replace(/\/$/, '')

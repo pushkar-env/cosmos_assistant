@@ -27,6 +27,7 @@ import type {
   SystemCommandId,
   SystemStats,
   TranscriptionResult,
+  VoiceLanguageId,
   WeatherInfo
 } from '@shared/types'
 import type { AgentEvent, ToolApprovalRequest, ToolEvent } from '@shared/tools'
@@ -51,6 +52,8 @@ export const cosmosApi = {
   ai: {
     chat: (req: ChatRequest): Promise<string> => ipcRenderer.invoke(IPC.AI_CHAT, req),
     abort: (requestId: string): Promise<void> => ipcRenderer.invoke(IPC.AI_ABORT, requestId),
+    translate: (text: string, target: VoiceLanguageId): Promise<string> =>
+      ipcRenderer.invoke(IPC.AI_TRANSLATE, text, target),
     listOllamaModels: (): Promise<string[]> => ipcRenderer.invoke(IPC.OLLAMA_LIST_MODELS),
     onToken: (cb: (e: AITokenEvent) => void): Unsubscribe => subscribe(IPC.AI_TOKEN, cb),
     onDone: (cb: (e: AIDoneEvent) => void): Unsubscribe => subscribe(IPC.AI_DONE, cb),
