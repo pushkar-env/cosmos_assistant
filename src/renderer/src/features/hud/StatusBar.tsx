@@ -57,6 +57,13 @@ export function StatusBar(): React.JSX.Element {
           ✎
         </button>
         <button
+          onClick={() => setPanel('studio')}
+          className="rounded-md px-2.5 py-1 font-mono text-xs text-dim transition-colors hover:bg-white/5 hover:text-body"
+          title="Studio — code editor & terminal"
+        >
+          ⌨
+        </button>
+        <button
           onClick={() => toggleCenter()}
           className="relative rounded-md px-2.5 py-1 font-mono text-xs text-dim transition-colors hover:bg-white/5 hover:text-body"
           title="Notifications"

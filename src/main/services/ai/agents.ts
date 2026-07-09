@@ -8,8 +8,9 @@ export interface AgentDef {
   tools: string[]
 }
 
-const FS_READ = ['fs_list', 'fs_read', 'fs_search']
-const FS_WRITE = ['fs_write', 'fs_mkdir', 'fs_move', 'fs_delete', 'fs_zip', 'fs_unzip']
+const FS_READ = ['fs_list', 'fs_read', 'fs_search', 'project_tree', 'read_file']
+const FS_WRITE = ['fs_write', 'fs_edit', 'fs_mkdir', 'fs_move', 'fs_delete', 'fs_zip', 'fs_unzip']
+const CODE = ['project_tree', 'read_file', 'fs_write', 'fs_edit', 'run_command']
 const VISION = ['vision_screen', 'vision_image', 'ocr_screen', 'ocr_image']
 const NOTES = ['note_write', 'note_list', 'note_read']
 const UNITY = ['unity_status', 'unity_console', 'unity_scene', 'unity_refresh', 'unity_play', 'unity_stop']
@@ -43,20 +44,20 @@ export const AGENTS: Record<AgentRole, AgentDef> = {
   },
   coder: {
     role: 'coder',
-    description: 'writes and modifies code, runs commands and tests',
-    prompt: `You are the Coder, a specialist agent inside COSMOS. Implement the requested change: read the relevant files first, match the project's existing style, make the edits, and verify (build/tests/run) with the terminal when possible. Output: what you changed (files + why) and the verification result. ${SHARED_RULES}`,
-    tools: [...FS_READ, ...FS_WRITE, ...UNITY, ...NOTES, 'terminal_run', 'clipboard_read', 'clipboard_write']
+    description: 'writes and modifies code, runs commands and tests in the workspace',
+    prompt: `You are the Coder, a senior software engineer inside COSMOS. Build or change software to production quality. WORKFLOW: (1) orient — call project_tree, then read_file the files you'll touch; never edit code you haven't read; (2) implement — fs_write for new files, fs_edit for surgical changes to existing ones, matching the project's existing style, imports and conventions; scaffold/install with run_command; (3) verify — actually run it with run_command (build, tests, or launch) and read the output; if it fails, fix the real cause and re-run until it works. Bare relative paths land in the project workspace. Output: what you changed (files + why) and the concrete verification result. ${SHARED_RULES}`,
+    tools: [...FS_READ, ...FS_WRITE, ...UNITY, ...NOTES, 'run_command', 'terminal_run', 'clipboard_read', 'clipboard_write']
   },
   debugger: {
     role: 'debugger',
     description: 'reproduces, diagnoses and fixes failures',
-    prompt: `You are the Debugger, a specialist agent inside COSMOS. Reproduce the problem first (terminal), read the failing code, form a hypothesis, fix the root cause — not the symptom — and re-run to confirm. Output: root cause, the fix, and proof it works. ${SHARED_RULES}`,
-    tools: [...FS_READ, ...UNITY, ...VISION, 'fs_write', 'terminal_run']
+    prompt: `You are the Debugger, a specialist agent inside COSMOS. Reproduce the problem first with run_command, read the failing code (project_tree + read_file), form a hypothesis, fix the root cause — not the symptom — with fs_edit, and re-run to confirm. Output: root cause, the fix, and proof it works. ${SHARED_RULES}`,
+    tools: [...FS_READ, ...CODE, ...UNITY, ...VISION, 'terminal_run']
   },
   reviewer: {
     role: 'reviewer',
     description: 'reviews code or plans read-only, reports issues by severity',
-    prompt: `You are the Reviewer, a specialist agent inside COSMOS. Read the specified code carefully and report real defects: correctness first, then security, then maintainability. Cite file and line. No praise, no nitpicks presented as blockers. Output: findings ordered by severity, each with a suggested fix. ${SHARED_RULES}`,
+    prompt: `You are the Reviewer, a specialist agent inside COSMOS. Read the specified code carefully (project_tree + read_file) and report real defects: correctness first, then security, then maintainability. Cite file and line. No praise, no nitpicks presented as blockers. Output: findings ordered by severity, each with a suggested fix. ${SHARED_RULES}`,
     tools: FS_READ
   }
 }

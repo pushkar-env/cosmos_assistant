@@ -15,6 +15,7 @@ import type {
   CommandResult,
   ConversationMeta,
   ElevenVoice,
+  FileNode,
   InstalledApp,
   MemoryCategory,
   MemoryItem,
@@ -26,6 +27,7 @@ import type {
   SynthesisResult,
   SystemCommandId,
   SystemStats,
+  TerminalChunk,
   TranscriptionResult,
   VoiceLanguageId,
   WeatherInfo
@@ -123,6 +125,32 @@ export const cosmosApi = {
       ipcRenderer.invoke(IPC.APPS_LIST, refresh),
     launch: (app: InstalledApp): Promise<CommandResult> =>
       ipcRenderer.invoke(IPC.APPS_LAUNCH, app)
+  },
+  workspace: {
+    getRoot: (): Promise<string> => ipcRenderer.invoke(IPC.WORKSPACE_GET),
+    pick: (): Promise<string> => ipcRenderer.invoke(IPC.WORKSPACE_PICK),
+    setRoot: (dir: string): Promise<string> => ipcRenderer.invoke(IPC.WORKSPACE_SET, dir),
+    onFilesChanged: (cb: () => void): Unsubscribe => subscribe(IPC.FILES_CHANGED, cb)
+  },
+  files: {
+    tree: (): Promise<{ root: string; nodes: FileNode[] }> => ipcRenderer.invoke(IPC.FILES_TREE),
+    list: (relPath: string): Promise<FileNode[]> => ipcRenderer.invoke(IPC.FILES_LIST, relPath),
+    read: (relPath: string): Promise<{ content: string; truncated: boolean }> =>
+      ipcRenderer.invoke(IPC.FILES_READ, relPath),
+    write: (relPath: string, content: string): Promise<void> =>
+      ipcRenderer.invoke(IPC.FILES_WRITE, relPath, content),
+    create: (relPath: string, kind: 'file' | 'dir'): Promise<string> =>
+      ipcRenderer.invoke(IPC.FILES_CREATE, relPath, kind),
+    rename: (relPath: string, name: string): Promise<string> =>
+      ipcRenderer.invoke(IPC.FILES_RENAME, relPath, name),
+    delete: (relPath: string): Promise<void> => ipcRenderer.invoke(IPC.FILES_DELETE, relPath),
+    reveal: (relPath?: string): Promise<void> => ipcRenderer.invoke(IPC.FILES_REVEAL, relPath)
+  },
+  terminal: {
+    start: (): Promise<string> => ipcRenderer.invoke(IPC.TERM_START),
+    input: (command: string): Promise<void> => ipcRenderer.invoke(IPC.TERM_INPUT, command),
+    reset: (): Promise<string> => ipcRenderer.invoke(IPC.TERM_RESET),
+    onData: (cb: (chunk: TerminalChunk) => void): Unsubscribe => subscribe(IPC.TERM_DATA, cb)
   },
   app: {
     onPaletteToggle: (cb: () => void): Unsubscribe => subscribe(IPC.PALETTE_TOGGLE, cb),

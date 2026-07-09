@@ -31,6 +31,7 @@ import { UnityService } from './services/unity/UnityService'
 import { UnrealService } from './services/UnrealService'
 import { PluginService } from './services/PluginService'
 import { MediaService } from './services/MediaService'
+import { WorkspaceService } from './services/WorkspaceService'
 
 // Pin a stable identity BEFORE any service reads app.getPath('userData').
 // This guarantees `npm run dev` and the installed .exe share one profile
@@ -70,6 +71,7 @@ const embeddings = new EmbeddingService(settings)
 const memory = new MemoryService(embeddings)
 const browser = new BrowserService()
 const media = new MediaService(browser, settings)
+const workspace = new WorkspaceService(settings)
 const tools = new ToolRegistry({
   stats,
   commands,
@@ -79,9 +81,10 @@ const tools = new ToolRegistry({
   ocr: new OcrService(),
   unity: new UnityService(),
   unreal: new UnrealService(),
-  media
+  media,
+  workspace
 })
-const ai = new AIService(settings, tools, memory)
+const ai = new AIService(settings, tools, memory, workspace)
 const stt = new SttService(settings)
 const tts = new TtsService(settings)
 const plugins = new PluginService()
@@ -327,6 +330,7 @@ if (!gotLock) {
       tts,
       memory,
       plugins,
+      workspace,
       window: {
         setMode: setWindowMode,
         show: showMainWindow,
@@ -366,6 +370,7 @@ if (!gotLock) {
   app.on('before-quit', () => {
     isQuitting = true
     stats.stop()
+    workspace.dispose() // kills the persistent terminal + file watcher
     void browser.close() // also closes the media tab
   })
 

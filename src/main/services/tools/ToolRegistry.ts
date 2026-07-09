@@ -7,6 +7,7 @@ import { systemControlTools } from './systemControlTools'
 import { memoryTools } from './memoryTools'
 import { browserTools } from './browserTools'
 import { creatorTools } from './creatorTools'
+import { codingTools } from './codingTools'
 import type { SystemStatsService } from '../SystemStatsService'
 import type { CommandService } from '../CommandService'
 import type { MemoryService } from '../MemoryService'
@@ -16,6 +17,7 @@ import type { OcrService } from '../OcrService'
 import type { UnityService } from '../unity/UnityService'
 import type { UnrealService } from '../UnrealService'
 import type { MediaService } from '../MediaService'
+import type { WorkspaceService } from '../WorkspaceService'
 
 export interface RegistryDeps {
   stats: SystemStatsService
@@ -27,6 +29,7 @@ export interface RegistryDeps {
   unity: UnityService
   unreal: UnrealService
   media: MediaService
+  workspace: WorkspaceService
 }
 
 /** runtime context a tool may need (delegate spawns sub-agents with it) */
@@ -38,6 +41,8 @@ export interface ToolExecContext {
   model: string
   /** 0 = orchestrator; sub-agents run at depth 1 and cannot delegate */
   depth: number
+  /** the active project root — bare-relative file paths resolve against it */
+  workspaceRoot?: string
 }
 
 export interface ToolSpec {
@@ -61,7 +66,8 @@ export class ToolRegistry {
       ...systemControlTools(),
       ...memoryTools(deps.memory),
       ...browserTools(deps.browser),
-      ...creatorTools(deps)
+      ...creatorTools(deps),
+      ...codingTools(deps.workspace)
     ]) {
       this.specs.set(spec.def.name, spec)
     }

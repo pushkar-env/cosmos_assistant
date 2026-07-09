@@ -38,6 +38,7 @@ export function SettingsPanel(): React.JSX.Element {
   const [elevenVoices, setElevenVoices] = useState<ElevenVoice[]>([])
   const [ollamaModels, setOllamaModels] = useState<string[]>([])
   const [customModel, setCustomModel] = useState(false)
+  const [workspaceRoot, setWorkspaceRoot] = useState('')
 
   useEffect(() => {
     void window.cosmos.voice.listAvailableVoices().then(setAvailableVoiceIds)
@@ -73,6 +74,18 @@ export function SettingsPanel(): React.JSX.Element {
   useEffect(() => {
     setCustomModel(false)
   }, [settings.provider])
+
+  // resolve the effective workspace folder (default is filled in by main)
+  useEffect(() => {
+    if (settingsOpen) void window.cosmos.workspace.getRoot().then(setWorkspaceRoot)
+  }, [settingsOpen, settings.workspaceRoot])
+
+  const changeWorkspace = (): void => {
+    void window.cosmos.workspace.pick().then((root) => {
+      setWorkspaceRoot(root)
+      void update({ workspaceRoot: root })
+    })
+  }
 
   const setModel = (model: string): void =>
     void update({
@@ -217,6 +230,33 @@ export function SettingsPanel(): React.JSX.Element {
             </select>
           )
         }
+      },
+      {
+        id: 'workspace',
+        label: 'Agent Workspace',
+        keywords: 'workspace project folder studio agent code files directory build',
+        render: () => (
+          <div className="flex items-center gap-2">
+            <span
+              className="w-64 truncate rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-mono text-xs text-body"
+              title={workspaceRoot}
+            >
+              {workspaceRoot || 'Documents\\COSMOS Projects'}
+            </span>
+            <button
+              onClick={changeWorkspace}
+              className="shrink-0 rounded-lg border border-white/10 px-3 py-2 font-ui text-[10px] font-bold uppercase tracking-widest text-dim transition-colors hover:border-[var(--accent-dim)] hover:text-body"
+            >
+              Change
+            </button>
+            <button
+              onClick={() => setPanel('studio')}
+              className="shrink-0 rounded-lg border border-[var(--accent-dim)] px-3 py-2 font-ui text-[10px] font-bold uppercase tracking-widest text-[var(--accent-bright)] transition-colors hover:bg-white/5"
+            >
+              Open Studio
+            </button>
+          </div>
+        )
       },
       {
         id: 'key-anthropic',
@@ -487,7 +527,7 @@ export function SettingsPanel(): React.JSX.Element {
     // ollamaModels + customModel + elevenVoices drive their dropdowns; without
     // them the memo keeps a stale closure and the dropdown never updates
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings, update, availableVoiceIds, elevenVoices, ollamaModels, customModel])
+  }, [settings, update, availableVoiceIds, elevenVoices, ollamaModels, customModel, workspaceRoot])
 
   const filtered = rows.filter(
     (r) =>

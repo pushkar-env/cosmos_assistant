@@ -12,12 +12,31 @@ export const IPC = {
   PALETTE_TOGGLE: 'app:palette-toggle',
   /** window came back from minimize/hidden → renderer re-arms the mic */
   WINDOW_SHOWN: 'app:window-shown',
+  /** workspace files changed on disk (watcher) → renderer refreshes the tree */
+  FILES_CHANGED: 'files:changed',
+  /** a streamed chunk from the integrated terminal */
+  TERM_DATA: 'term:data',
 
   // renderer -> main (invoke)
   AI_CHAT: 'ai:chat',
   AI_ABORT: 'ai:abort',
   AI_TRANSLATE: 'ai:translate',
   OLLAMA_LIST_MODELS: 'ai:ollama-list-models',
+  // ── workspace / studio ──
+  WORKSPACE_GET: 'workspace:get',
+  WORKSPACE_PICK: 'workspace:pick',
+  WORKSPACE_SET: 'workspace:set',
+  FILES_TREE: 'files:tree',
+  FILES_LIST: 'files:list',
+  FILES_READ: 'files:read',
+  FILES_WRITE: 'files:write',
+  FILES_CREATE: 'files:create',
+  FILES_RENAME: 'files:rename',
+  FILES_DELETE: 'files:delete',
+  FILES_REVEAL: 'files:reveal',
+  TERM_START: 'term:start',
+  TERM_INPUT: 'term:input',
+  TERM_RESET: 'term:reset',
   SETTINGS_GET: 'settings:get',
   SETTINGS_SET: 'settings:set',
   WEATHER_GET: 'weather:get',

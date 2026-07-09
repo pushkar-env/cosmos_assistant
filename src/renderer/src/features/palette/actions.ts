@@ -187,9 +187,17 @@ export function buildActions(): Action[] {
       id: 'open-workspace',
       title: 'Open Workspace',
       subtitle: 'Notes shared with the agents',
-      keywords: ['workspace', 'notes', 'note', 'editor', 'markdown', 'write'],
+      keywords: ['workspace', 'notes', 'note', 'markdown', 'write'],
       section: 'settings',
       run: () => useUIStore.getState().setPanel('workspace')
+    },
+    {
+      id: 'open-studio',
+      title: 'Open Studio',
+      subtitle: 'Code editor, file tree & integrated terminal',
+      keywords: ['studio', 'code', 'editor', 'ide', 'terminal', 'shell', 'files', 'project', 'develop', 'programming'],
+      section: 'settings',
+      run: () => useUIStore.getState().setPanel('studio')
     },
     {
       id: 'compact-mode',

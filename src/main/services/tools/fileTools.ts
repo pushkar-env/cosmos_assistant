@@ -57,8 +57,8 @@ export const fileTools: ToolSpec[] = [
       sensitive: false
     },
     summary: (a) => String(a.path ?? ''),
-    run: async (a) => {
-      const dir = resolveUserPath(String(a.path))
+    run: async (a, ctx) => {
+      const dir = resolveUserPath(String(a.path), ctx.workspaceRoot)
       const entries = await fs.readdir(dir, { withFileTypes: true })
       const lines = await Promise.all(
         entries.slice(0, MAX_LIST_ENTRIES).map(async (e) => {
@@ -87,8 +87,8 @@ export const fileTools: ToolSpec[] = [
       sensitive: false
     },
     summary: (a) => String(a.path ?? ''),
-    run: async (a) => {
-      const buf = await fs.readFile(resolveUserPath(String(a.path)))
+    run: async (a, ctx) => {
+      const buf = await fs.readFile(resolveUserPath(String(a.path), ctx.workspaceRoot))
       const text = buf.subarray(0, MAX_READ_BYTES).toString('utf-8')
       return buf.length > MAX_READ_BYTES
         ? `${text}\n… [truncated, ${buf.length} bytes total]`
@@ -114,8 +114,8 @@ export const fileTools: ToolSpec[] = [
       sensitive: true
     },
     summary: (a) => String(a.path ?? ''),
-    run: async (a) => {
-      const file = resolveUserPath(String(a.path))
+    run: async (a, ctx) => {
+      const file = resolveUserPath(String(a.path), ctx.workspaceRoot)
       try {
         await fs.mkdir(dirname(file), { recursive: true })
         await fs.writeFile(file, String(a.content), 'utf-8')
@@ -138,8 +138,8 @@ export const fileTools: ToolSpec[] = [
       sensitive: false
     },
     summary: (a) => String(a.path ?? ''),
-    run: async (a) => {
-      const target = resolveUserPath(String(a.path))
+    run: async (a, ctx) => {
+      const target = resolveUserPath(String(a.path), ctx.workspaceRoot)
       if (!existsSync(target)) {
         throw new Error(
           `Nothing exists at ${target}. Create the file first, then open it (use the ` +
@@ -164,8 +164,8 @@ export const fileTools: ToolSpec[] = [
       sensitive: false
     },
     summary: (a) => String(a.path ?? ''),
-    run: async (a) => {
-      const dir = resolveUserPath(String(a.path))
+    run: async (a, ctx) => {
+      const dir = resolveUserPath(String(a.path), ctx.workspaceRoot)
       try {
         await fs.mkdir(dir, { recursive: true })
       } catch (err) {
@@ -190,8 +190,8 @@ export const fileTools: ToolSpec[] = [
       sensitive: false
     },
     summary: (a) => `"${String(a.query ?? '')}" in ${String(a.directory ?? '')}`,
-    run: async (a) => {
-      const root = resolveUserPath(String(a.directory))
+    run: async (a, ctx) => {
+      const root = resolveUserPath(String(a.directory), ctx.workspaceRoot)
       const query = String(a.query).toLowerCase()
       const max = Math.min(Number(a.maxResults) || 50, 200)
       const hits: string[] = []
@@ -233,9 +233,9 @@ export const fileTools: ToolSpec[] = [
       sensitive: true
     },
     summary: (a) => `${String(a.source ?? '')} → ${String(a.destination ?? '')}`,
-    run: async (a) => {
-      const src = resolveUserPath(String(a.source))
-      const dest = resolveUserPath(String(a.destination))
+    run: async (a, ctx) => {
+      const src = resolveUserPath(String(a.source), ctx.workspaceRoot)
+      const dest = resolveUserPath(String(a.destination), ctx.workspaceRoot)
       try {
         await fs.mkdir(dirname(dest), { recursive: true })
         try {
@@ -264,8 +264,8 @@ export const fileTools: ToolSpec[] = [
       sensitive: true
     },
     summary: (a) => String(a.path ?? ''),
-    run: async (a) => {
-      const target = resolveUserPath(String(a.path))
+    run: async (a, ctx) => {
+      const target = resolveUserPath(String(a.path), ctx.workspaceRoot)
       await shell.trashItem(target)
       return `Moved to Recycle Bin: ${target}`
     }
@@ -285,9 +285,9 @@ export const fileTools: ToolSpec[] = [
       sensitive: true
     },
     summary: (a) => `${String(a.source ?? '')} → ${String(a.zipPath ?? '')}`,
-    run: async (a) => {
-      const src = resolveUserPath(String(a.source))
-      const zip = resolveUserPath(String(a.zipPath))
+    run: async (a, ctx) => {
+      const src = resolveUserPath(String(a.source), ctx.workspaceRoot)
+      const zip = resolveUserPath(String(a.zipPath), ctx.workspaceRoot)
       await runPs(
         `Compress-Archive -Path ${psQuote(src)} -DestinationPath ${psQuote(zip)} -Force`,
         180_000
@@ -310,9 +310,9 @@ export const fileTools: ToolSpec[] = [
       sensitive: true
     },
     summary: (a) => `${String(a.zipPath ?? '')} → ${String(a.destination ?? '')}`,
-    run: async (a) => {
-      const zip = resolveUserPath(String(a.zipPath))
-      const dest = resolveUserPath(String(a.destination))
+    run: async (a, ctx) => {
+      const zip = resolveUserPath(String(a.zipPath), ctx.workspaceRoot)
+      const dest = resolveUserPath(String(a.destination), ctx.workspaceRoot)
       await runPs(
         `Expand-Archive -Path ${psQuote(zip)} -DestinationPath ${psQuote(dest)} -Force`,
         180_000

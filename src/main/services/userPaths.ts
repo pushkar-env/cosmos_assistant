@@ -12,7 +12,7 @@ import { isAbsolute, join, normalize } from 'path'
  * well-known folder names (Desktop, Documents…) to their real
  * locations, which handles OneDrive redirection.
  */
-export function resolveUserPath(input: string): string {
+export function resolveUserPath(input: string, base?: string): string {
   let p = String(input).trim().replace(/^["']|["']$/g, '')
 
   // ~ or ~/... → home
@@ -31,8 +31,10 @@ export function resolveUserPath(input: string): string {
   const known = knownFolder(first)
   if (known) return normalize(join(known, ...segs.slice(1)))
 
-  // otherwise treat as relative to HOME (never the install dir)
-  return normalize(join(homedir(), p))
+  // a bare relative path resolves against the agent's workspace root when one
+  // is active (so "src/App.tsx" lands in the project), else the user's HOME —
+  // never the install dir (read-only in a packaged build)
+  return normalize(join(base || homedir(), p))
 }
 
 /**

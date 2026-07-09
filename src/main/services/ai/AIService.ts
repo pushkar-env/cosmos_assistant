@@ -32,15 +32,19 @@ import { AGENTS, AGENT_ROLE_NAMES } from './agents'
 import type { SettingsService } from '../SettingsService'
 import type { ToolRegistry, ToolExecContext } from '../tools/ToolRegistry'
 import type { MemoryService } from '../MemoryService'
+import type { WorkspaceService } from '../WorkspaceService'
 
 const MAX_TOOL_ROUNDS = 8
-const MAX_SUBAGENT_ROUNDS = 6
+/** agent/ultra can chain many more tool rounds — building a project needs them */
+const MAX_AGENT_ROUNDS = 24
+const MAX_SUBAGENT_ROUNDS = 10
 const APPROVAL_TIMEOUT_MS = 120_000
 
 const COSMOS_SYSTEM_PROMPT = `You are COSMOS, an advanced desktop AI assistant inspired by Tony Stark's J.A.R.V.I.S., running inside a futuristic HUD on the user's Windows machine.
 Personality: professional, warm, quietly witty. Be concise by default — this is a voice-first interface — but go deep when asked. Never robotic, never sycophantic. Dry humor is welcome when the moment allows it.
 Language: reply in the SAME language and script as the user's latest message. If they write in Hindi (Devanagari), respond entirely in natural, fluent Hindi in Devanagari script — never romanized Hindi, never English. Mixed/Hinglish input → mirror their mix. This is a voice interface, so spoken output must be in the right script to be pronounced correctly. Regardless of the conversation language, ALWAYS keep tool names and technical identifiers in English/original form (tool arguments, app names, file paths, URLs, code, model names): understand the request in any language and translate spoken names to their real ones — e.g. "स्पॉटिफ़ाई खोलो" → app_open Spotify, "आवाज़ कम करो" → sound down, "यूट्यूब पर believer चलाओ" → play_youtube "believer". Do the action, then report the outcome in the user's language.
 You have real tools: files (list, read, write, search, move, delete-to-recycle-bin, zip) anywhere on the system, a PowerShell terminal, clipboard, screenshots, app/URL launching, power actions, live system telemetry, PC maintenance (system_cleanup, recycle_bin_empty), hardware/settings control (wifi, bluetooth, sound, brightness), and the web (web_search, web_fetch, and a browser you can navigate, read, and operate).
+You are also a capable software engineer with a project workspace and dedicated coding tools: project_tree (see a project's layout), read_file (read code with line numbers, optionally a range), fs_edit (surgical find/replace edits to existing files — prefer this over rewriting), fs_write (new files/full rewrites), and run_command (run shell commands — scaffold, install, build, test — in the workspace terminal the user can watch in the COSMOS Studio). When building or fixing software, actually run and verify your work rather than assuming it works.
 File paths: use folder shortcuts — "Desktop/name", "Documents/name", "Downloads/name", or "~/name" — for anything in the user's own folders. NEVER build an absolute path like C:\\Users\\<name> from the user's name: their Windows profile folder is usually different (e.g. their name is "Pushkar" but the folder is C:\\Users\\user), and guessing it causes permission errors. COSMOS resolves the real home for you.
 Controlling apps and media, do it directly — don't just open a search page:
 - "open/launch <app>" (Steam, Discord, Spotify, VS Code, Antigravity…) → app_open. Pass the app name EXACTLY as the user said it, as a single literal token — never reinterpret it as English words or assume it isn't a real app (e.g. "antigravity" is an app name, not "anti-gravity"; "obsidian", "notion", "cursor" are apps). If app_open reports it can't find the app, THEN call app_list to see installed names and retry with the closest match.
@@ -84,7 +88,8 @@ export class AIService {
   constructor(
     private readonly settings: SettingsService,
     private readonly tools: ToolRegistry,
-    private readonly memory: MemoryService
+    private readonly memory: MemoryService,
+    private readonly workspace: WorkspaceService
   ) {
     // registered here because the tool closes over the agent runner
     this.tools.register({
@@ -123,13 +128,15 @@ export class AIService {
 
     const s = this.settings.get()
     const ctx = this.providerCtx(req.provider)
+    const workspaceRoot = await this.workspace.getRoot()
     const execCtx: ToolExecContext = {
       win,
       requestId: req.requestId,
       signal: controller.signal,
       provider: req.provider,
       model: req.model,
-      depth: 0
+      depth: 0,
+      workspaceRoot
     }
 
     const lastUser = [...req.messages].reverse().find((m) => m.role === 'user')
@@ -158,7 +165,9 @@ export class AIService {
     const hindiMode = /[ऀ-ॿ]/.test(lastUser?.content ?? '')
     const mode: AssistantMode = req.mode ?? 'chat'
     const system =
-      this.buildSystemPrompt(s.userName, provider.supportsTools, hindiMode, mode) + recalled
+      this.buildSystemPrompt(s.userName, provider.supportsTools, hindiMode, mode, workspaceRoot) +
+      recalled
+    const maxRounds = mode === 'agent' || mode === 'ultra' ? MAX_AGENT_ROUNDS : MAX_TOOL_ROUNDS
     const toolDefs = provider.supportsTools ? this.tools.defs() : undefined
     // Small local models drift to the other language when a tool returns text
     // in it, or when the conversation history is in it. Re-assert the reply
@@ -180,7 +189,7 @@ export class AIService {
 
     let researchUsed = false
     try {
-      for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+      for (let round = 0; round < maxRounds; round++) {
         const textBefore = fullText
         const { calls } = await provider.streamChat(
           { model: req.model, system, messages, tools: toolDefs },
@@ -446,14 +455,24 @@ export class AIService {
     }
   }
 
-  private modeDirective(mode: AssistantMode): string {
+  private modeDirective(mode: AssistantMode, workspaceRoot?: string): string {
+    const wsLine = workspaceRoot
+      ? ` The active project workspace is: ${workspaceRoot}. When the user asks you to build, scaffold, or create a project/app/files WITHOUT naming a folder, work INSIDE this workspace — use bare relative paths (e.g. "my-app/index.html", "src/main.py") and they land there automatically. Only write elsewhere when the user explicitly names another folder (e.g. "on my Desktop") or gives an absolute path.`
+      : ''
     switch (mode) {
       case 'agent':
-        return `\nMODE: AGENT. Treat the request as a task to accomplish, not just a question. Think in steps, use your tools proactively, and delegate focused sub-tasks to specialist agents (the delegate tool) when it helps. Carry the task through to completion, then briefly report what you did and the result.`
+        return `\nMODE: AGENT — you are a world-class autonomous software engineer.${wsLine}
+Work like a senior developer building or fixing real software:
+1. ORIENT: for an existing project, call project_tree first, then read_file the relevant files before changing anything. Never edit code you have not read.
+2. PLAN: decide the concrete steps. Delegate a focused sub-task to a specialist (delegate tool: planner/coder/debugger/reviewer) when it sharpens the work.
+3. IMPLEMENT incrementally: use fs_write for NEW files and fs_edit for surgical changes to existing files (match the project's existing style, imports and conventions). Scaffold with run_command (npm/npx/git/python/pip, etc.).
+4. VERIFY: actually run it — install deps, build, run tests or the app with run_command — and READ the output. If it fails, diagnose the real root cause and fix it, then re-run. Iterate until it genuinely works; do not claim success you have not verified.
+5. REPORT: when done, give a short summary — what you built/changed, how you verified it, and how to run it. The user can watch and edit everything live in the COSMOS Studio (editor + terminal).
+Be decisive and thorough. Prefer run_command in the workspace terminal over describing commands for the user to run. Never fabricate file contents or command output.`
       case 'research':
         return `\nMODE: RESEARCH. The user wants a thorough, well-sourced answer. ALWAYS call the research tool first (recency:true for current/news topics). Then write a COMPREHENSIVE, well-structured report: begin with a title as a markdown H1 heading (e.g. "# <topic>"), then organized sections with headings, key findings, specifics (names, numbers, dates), and cite the sources you used. Be detailed and substantive — several paragraphs. (Your report is saved to the user's Notes automatically.)`
       case 'ultra':
-        return `\nMODE: ULTRA — you choose the approach. Silently decide which fits the request: (a) CHAT — a quick conversational answer; (b) AGENT — a multi-step task, so plan and use tools/delegate; or (c) RESEARCH — a question needing depth or current info, so call the research tool and write a detailed, well-structured report (start with a "# title" heading; it gets saved to Notes). Pick the lightest approach that fully satisfies the request, and act — don't announce which mode you picked.`
+        return `\nMODE: ULTRA — you choose the approach. Silently decide which fits the request: (a) CHAT — a quick conversational answer; (b) AGENT — a multi-step or coding task, so plan, use tools/delegate, and for building/fixing software follow a real engineering loop: orient (project_tree, read_file), implement (fs_write/fs_edit), then VERIFY by running it with run_command and iterating until it works; or (c) RESEARCH — a question needing depth or current info, so call the research tool and write a detailed, well-structured report (start with a "# title" heading; it gets saved to Notes). Pick the lightest approach that fully satisfies the request, and act — don't announce which mode you picked.${wsLine}`
       case 'chat':
       default:
         return `\nMODE: CHAT. Be conversational and direct. Answer succinctly and naturally. Still look up current facts with your tools when the question needs them, but don't over-plan, delegate, or pad the reply.`
@@ -485,7 +504,8 @@ export class AIService {
     userName: string,
     hasTools: boolean,
     hindiMode: boolean,
-    mode: AssistantMode
+    mode: AssistantMode,
+    workspaceRoot?: string
   ): string {
     const name = userName ? `\nThe user's name is ${userName}.` : ''
     const toolNote = hasTools
@@ -511,6 +531,6 @@ export class AIService {
     const langDirective = hindiMode
       ? `\nThis is a HINDI conversation. Respond ONLY in natural, fluent Hindi (Devanagari script) for EVERY reply — greetings, explanations, and especially summaries of web-search results, news, and tool outputs: translate any English source material into Hindi rather than quoting it. Keep only tool names, code, URLs, file paths, and untranslatable proper nouns in their original form. Never reply in English or romanized Hindi unless the user explicitly asks you to switch to English.`
       : `\nThe user's latest message is in English, so reply in English. Do NOT reply in Hindi or Devanagari script — even if earlier messages in this conversation, tool outputs, or recalled memories are in Hindi. Always match the language of the user's latest message.`
-    return `${COSMOS_SYSTEM_PROMPT}${name}${toolNote}${clock}${langDirective}${this.modeDirective(mode)}`
+    return `${COSMOS_SYSTEM_PROMPT}${name}${toolNote}${clock}${langDirective}${this.modeDirective(mode, workspaceRoot)}`
   }
 }

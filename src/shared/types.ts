@@ -204,8 +204,30 @@ export interface Settings {
   mediaPlayer: MediaPlayerMode
   /** how the assistant approaches each turn (chat/agent/research/ultra) */
   assistantMode: AssistantMode
+  /**
+   * The agent's project workspace — where files are created/edited when the
+   * user doesn't name a folder, and the root shown in the Studio (editor +
+   * terminal). Empty → resolved lazily to Documents/COSMOS Projects.
+   */
+  workspaceRoot: string
   /** tools granted permanent approval ("Always allow") */
   alwaysAllowTools: string[]
+}
+
+/** A node in the Studio file tree (dirs listed before files). */
+export interface FileNode {
+  name: string
+  /** path relative to the workspace root, POSIX separators */
+  path: string
+  kind: 'file' | 'dir'
+  /** child nodes for a dir (absent = not yet loaded / a file) */
+  children?: FileNode[]
+}
+
+/** A single streamed chunk from the integrated terminal. */
+export interface TerminalChunk {
+  data: string
+  stream: 'stdout' | 'stderr' | 'system'
 }
 
 export type MemoryCategory = 'preference' | 'project' | 'fact' | 'goal'
@@ -299,6 +321,7 @@ export const DEFAULT_SETTINGS: Settings = {
   voice: DEFAULT_VOICE_SETTINGS,
   mediaPlayer: 'dedicated',
   assistantMode: 'chat',
+  workspaceRoot: '',
   alwaysAllowTools: []
 }
 

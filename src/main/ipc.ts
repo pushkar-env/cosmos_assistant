@@ -1,4 +1,4 @@
-import { ipcMain, type BrowserWindow } from 'electron'
+import { ipcMain, dialog, type BrowserWindow } from 'electron'
 import {
   IPC,
   type ApprovalDecision,
@@ -21,6 +21,7 @@ import type { SttService } from './services/voice/SttService'
 import type { TtsService } from './services/voice/TtsService'
 import type { MemoryService } from './services/MemoryService'
 import type { PluginService } from './services/PluginService'
+import type { WorkspaceService } from './services/WorkspaceService'
 
 interface WindowController {
   setMode: (mode: WindowMode) => void
@@ -39,11 +40,50 @@ interface Services {
   tts: TtsService
   memory: MemoryService
   plugins: PluginService
+  workspace: WorkspaceService
   window: WindowController
 }
 
 /** Binds every service to its IPC channel. Called once at startup. */
 export function registerIpc(getWindow: () => BrowserWindow | null, services: Services): void {
+  // give the workspace terminal/watcher a path back to the renderer
+  services.workspace.attachWindow(getWindow)
+
+  // ── workspace / studio ──
+  ipcMain.handle(IPC.WORKSPACE_GET, () => services.workspace.getRoot())
+
+  ipcMain.handle(IPC.WORKSPACE_PICK, async () => {
+    const win = getWindow()
+    const res = await dialog.showOpenDialog(win ?? undefined!, {
+      title: 'Choose the COSMOS project workspace',
+      defaultPath: await services.workspace.getRoot(),
+      properties: ['openDirectory', 'createDirectory']
+    })
+    if (res.canceled || !res.filePaths[0]) return services.workspace.getRoot()
+    return services.workspace.setRoot(res.filePaths[0])
+  })
+
+  ipcMain.handle(IPC.WORKSPACE_SET, (_e, dir: string) => services.workspace.setRoot(dir))
+
+  ipcMain.handle(IPC.FILES_TREE, () => services.workspace.tree())
+  ipcMain.handle(IPC.FILES_LIST, (_e, relPath: string) => services.workspace.listDir(relPath))
+  ipcMain.handle(IPC.FILES_READ, (_e, relPath: string) => services.workspace.readFile(relPath))
+  ipcMain.handle(IPC.FILES_WRITE, (_e, relPath: string, content: string) =>
+    services.workspace.writeFile(relPath, content)
+  )
+  ipcMain.handle(IPC.FILES_CREATE, (_e, relPath: string, kind: 'file' | 'dir') =>
+    services.workspace.create(relPath, kind)
+  )
+  ipcMain.handle(IPC.FILES_RENAME, (_e, relPath: string, name: string) =>
+    services.workspace.rename(relPath, name)
+  )
+  ipcMain.handle(IPC.FILES_DELETE, (_e, relPath: string) => services.workspace.trash(relPath))
+  ipcMain.handle(IPC.FILES_REVEAL, (_e, relPath?: string) => services.workspace.reveal(relPath))
+
+  ipcMain.handle(IPC.TERM_START, () => services.workspace.terminalStart())
+  ipcMain.handle(IPC.TERM_INPUT, (_e, command: string) => services.workspace.terminalInput(command))
+  ipcMain.handle(IPC.TERM_RESET, () => services.workspace.terminalReset())
+
   ipcMain.handle(IPC.AI_CHAT, async (_e, req: ChatRequest) => {
     const win = getWindow()
     if (!win) return
