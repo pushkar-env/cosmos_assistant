@@ -6,7 +6,7 @@
  */
 
 // a normal Chrome UA — a custom "COSMOS research" UA gets bot-blocked fast
-const UA =
+export const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 
 function decodeEntities(s: string): string {
@@ -19,8 +19,38 @@ function decodeEntities(s: string): string {
     .replace(/&\w+;/g, ' ')
 }
 
-function stripTags(s: string): string {
+export function stripTags(s: string): string {
   return decodeEntities(s.replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim()
+}
+
+/**
+ * Fetch a page and extract its main readable text (article paragraphs first,
+ * then a stripped fallback). Best-effort — returns '' on failure/thin pages so
+ * the research tool can fall back to the search snippet.
+ */
+export async function fetchArticleText(url: string, maxChars = 2500): Promise<string> {
+  let html: string
+  try {
+    const res = await fetch(url, {
+      redirect: 'follow',
+      headers: { 'user-agent': UA },
+      signal: AbortSignal.timeout(12_000)
+    })
+    if (!res.ok) return ''
+    html = await res.text()
+  } catch {
+    return ''
+  }
+  const cleaned = html
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+  // article body is almost always in <p> tags — join the substantive ones
+  const paras = [...cleaned.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/gi)]
+    .map((m) => stripTags(m[1]))
+    .filter((t) => t.length > 40)
+  let text = paras.join(' ')
+  if (text.length < 200) text = stripTags(cleaned) // fallback: whole page
+  return text.slice(0, maxChars)
 }
 
 export interface SearchResult {

@@ -10,6 +10,8 @@ export const IPC = {
   TOOL_APPROVAL_REQUEST: 'ai:tool-approval-request',
   AGENT_EVENT: 'ai:agent-event',
   PALETTE_TOGGLE: 'app:palette-toggle',
+  /** window came back from minimize/hidden → renderer re-arms the mic */
+  WINDOW_SHOWN: 'app:window-shown',
 
   // renderer -> main (invoke)
   AI_CHAT: 'ai:chat',

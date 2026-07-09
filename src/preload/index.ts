@@ -129,6 +129,8 @@ export const cosmosApi = {
     setMode: (mode: WindowMode): Promise<void> => ipcRenderer.invoke(IPC.WINDOW_SET_MODE, mode),
     onModeChanged: (cb: (mode: WindowMode) => void): Unsubscribe =>
       subscribe(IPC.WINDOW_MODE_CHANGED, cb),
+    // window returned from minimize / hidden (for re-arming hands-free)
+    onWindowShown: (cb: () => void): Unsubscribe => subscribe(IPC.WINDOW_SHOWN, cb),
     quit: (): Promise<void> => ipcRenderer.invoke(IPC.APP_QUIT),
     // tray asked the renderer to toggle hands-free
     onHandsFreeToggle: (cb: () => void): Unsubscribe => subscribe(IPC.HANDSFREE_TOGGLE, cb),

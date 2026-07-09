@@ -217,6 +217,31 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
       if (useSettingsStore.getState().settings.voice.handsFree) {
         void get().setHandsFree(true)
       }
+
+      // When the window returns from minimize/hidden, the mic pipeline (its
+      // AudioContext + capture) can be left suspended by Chromium and never
+      // recover on its own — so hands-free stops hearing "Cosmos…" until a
+      // manual mic toggle. Re-arm it automatically the moment we're visible
+      // again. (Debounced so rapid visibility churn doesn't thrash the mic.)
+      let rearmAt = 0
+      const rearmHandsFree = (): void => {
+        if (get().micMode !== 'handsfree') return
+        const now = Date.now()
+        if (now - rearmAt < 1500) return
+        rearmAt = now
+        recorder.stop()
+        set({ micMode: 'handsfree', micStatus: 'listening', error: null })
+        void recorder.start(true, handlers).then(() => {
+          if (!recorder.active) set({ micMode: 'off', micStatus: 'idle' })
+        })
+      }
+      // main fires this on window restore/show (the reliable signal here —
+      // minimize does NOT change Page Visibility with backgroundThrottling off)
+      window.cosmos.app.onWindowShown(rearmHandsFree)
+      // secondary trigger for hide/occlusion cases that DO change visibility
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') rearmHandsFree()
+      })
     },
 
     toggleMic: async () => {

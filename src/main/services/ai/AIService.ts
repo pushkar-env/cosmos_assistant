@@ -51,7 +51,7 @@ Never claim you opened, closed, played or changed something unless the correspon
 - The browser_* automation tools (browser_goto, browser_read, browser_inputs, browser_type, browser_click) drive the COSMOS-controlled browser and are for reading/extracting a page or filling a form the user asked you to fill. Never use them just to open or play something — prefer url_open / play_youtube for that.
 - "close the <site> tab" (e.g. "close the YouTube tab") → browser_close_tab with the site name; browser_tabs lists open tabs. NOTE: this only controls the COSMOS browser (the one that plays media / you automate), not the user's separate default browser — if they used default-browser mode, tell them tab control needs the COSMOS player.
 You can see: vision_screen/vision_image analyze the screen or images with your vision model; ocr_screen/ocr_image extract exact text offline. You integrate with game engines: unity_* tools talk to the Unity editor (install the bridge with unity_install_bridge first; write scripts with fs_write, then unity_refresh and check unity_console for compile errors), and unreal_* tools use Unreal's Remote Control API. Use them when the user asks you to act — don't describe what you would do, do it. Prefer the specific tool over the terminal when one exists. Destructive actions are confirmed with the user by the system automatically; if a request is denied, respect it and don't retry.
-Recency policy — this is critical: your training data is stale, but you have LIVE web access, so a knowledge cutoff is never a reason to refuse or hedge. For ANY question that is current or time-sensitive — news, sports results and standings, scores, prices, weather elsewhere, product releases, schedules, elections, anything "latest", "current", "today", or dated after your training — do NOT answer from memory and do NOT disclaim a cutoff. Instead: use news_search (best for events/results) or web_search, then web_fetch the most promising result, and answer from what you found, naming the source and its date. If the tools genuinely fail, say the search failed and offer to retry — never fall back to "check a sports news source yourself".
+Recency & research policy — this is critical: your training data is stale, but you have LIVE web access, so a knowledge cutoff is never a reason to refuse or hedge. For ANY question that is current, time-sensitive, or where the user wants details/depth — news, "latest/today", "tell me about X", "what's happening with Y", explanations, comparisons, sports results, prices, releases, elections — do NOT answer from memory. Call the research tool (query, and recency:true for news/current events): it searches AND reads the top sources in one step and returns their real article text. Then WRITE A DETAILED, well-organized answer synthesizing those sources — several informative paragraphs or clear sections, naming the sources and their dates. NEVER just paste links or one-line headlines; the user wants substance. Use news_search/web_search only for a quick headline/link check; use research whenever depth is wanted. If research genuinely fails, say the search failed and offer to retry — never invent facts or fall back to "check a news source yourself".
 You lead a team of specialist agents — planner, researcher, coder, debugger, reviewer — via the delegate tool. Delegate when a task is complex, multi-step, or benefits from focus (a coding task, a research question, a code review); handle quick actions yourself. You may delegate several tasks in sequence and combine their reports. The user sees agents working live around your core; summarize the team's outcome, don't paste raw reports.
 You also have long-term memory. When the user shares a durable preference, project, goal, or personal fact, save it with memory_save (one clean sentence). Relevant saved memories are injected into your context automatically — use them naturally, never recite them back verbatim. If asked to forget something, use memory_delete.
 After acting, state the outcome in one or two sentences and stop. Never end a reply with a recap — no "To summarize", no "In summary", no restating what you just said, and no listing actions from earlier in the conversation. Answer only what was just asked.`
@@ -145,8 +145,20 @@ export class AIService {
     }
 
     const messages: AgentMessage[] = [...req.messages]
-    const system = this.buildSystemPrompt(s.userName, provider.supportsTools) + recalled
+    // Reply language follows the USER'S MESSAGE — if it's in Devanagari it's a
+    // Hindi turn (regardless of the voice-language setting, which may say 'en'
+    // while the user typed Hindi). The setting also forces Hindi mode (e.g. for
+    // spoken Hindi that STT already produced as Devanagari).
+    const hindiMode =
+      /[ऀ-ॿ]/.test(lastUser?.content ?? '') || s.voice.language === 'hi'
+    const system = this.buildSystemPrompt(s.userName, provider.supportsTools, hindiMode) + recalled
     const toolDefs = provider.supportsTools ? this.tools.defs() : undefined
+    // Small local models drift back to English when a tool returns English
+    // text (the tool output is the most-recent context). In Hindi mode we
+    // re-assert the reply language right after tool results so it stays Hindi.
+    const hindiReminder = hindiMode
+      ? '\n\n[Language: reply to the user ENTIRELY in Hindi (Devanagari). Any English in this tool output must be translated into Hindi — do NOT answer in English, and do NOT invent facts if the tool failed.]'
+      : ''
 
     let fullText = ''
     const emit = (delta: string): void => {
@@ -176,6 +188,9 @@ export class AIService {
           calls
         })
         const results = await this.executeCalls(calls, execCtx)
+        if (hindiReminder && results.length > 0) {
+          results[results.length - 1].result += hindiReminder
+        }
         messages.push({ role: 'tool-results', results })
       }
       this.memory.append('assistant', fullText)
@@ -382,7 +397,7 @@ export class AIService {
     }
   }
 
-  private buildSystemPrompt(userName: string, hasTools: boolean): string {
+  private buildSystemPrompt(userName: string, hasTools: boolean, hindiMode: boolean): string {
     const name = userName ? `\nThe user's name is ${userName}.` : ''
     const toolNote = hasTools
       ? ''
@@ -404,11 +419,9 @@ export class AIService {
     // In Hindi mode (a Hindi voice is selected) force Hindi output everywhere —
     // this is spoken aloud, so a stray English sentence gets read by the Hindi
     // voice and sounds broken.
-    const lang = this.settings.get().voice.language
-    const langDirective =
-      lang === 'hi'
-        ? `\nThe user is in HINDI mode. Respond ONLY in natural, fluent Hindi (Devanagari script) for EVERY reply — greetings, explanations, and especially summaries of web-search results, news, and tool outputs: translate any English source material into Hindi rather than quoting it. Keep only tool names, code, URLs, file paths, and untranslatable proper nouns in their original form. Never reply in English or romanized Hindi unless the user explicitly asks you to switch to English.`
-        : ''
+    const langDirective = hindiMode
+      ? `\nThis is a HINDI conversation. Respond ONLY in natural, fluent Hindi (Devanagari script) for EVERY reply — greetings, explanations, and especially summaries of web-search results, news, and tool outputs: translate any English source material into Hindi rather than quoting it. Keep only tool names, code, URLs, file paths, and untranslatable proper nouns in their original form. Never reply in English or romanized Hindi unless the user explicitly asks you to switch to English.`
+      : ''
     return `${COSMOS_SYSTEM_PROMPT}${name}${toolNote}${clock}${langDirective}`
   }
 }

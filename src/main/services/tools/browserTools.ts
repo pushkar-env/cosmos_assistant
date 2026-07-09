@@ -1,6 +1,13 @@
 import type { ToolSpec } from './ToolRegistry'
 import type { BrowserService } from '../BrowserService'
-import { ddgSearch, newsSearch, formatResults, CaptchaError } from './webSearch'
+import {
+  ddgSearch,
+  newsSearch,
+  formatResults,
+  fetchArticleText,
+  CaptchaError,
+  type SearchResult
+} from './webSearch'
 
 const FETCH_LIMIT = 12_000
 /** below this, assume a JS-rendered page and re-read via the browser */
@@ -71,7 +78,7 @@ export function browserTools(browser: BrowserService): ToolSpec[] {
       def: {
         name: 'web_search',
         description:
-          'Search the web and get the top results with titles, URLs and snippets. Follow up with web_fetch on the most promising results to get details.',
+          'Quick web search — returns top results as titles, URLs and snippets only. For a DETAILED answer that actually reads the sources, use the `research` tool instead of this.',
         inputSchema: {
           type: 'object',
           properties: { query: { type: 'string' } },
@@ -110,7 +117,7 @@ export function browserTools(browser: BrowserService): ToolSpec[] {
       def: {
         name: 'news_search',
         description:
-          'Search current news (Google News) — returns dated headlines with sources. THE tool for anything recent or time-sensitive: sports results, events, releases, "latest/current/today" questions. Follow up with web_fetch for details.',
+          'Quick current-news lookup (Google News) — returns dated headlines with sources only. For a DETAILED news answer that reads the articles, use the `research` tool with recency:true instead.',
         inputSchema: {
           type: 'object',
           properties: { query: { type: 'string' } },
@@ -120,6 +127,93 @@ export function browserTools(browser: BrowserService): ToolSpec[] {
       },
       summary: (a) => String(a.query ?? ''),
       run: async (a) => formatResults(await newsSearch(String(a.query)))
+    },
+    {
+      def: {
+        name: 'research',
+        description:
+          'Deep research in ONE step: searches the web, then fetches and READS the top sources and returns their actual article text (not just links). Use this whenever the user wants details, "latest news", "tell me about X", "what\'s happening with Y", explanations, comparisons, or anything current/in-depth. After it returns, WRITE A DETAILED, well-organized answer synthesizing the sources (cite source names/dates) — never just paste links or one-line headlines.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            query: { type: 'string' },
+            recency: {
+              type: 'boolean',
+              description: 'true for news / current events (uses the news index); false for general/evergreen topics'
+            }
+          },
+          required: ['query']
+        },
+        sensitive: false
+      },
+      summary: (a) => String(a.query ?? ''),
+      run: async (a) => {
+        const query = String(a.query)
+        const recency = a.recency === true
+        // Fetchable article URLs come from DuckDuckGo (direct links). Google
+        // News RSS links are redirect URLs that don't resolve to article text
+        // over HTTP, so news_search is used only for DATED headline context.
+        let web: SearchResult[] = []
+        try {
+          web = await ddgSearch(query)
+        } catch {
+          /* blocked — handled below */
+        }
+        let news: SearchResult[] = []
+        if (recency) {
+          try {
+            news = await newsSearch(query)
+          } catch {
+            /* optional context */
+          }
+        }
+        if (web.length === 0 && news.length === 0) {
+          try {
+            return (
+              `Search results for "${query}":\n${await browser.search(query)}\n\n` +
+              `---\nWrite a detailed answer from these; if they're thin, say so.`
+            )
+          } catch {
+            return `Couldn't reach any search source for "${query}". Tell the user the search failed and offer to retry — do NOT invent facts.`
+          }
+        }
+
+        // read the top direct sources in parallel (best-effort). Kept small so
+        // the combined result fits a local model's context in ONE round (3+
+        // large results overflow Ollama's 8192 window and it loops/truncates).
+        const top = web.slice(0, 3)
+        const fetched = await Promise.all(
+          top.map(async (r) => ({ r, text: await fetchArticleText(r.url, 1600).catch(() => '') }))
+        )
+
+        const sections: string[] = []
+        if (recency && news.length > 0) {
+          const heads = news
+            .slice(0, 6)
+            .map((n) => `• ${n.title}${n.date || n.source ? ` (${[n.date, n.source].filter(Boolean).join(', ')})` : ''}`)
+            .join('\n')
+          sections.push(`Recent headlines:\n${heads}`)
+        }
+        const CAP = 4200
+        let used = 0
+        const readable = fetched.filter((f) => f.text || f.r.snippet)
+        const blocks = readable.map(({ r, text }, i) => {
+          const meta = [r.source, r.date].filter(Boolean).join(' · ')
+          const budget = Math.max(500, Math.floor((CAP - used) / (readable.length - i)))
+          const body = (text || r.snippet || '').slice(0, budget)
+          used += body.length
+          return `[${i + 1}] ${r.title}${meta ? ` (${meta})` : ''}\n${r.url}\n${body}`
+        })
+        if (blocks.length > 0) sections.push(`Sources read:\n\n${blocks.join('\n\n')}`)
+        if (sections.length === 0) sections.push(formatResults(recency ? news : web))
+
+        return (
+          `Research on "${query}":\n\n${sections.join('\n\n')}\n\n` +
+          `---\nThis is enough to answer — do NOT call research again. Now write a DETAILED, ` +
+          `well-structured answer for the user synthesizing the above (name the sources and ` +
+          `dates). Do not just list links or headlines, and do not invent details not in the sources.`
+        )
+      }
     },
     {
       def: {

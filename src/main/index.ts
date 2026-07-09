@@ -120,6 +120,16 @@ function createWindow(): void {
     if (windowMode === 'full') fullMaximized = false
   })
 
+  // Tell the renderer when the window comes back from minimize/hidden. The
+  // Page Visibility API does NOT fire on minimize here (backgroundThrottling
+  // is off), so hands-free relies on this to re-arm the mic — otherwise the
+  // suspended audio capture never recovers without a manual mic toggle.
+  const notifyShown = (): void => {
+    if (!mainWindow?.isDestroyed()) mainWindow?.webContents.send(IPC.WINDOW_SHOWN)
+  }
+  mainWindow.on('restore', notifyShown)
+  mainWindow.on('show', notifyShown)
+
   // external links open in the OS browser, never inside the shell
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url)
