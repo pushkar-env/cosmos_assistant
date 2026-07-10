@@ -16,6 +16,8 @@ import type {
   ConversationMeta,
   ElevenVoice,
   FileNode,
+  GitStatus,
+  GithubIdentity,
   InstalledApp,
   MemoryCategory,
   MemoryItem,
@@ -151,6 +153,12 @@ export const cosmosApi = {
     input: (command: string): Promise<void> => ipcRenderer.invoke(IPC.TERM_INPUT, command),
     reset: (): Promise<string> => ipcRenderer.invoke(IPC.TERM_RESET),
     onData: (cb: (chunk: TerminalChunk) => void): Unsubscribe => subscribe(IPC.TERM_DATA, cb)
+  },
+  github: {
+    connect: (token: string): Promise<GithubIdentity> => ipcRenderer.invoke(IPC.GITHUB_CONNECT, token),
+    disconnect: (): Promise<void> => ipcRenderer.invoke(IPC.GITHUB_DISCONNECT),
+    identity: (): Promise<GithubIdentity | null> => ipcRenderer.invoke(IPC.GITHUB_IDENTITY),
+    status: (): Promise<GitStatus> => ipcRenderer.invoke(IPC.GIT_STATUS)
   },
   app: {
     onPaletteToggle: (cb: () => void): Unsubscribe => subscribe(IPC.PALETTE_TOGGLE, cb),

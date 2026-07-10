@@ -276,7 +276,9 @@ export class WorkspaceService {
   // ── terminal ──────────────────────────────────────────────────────────────
 
   private async ensureTerminal(): Promise<TerminalSession> {
-    if (!this.terminal) {
+    // respawn if never started, or if a previous hang/crash killed the shell
+    if (!this.terminal || this.terminal.dead) {
+      this.terminal?.dispose()
       const root = await this.getRoot()
       this.terminal = new TerminalSession(root, (chunk) => {
         const win = this.getWindow()
@@ -310,16 +312,16 @@ export class WorkspaceService {
 
   /**
    * Run a command for the agent: it streams into the same UI terminal AND the
-   * captured output is returned. `background:true` starts it without waiting
-   * (for dev servers etc.) so the loop isn't blocked.
+   * captured output is returned. Uses an IDLE timeout, not a fixed one, so a
+   * long-but-active build (npm install, pip, cargo, docker) runs as long as it
+   * keeps producing output — only a genuinely stuck command is cut off (and the
+   * shell is then respawned). `background:true` starts it without waiting (dev
+   * servers, watchers) so the loop isn't blocked.
    */
-  async agentRun(command: string, background = false, timeoutMs = 120_000): Promise<string> {
+  async agentRun(command: string, background = false): Promise<string> {
     const term = await this.ensureTerminal()
-    if (background) {
-      void term.exec(command).catch(() => {})
-      return `Started in the background (streaming to the COSMOS terminal). Working directory: ${term.cwd}`
-    }
-    const out = await term.exec(command, timeoutMs)
+    if (background) return term.runBackground(command)
+    const out = await term.exec(command)
     return out.trim() || '(command produced no output)'
   }
 
@@ -336,33 +338,53 @@ export class WorkspaceService {
  * and new working directory, which lets us (a) detect completion, (b) track
  * cwd, and (c) capture per-command output for the agent — all without a PTY.
  */
+interface TermEntry {
+  marker: string
+  capture: string
+  resolve: (out: string) => void
+  idleTimer: ReturnType<typeof setTimeout> | null
+  hardTimer: ReturnType<typeof setTimeout> | null
+}
+
+/** no output for this long on a foreground command → assume it's stuck */
+const IDLE_TIMEOUT_MS = 180_000
+/** absolute ceiling for any single foreground command */
+const HARD_TIMEOUT_MS = 1_200_000
+
 class TerminalSession {
   private proc: ChildProcessWithoutNullStreams
   cwd: string
   private seq = 0
-  private queue: Array<{
-    marker: string
-    capture: string
-    resolve: (out: string) => void
-    timer: ReturnType<typeof setTimeout> | null
-  }> = []
+  private queue: TermEntry[] = []
   private buffer = ''
   private disposed = false
+  /** detached long-lived children (dev servers) — killed on dispose */
+  private bgProcs = new Set<ChildProcessWithoutNullStreams>()
 
   constructor(
     root: string,
     private readonly onData: (chunk: TerminalChunk) => void
   ) {
     this.cwd = root
-    this.proc = spawn('powershell.exe', ['-NoLogo', '-NoProfile', '-NoExit', '-Command', '-'], {
-      cwd: root,
-      windowsHide: true
-    })
+    // -ExecutionPolicy Bypass so the agent can run project build scripts (.ps1,
+    // npm/pnpm shims) without a policy prompt; -Command - reads stdin line by
+    // line with no prompt/echo noise (see cosmos-project memory).
+    this.proc = spawn(
+      'powershell.exe',
+      ['-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-NoExit', '-Command', '-'],
+      { cwd: root, windowsHide: true }
+    )
     this.proc.stdout.setEncoding('utf-8')
     this.proc.stderr.setEncoding('utf-8')
     this.proc.stdout.on('data', (d: string) => this.onStdout(d))
     this.proc.stderr.on('data', (d: string) => this.onStderr(d))
     this.proc.on('exit', () => {
+      // free every waiter so the agent loop never hangs on a dead shell
+      for (const e of this.queue) {
+        this.clearTimers(e)
+        e.resolve(e.capture + '\n[terminal exited]')
+      }
+      this.queue = []
       if (!this.disposed) this.onData({ data: '\n[terminal exited]\n', stream: 'system' })
     })
     // silence the default `PS C:\...>` prompt — we render our own
@@ -370,28 +392,19 @@ class TerminalSession {
     this.onData({ data: `Workspace: ${root}\n`, stream: 'system' })
   }
 
+  /** true once the shell has crashed / been killed — triggers a respawn */
+  get dead(): boolean {
+    return this.disposed || this.proc.exitCode !== null || this.proc.killed
+  }
+
   /** run a command; resolves with its stdout+stderr once the sentinel lands */
-  exec(command: string, timeoutMs?: number): Promise<string> {
-    if (this.disposed || this.proc.exitCode !== null) {
-      return Promise.resolve('[terminal is not running]')
-    }
+  exec(command: string): Promise<string> {
+    if (this.dead) return Promise.resolve('[terminal is not running]')
     const marker = `${STX}${++this.seq}`
     return new Promise<string>((resolve) => {
-      const entry = {
-        marker,
-        capture: '',
-        resolve,
-        timer: timeoutMs
-          ? setTimeout(() => {
-              // command overran (likely a server) — hand back what we have and
-              // reset so the queue keeps flowing
-              const idx = this.queue.indexOf(entry)
-              if (idx !== -1) this.queue.splice(idx, 1)
-              resolve(entry.capture + '\n[timed out after ' + Math.round(timeoutMs / 1000) + 's — still running or stuck; use background for long-lived processes]')
-            }, timeoutMs)
-          : null
-      }
+      const entry: TermEntry = { marker, capture: '', resolve, idleTimer: null, hardTimer: null }
       this.queue.push(entry)
+      this.armTimers(entry)
       // echo the command so the UI shows what ran, then the sentinel line
       this.onData({ data: `❯ ${command}\n`, stream: 'system' })
       this.proc.stdin.write(`${command}\n`)
@@ -399,6 +412,65 @@ class TerminalSession {
         `Write-Output "${marker}:$($LASTEXITCODE):$((Get-Location).Path)${ETX}"\n`
       )
     })
+  }
+
+  /**
+   * Launch a long-lived command (a dev server) as its OWN detached process so
+   * it never blocks the interactive shell's pipeline. Output still streams to
+   * the terminal UI, tagged so it's clear it's the background task.
+   */
+  runBackground(command: string): string {
+    if (this.dead) return '[terminal is not running]'
+    this.onData({ data: `❯ [background] ${command}\n`, stream: 'system' })
+    const child = spawn(
+      'powershell.exe',
+      ['-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command],
+      { cwd: this.cwd, windowsHide: true }
+    )
+    child.stdout.setEncoding('utf-8')
+    child.stderr.setEncoding('utf-8')
+    child.stdout.on('data', (d: string) => this.onData({ data: d, stream: 'stdout' }))
+    child.stderr.on('data', (d: string) => this.onData({ data: d, stream: 'stderr' }))
+    child.on('exit', (code) => {
+      this.bgProcs.delete(child)
+      this.onData({ data: `\n[background task exited (code ${code})]\n`, stream: 'system' })
+    })
+    this.bgProcs.add(child)
+    return `Started in the background (PID ${child.pid ?? '?'}), streaming to the COSMOS terminal. Working directory: ${this.cwd}`
+  }
+
+  /** (re)arm the idle + hard timeouts for the front-of-queue command */
+  private armTimers(entry: TermEntry): void {
+    this.clearTimers(entry)
+    entry.idleTimer = setTimeout(() => this.fireTimeout(entry, 'idle'), IDLE_TIMEOUT_MS)
+    if (!entry.hardTimer) {
+      entry.hardTimer = setTimeout(() => this.fireTimeout(entry, 'hard'), HARD_TIMEOUT_MS)
+    }
+  }
+
+  private clearTimers(entry: TermEntry): void {
+    if (entry.idleTimer) clearTimeout(entry.idleTimer)
+    if (entry.hardTimer) clearTimeout(entry.hardTimer)
+    entry.idleTimer = null
+    entry.hardTimer = null
+  }
+
+  private fireTimeout(entry: TermEntry, kind: 'idle' | 'hard'): void {
+    if (this.queue[0] !== entry) return
+    this.clearTimers(entry)
+    this.queue.shift()
+    const secs = Math.round((kind === 'idle' ? IDLE_TIMEOUT_MS : HARD_TIMEOUT_MS) / 1000)
+    entry.resolve(
+      entry.capture +
+        `\n[the command was killed — ${kind === 'idle' ? `no output for ${secs}s (looked stuck)` : `hit the ${secs}s ceiling`}. The terminal was restarted. For a long-lived process (a dev server), run it with background:true.]`
+    )
+    // a stuck command blocks the shell's stdin pipeline — kill so it respawns
+    this.disposed = false
+    try {
+      this.proc.kill()
+    } catch {
+      /* already gone */
+    }
   }
 
   private onStdout(chunk: string): void {
@@ -423,7 +495,7 @@ class TerminalSession {
       if (cwd) this.cwd = cwd
       const entry = this.queue.shift()
       if (entry) {
-        if (entry.timer) clearTimeout(entry.timer)
+        this.clearTimers(entry)
         entry.resolve(entry.capture)
       }
       // tell the UI the prompt is ready again (carries the new cwd)
@@ -431,23 +503,37 @@ class TerminalSession {
       return
     }
     const current = this.queue[0]
-    if (current) current.capture += line + '\n'
+    if (current) {
+      current.capture += line + '\n'
+      this.armTimers(current) // output → not stuck, reset the idle timer
+    }
     this.onData({ data: line + '\n', stream: 'stdout' })
   }
 
   private onStderr(chunk: string): void {
     const current = this.queue[0]
-    if (current) current.capture += chunk
+    if (current) {
+      current.capture += chunk
+      this.armTimers(current)
+    }
     this.onData({ data: chunk, stream: 'stderr' })
   }
 
   dispose(): void {
     this.disposed = true
     for (const e of this.queue) {
-      if (e.timer) clearTimeout(e.timer)
+      this.clearTimers(e)
       e.resolve(e.capture)
     }
     this.queue = []
+    for (const child of this.bgProcs) {
+      try {
+        child.kill()
+      } catch {
+        /* already gone */
+      }
+    }
+    this.bgProcs.clear()
     try {
       this.proc.kill()
     } catch {

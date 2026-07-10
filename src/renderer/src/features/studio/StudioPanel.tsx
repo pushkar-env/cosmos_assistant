@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { FileNode } from '@shared/types'
 import { useUIStore } from '@/core/stores/useUIStore'
+import { useSettingsStore } from '@/core/stores/useSettingsStore'
 import { Glass } from '@/shared/ui/Glass'
 import { CodeEditor } from './CodeEditor'
 import { useStudioStore } from './useStudioStore'
@@ -238,6 +239,9 @@ export function StudioPanel(): React.JSX.Element {
   const saveActive = useStudioStore((s) => s.saveActive)
   const pickRoot = useStudioStore((s) => s.pickRoot)
   const reveal = useStudioStore((s) => s.reveal)
+  const autoRun = useSettingsStore((s) => s.settings.agentAutoApprove)
+  const updateSettings = useSettingsStore((s) => s.update)
+  const git = useStudioStore((s) => s.git)
 
   const [creating, setCreating] = useState<null | 'file' | 'dir'>(null)
   const [newName, setNewName] = useState('')
@@ -279,8 +283,12 @@ export function StudioPanel(): React.JSX.Element {
             className="h-full w-full max-w-[1400px]"
           >
             <Glass brackets className="flex h-full w-full flex-col overflow-hidden">
-              {/* header */}
-              <div className="flex items-center justify-between border-b border-white/5 px-4 py-2.5">
+              {/* header — no-drag so its buttons aren't swallowed by the
+                  frameless-window titlebar drag region it overlaps at the top */}
+              <div
+                className="flex items-center justify-between border-b border-white/5 px-4 py-2.5"
+                style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+              >
                 <div className="flex items-center gap-3">
                   <span className="neon font-display text-xs font-bold tracking-[0.3em]">
                     COSMOS STUDIO
@@ -288,12 +296,46 @@ export function StudioPanel(): React.JSX.Element {
                   <button
                     onClick={() => reveal()}
                     title="Reveal in File Explorer"
-                    className="max-w-[420px] truncate rounded bg-black/30 px-2 py-1 font-mono text-[10px] text-dim hover:text-body"
+                    className="max-w-[360px] truncate rounded bg-black/30 px-2 py-1 font-mono text-[10px] text-dim hover:text-body"
                   >
                     {shortRoot || 'workspace'}
                   </button>
+                  {git?.isRepo && (
+                    <span
+                      className="flex items-center gap-1.5 rounded bg-black/30 px-2 py-1 font-mono text-[10px]"
+                      title={
+                        git.clean
+                          ? 'Working tree clean'
+                          : `${git.staged} staged · ${git.unstaged} modified · ${git.untracked} untracked`
+                      }
+                    >
+                      <span className="text-[var(--accent-bright)]">⎇ {git.branch || 'HEAD'}</span>
+                      {!git.clean && (
+                        <span className="text-amber-300">
+                          ●{git.staged + git.unstaged + git.untracked}
+                        </span>
+                      )}
+                      {git.ahead > 0 && <span className="text-dim">↑{git.ahead}</span>}
+                      {git.behind > 0 && <span className="text-dim">↓{git.behind}</span>}
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => void updateSettings({ agentAutoApprove: !autoRun })}
+                    title="Autonomous Builder — let the agent run its own terminal & file commands (install, build, test) without approving each step. Agent/Ultra mode only; Stop always interrupts."
+                    className={`flex items-center gap-1.5 rounded-md border px-2.5 py-1 font-mono text-[10px] uppercase tracking-widest transition-colors ${
+                      autoRun
+                        ? 'border-[var(--accent-dim)] text-[var(--accent-bright)]'
+                        : 'border-white/10 text-dim hover:text-body'
+                    }`}
+                  >
+                    <span
+                      className="h-1.5 w-1.5 rounded-full"
+                      style={{ background: autoRun ? 'var(--accent)' : 'var(--dim)' }}
+                    />
+                    Auto-run
+                  </button>
                   <button
                     onClick={() => void pickRoot()}
                     className="rounded-md px-2.5 py-1 font-mono text-[10px] uppercase tracking-widest text-dim hover:bg-white/5 hover:text-body"

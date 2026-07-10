@@ -8,9 +8,9 @@ export interface AgentDef {
   tools: string[]
 }
 
-const FS_READ = ['fs_list', 'fs_read', 'fs_search', 'project_tree', 'read_file']
+const FS_READ = ['fs_list', 'fs_read', 'fs_search', 'project_tree', 'read_file', 'search_code']
 const FS_WRITE = ['fs_write', 'fs_edit', 'fs_mkdir', 'fs_move', 'fs_delete', 'fs_zip', 'fs_unzip']
-const CODE = ['project_tree', 'read_file', 'fs_write', 'fs_edit', 'run_command']
+const CODE = ['project_tree', 'read_file', 'search_code', 'fs_write', 'fs_edit', 'run_command']
 const VISION = ['vision_screen', 'vision_image', 'ocr_screen', 'ocr_image']
 const NOTES = ['note_write', 'note_list', 'note_read']
 const UNITY = ['unity_status', 'unity_console', 'unity_scene', 'unity_refresh', 'unity_play', 'unity_stop']

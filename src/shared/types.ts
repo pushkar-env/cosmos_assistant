@@ -184,6 +184,51 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
  */
 export type MediaPlayerMode = 'dedicated' | 'default'
 
+/** A connected GitHub account. The token is stored encrypted at rest. */
+export interface GithubSettings {
+  /** Personal Access Token — encrypted on disk (safeStorage) */
+  token: string
+  /** @handle, shown when connected */
+  login: string
+  /** display name */
+  name: string
+  /** commit email — the account's primary email, or a noreply fallback */
+  email: string
+  /** avatar image URL */
+  avatarUrl: string
+}
+
+export const DEFAULT_GITHUB_SETTINGS: GithubSettings = {
+  token: '',
+  login: '',
+  name: '',
+  email: '',
+  avatarUrl: ''
+}
+
+/** Public GitHub identity surfaced to the renderer (never includes the token). */
+export interface GithubIdentity {
+  login: string
+  name: string
+  avatarUrl: string
+}
+
+/** Workspace git status for the Studio source-control indicator. */
+export interface GitStatus {
+  isRepo: boolean
+  branch: string
+  /** commits ahead / behind the upstream, when known */
+  ahead: number
+  behind: number
+  staged: number
+  unstaged: number
+  untracked: number
+  /** true when there is nothing to commit */
+  clean: boolean
+  /** origin remote URL, when set */
+  remote?: string
+}
+
 export interface Settings {
   provider: ProviderId
   /** the active model (for the current provider) */
@@ -210,6 +255,16 @@ export interface Settings {
    * terminal). Empty → resolved lazily to Documents/COSMOS Projects.
    */
   workspaceRoot: string
+  /**
+   * Autonomous Builder: in Agent/Ultra mode, auto-approve the agent's coding
+   * tools (run_command, fs_write, fs_edit, fs_mkdir, fs_move) so it can build a
+   * whole project — install packages, scaffold, build, test — without a prompt
+   * per step. Off by default; Stop always interrupts. Other sensitive tools
+   * (delete, power, close app…) still ask.
+   */
+  agentAutoApprove: boolean
+  /** the connected GitHub account (token encrypted at rest) */
+  github: GithubSettings
   /** tools granted permanent approval ("Always allow") */
   alwaysAllowTools: string[]
 }
@@ -322,6 +377,8 @@ export const DEFAULT_SETTINGS: Settings = {
   mediaPlayer: 'dedicated',
   assistantMode: 'chat',
   workspaceRoot: '',
+  agentAutoApprove: false,
+  github: DEFAULT_GITHUB_SETTINGS,
   alwaysAllowTools: []
 }
 

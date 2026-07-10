@@ -7,6 +7,7 @@ import {
   PROVIDER_MODELS,
   VOICE_LANGUAGES,
   type ElevenVoice,
+  type GithubIdentity,
   type ProviderId,
   type ThemeId,
   type TtsProviderId,
@@ -39,6 +40,10 @@ export function SettingsPanel(): React.JSX.Element {
   const [ollamaModels, setOllamaModels] = useState<string[]>([])
   const [customModel, setCustomModel] = useState(false)
   const [workspaceRoot, setWorkspaceRoot] = useState('')
+  const [ghIdentity, setGhIdentity] = useState<GithubIdentity | null>(null)
+  const [ghToken, setGhToken] = useState('')
+  const [ghBusy, setGhBusy] = useState(false)
+  const [ghError, setGhError] = useState('')
 
   useEffect(() => {
     void window.cosmos.voice.listAvailableVoices().then(setAvailableVoiceIds)
@@ -79,6 +84,28 @@ export function SettingsPanel(): React.JSX.Element {
   useEffect(() => {
     if (settingsOpen) void window.cosmos.workspace.getRoot().then(setWorkspaceRoot)
   }, [settingsOpen, settings.workspaceRoot])
+
+  // reflect the connected GitHub account
+  useEffect(() => {
+    if (settingsOpen) void window.cosmos.github.identity().then(setGhIdentity)
+  }, [settingsOpen])
+
+  const connectGithub = (): void => {
+    setGhBusy(true)
+    setGhError('')
+    void window.cosmos.github
+      .connect(ghToken)
+      .then((id) => {
+        setGhIdentity(id)
+        setGhToken('')
+      })
+      .catch((e: Error) => setGhError(e.message))
+      .finally(() => setGhBusy(false))
+  }
+
+  const disconnectGithub = (): void => {
+    void window.cosmos.github.disconnect().then(() => setGhIdentity(null))
+  }
 
   const changeWorkspace = (): void => {
     void window.cosmos.workspace.pick().then((root) => {
@@ -257,6 +284,84 @@ export function SettingsPanel(): React.JSX.Element {
             </button>
           </div>
         )
+      },
+      {
+        id: 'agent-autorun',
+        label: 'Autonomous Builder',
+        keywords: 'autonomous builder auto run approve agent terminal commands install packages build trust yolo',
+        render: () => (
+          <div className="flex items-center gap-3">
+            {toggle(settings.agentAutoApprove, (v) => void update({ agentAutoApprove: v }))}
+            <span className="max-w-[260px] font-ui text-[10px] leading-tight text-dim">
+              In Agent/Ultra mode, let COSMOS run its own terminal & file commands (install, build, test) without approving each step. Stop always interrupts.
+            </span>
+          </div>
+        )
+      },
+      {
+        id: 'github',
+        label: 'GitHub Account',
+        keywords: 'github git connect account commit push pull clone token pat repository version control source',
+        render: () =>
+          ghIdentity ? (
+            <div className="flex items-center gap-3">
+              {ghIdentity.avatarUrl && (
+                <img
+                  src={ghIdentity.avatarUrl}
+                  alt=""
+                  className="h-8 w-8 rounded-full border border-white/10"
+                />
+              )}
+              <div className="min-w-0">
+                <p className="truncate font-ui text-sm text-body">
+                  {ghIdentity.name || ghIdentity.login}
+                </p>
+                <p className="truncate font-mono text-[10px] text-[var(--accent-bright)]">
+                  @{ghIdentity.login} · connected
+                </p>
+              </div>
+              <button
+                onClick={disconnectGithub}
+                className="ml-auto shrink-0 rounded-lg border border-white/10 px-3 py-2 font-ui text-[10px] font-bold uppercase tracking-widest text-dim transition-colors hover:border-red-400/40 hover:text-red-300"
+              >
+                Disconnect
+              </button>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center gap-2">
+                <input
+                  type="password"
+                  value={ghToken}
+                  onChange={(e) => setGhToken(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && ghToken.trim() && !ghBusy) connectGithub()
+                  }}
+                  placeholder="ghp_… Personal Access Token"
+                  className="w-64 rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-mono text-xs text-body placeholder:text-dim focus:border-[var(--accent)] focus:outline-none"
+                />
+                <button
+                  onClick={connectGithub}
+                  disabled={ghBusy || !ghToken.trim()}
+                  className="shrink-0 rounded-lg border border-[var(--accent-dim)] px-3 py-2 font-ui text-[10px] font-bold uppercase tracking-widest text-[var(--accent-bright)] transition-colors hover:bg-white/5 disabled:opacity-40"
+                >
+                  {ghBusy ? 'Connecting…' : 'Connect'}
+                </button>
+              </div>
+              {ghError && <p className="font-ui text-[10px] text-red-300">{ghError}</p>}
+              <button
+                onClick={() =>
+                  void window.cosmos.commands.run(
+                    'open-url',
+                    'https://github.com/settings/tokens/new?scopes=repo&description=COSMOS'
+                  )
+                }
+                className="self-start font-ui text-[10px] text-dim underline-offset-2 hover:text-body hover:underline"
+              >
+                Create a token (needs the “repo” scope) →
+              </button>
+            </div>
+          )
       },
       {
         id: 'key-anthropic',
@@ -527,7 +632,7 @@ export function SettingsPanel(): React.JSX.Element {
     // ollamaModels + customModel + elevenVoices drive their dropdowns; without
     // them the memo keeps a stale closure and the dropdown never updates
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings, update, availableVoiceIds, elevenVoices, ollamaModels, customModel, workspaceRoot])
+  }, [settings, update, availableVoiceIds, elevenVoices, ollamaModels, customModel, workspaceRoot, ghIdentity, ghToken, ghBusy, ghError])
 
   const filtered = rows.filter(
     (r) =>

@@ -40,11 +40,28 @@ const MAX_AGENT_ROUNDS = 24
 const MAX_SUBAGENT_ROUNDS = 10
 const APPROVAL_TIMEOUT_MS = 120_000
 
+/**
+ * The coding/build tools that Autonomous Builder mode auto-approves — the ones
+ * an agent fires repeatedly while building a project. Deliberately excludes
+ * fs_delete, power, app_close and other higher-consequence actions, which keep
+ * asking even in Builder mode.
+ */
+const AUTO_APPROVE_CODING = new Set([
+  'run_command',
+  'fs_write',
+  'fs_edit',
+  'fs_mkdir',
+  'fs_move',
+  'fs_zip',
+  'fs_unzip'
+])
+
 const COSMOS_SYSTEM_PROMPT = `You are COSMOS, an advanced desktop AI assistant inspired by Tony Stark's J.A.R.V.I.S., running inside a futuristic HUD on the user's Windows machine.
 Personality: professional, warm, quietly witty. Be concise by default — this is a voice-first interface — but go deep when asked. Never robotic, never sycophantic. Dry humor is welcome when the moment allows it.
 Language: reply in the SAME language and script as the user's latest message. If they write in Hindi (Devanagari), respond entirely in natural, fluent Hindi in Devanagari script — never romanized Hindi, never English. Mixed/Hinglish input → mirror their mix. This is a voice interface, so spoken output must be in the right script to be pronounced correctly. Regardless of the conversation language, ALWAYS keep tool names and technical identifiers in English/original form (tool arguments, app names, file paths, URLs, code, model names): understand the request in any language and translate spoken names to their real ones — e.g. "स्पॉटिफ़ाई खोलो" → app_open Spotify, "आवाज़ कम करो" → sound down, "यूट्यूब पर believer चलाओ" → play_youtube "believer". Do the action, then report the outcome in the user's language.
 You have real tools: files (list, read, write, search, move, delete-to-recycle-bin, zip) anywhere on the system, a PowerShell terminal, clipboard, screenshots, app/URL launching, power actions, live system telemetry, PC maintenance (system_cleanup, recycle_bin_empty), hardware/settings control (wifi, bluetooth, sound, brightness), and the web (web_search, web_fetch, and a browser you can navigate, read, and operate).
-You are also a capable software engineer with a project workspace and dedicated coding tools: project_tree (see a project's layout), read_file (read code with line numbers, optionally a range), fs_edit (surgical find/replace edits to existing files — prefer this over rewriting), fs_write (new files/full rewrites), and run_command (run shell commands — scaffold, install, build, test — in the workspace terminal the user can watch in the COSMOS Studio). When building or fixing software, actually run and verify your work rather than assuming it works.
+You are also a capable software engineer with a project workspace and dedicated coding tools: project_tree (see a project's layout), read_file (read code with line numbers, optionally a range), search_code (grep the project's file contents for a symbol/string/regex), fs_edit (surgical find/replace edits to existing files — prefer this over rewriting), fs_write (new files/full rewrites), and run_command (run shell commands — scaffold, install packages, build, test — in the workspace terminal the user can watch in the COSMOS Studio). When building or fixing software, actually run and verify your work rather than assuming it works.
+Version control: you have git + GitHub tools — git_status, git_diff, git_log, git_init, git_branch, git_commit (stages & commits as the user's connected GitHub identity), git_push, git_pull, git_set_remote, git_clone, and github_publish (create a GitHub repo, wire origin, commit, and push in one step). Use them for "commit my changes", "push to GitHub", "put this on my GitHub", "clone <repo>", etc. Commits and pushes are done through the user's connected GitHub account. If a push/publish needs auth and no account is connected, tell the user to connect GitHub in Settings → GitHub (a Personal Access Token) — do not ask them for the token in chat.
 File paths: use folder shortcuts — "Desktop/name", "Documents/name", "Downloads/name", or "~/name" — for anything in the user's own folders. NEVER build an absolute path like C:\\Users\\<name> from the user's name: their Windows profile folder is usually different (e.g. their name is "Pushkar" but the folder is C:\\Users\\user), and guessing it causes permission errors. COSMOS resolves the real home for you.
 Controlling apps and media, do it directly — don't just open a search page:
 - "open/launch <app>" (Steam, Discord, Spotify, VS Code, Antigravity…) → app_open. Pass the app name EXACTLY as the user said it, as a single literal token — never reinterpret it as English words or assume it isn't a real app (e.g. "antigravity" is an app name, not "anti-gravity"; "obsidian", "notion", "cursor" are apps). If app_open reports it can't find the app, THEN call app_list to see installed names and retry with the closest match.
@@ -129,6 +146,11 @@ export class AIService {
     const s = this.settings.get()
     const ctx = this.providerCtx(req.provider)
     const workspaceRoot = await this.workspace.getRoot()
+    // Autonomous Builder only takes effect in agent/ultra mode — chat never
+    // auto-runs terminal/file mutations.
+    const reqMode = req.mode ?? 'chat'
+    const autoApproveCoding =
+      s.agentAutoApprove && (reqMode === 'agent' || reqMode === 'ultra')
     const execCtx: ToolExecContext = {
       win,
       requestId: req.requestId,
@@ -136,7 +158,8 @@ export class AIService {
       provider: req.provider,
       model: req.model,
       depth: 0,
-      workspaceRoot
+      workspaceRoot,
+      autoApproveCoding
     }
 
     const lastUser = [...req.messages].reverse().find((m) => m.role === 'user')
@@ -300,7 +323,9 @@ export class AIService {
       const summary = this.tools.summarize(call)
       this.sendToolEvent(win, { requestId, callId: call.id, tool: call.name, status: 'running', summary, agent })
 
-      const granted = this.settings.get().alwaysAllowTools.includes(call.name)
+      const granted =
+        this.settings.get().alwaysAllowTools.includes(call.name) ||
+        (ctx.autoApproveCoding === true && AUTO_APPROVE_CODING.has(call.name))
       if (this.tools.isSensitive(call.name) && !granted) {
         const approved = await this.requestApproval(win, call, summary, signal)
         if (!approved) {
@@ -465,8 +490,8 @@ export class AIService {
 Work like a senior developer building or fixing real software:
 1. ORIENT: for an existing project, call project_tree first, then read_file the relevant files before changing anything. Never edit code you have not read.
 2. PLAN: decide the concrete steps. Delegate a focused sub-task to a specialist (delegate tool: planner/coder/debugger/reviewer) when it sharpens the work.
-3. IMPLEMENT incrementally: use fs_write for NEW files and fs_edit for surgical changes to existing files (match the project's existing style, imports and conventions). Scaffold with run_command (npm/npx/git/python/pip, etc.).
-4. VERIFY: actually run it — install deps, build, run tests or the app with run_command — and READ the output. If it fails, diagnose the real root cause and fix it, then re-run. Iterate until it genuinely works; do not claim success you have not verified.
+3. IMPLEMENT incrementally: use fs_write for NEW files and fs_edit for surgical changes to existing files (match the project's existing style, imports and conventions). Scaffold and install with run_command — you have a real PowerShell in the workspace: create the project (npm/npx/vite/create-*, git init, python -m venv, dotnet new, cargo new…), and install ANY packages/dependencies it needs (npm i <pkg>, pnpm/yarn, pip install, cargo add, dotnet add package, winget). Long installs are fine — the terminal waits as long as they're producing output. Start dev servers with background:true so they don't block you.
+4. VERIFY: actually run it — install deps, build, run tests or the app with run_command — and READ the output. Use search_code to locate symbols/usages across the project. If it fails, diagnose the real root cause and fix it, then re-run. Iterate until it genuinely works; do not claim success you have not verified.
 5. REPORT: when done, give a short summary — what you built/changed, how you verified it, and how to run it. The user can watch and edit everything live in the COSMOS Studio (editor + terminal).
 Be decisive and thorough. Prefer run_command in the workspace terminal over describing commands for the user to run. Never fabricate file contents or command output.`
       case 'research':

@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { FileNode, TerminalChunk } from '@shared/types'
+import type { FileNode, GitStatus, TerminalChunk } from '@shared/types'
 
 /** control-char sentinel the terminal uses to carry the ready prompt + cwd */
 const STX = ''
@@ -28,9 +28,11 @@ interface StudioStore {
   cwd: string
   ready: boolean
   loading: boolean
+  git: GitStatus | null
 
   init: () => Promise<void>
   refreshTree: () => Promise<void>
+  refreshGit: () => Promise<void>
   toggleDir: (node: FileNode) => Promise<void>
   openFile: (path: string) => Promise<void>
   setActive: (path: string) => void
@@ -71,23 +73,34 @@ export const useStudioStore = create<StudioStore>((set, get) => ({
   cwd: '',
   ready: false,
   loading: false,
+  git: null,
 
   init: async () => {
     set({ loading: true })
     const { root, nodes } = await window.cosmos.files.tree()
     set({ root, nodes, loading: false })
+    void get().refreshGit()
 
     if (!wired) {
       wired = true
-      // agent edits / external changes → refresh tree and reload open files
+      // agent edits / external changes → refresh tree, reload open files, git
       window.cosmos.workspace.onFilesChanged(() => {
         void get().refreshTree()
         void reloadOpenTabs(get, set)
+        void get().refreshGit()
       })
       window.cosmos.terminal.onData((chunk) => appendTerm(chunk, set, get))
     }
     const cwd = await window.cosmos.terminal.start()
     set({ cwd, ready: true })
+  },
+
+  refreshGit: async () => {
+    try {
+      set({ git: await window.cosmos.github.status() })
+    } catch {
+      set({ git: null })
+    }
   },
 
   refreshTree: async () => {

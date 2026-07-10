@@ -22,6 +22,7 @@ import type { TtsService } from './services/voice/TtsService'
 import type { MemoryService } from './services/MemoryService'
 import type { PluginService } from './services/PluginService'
 import type { WorkspaceService } from './services/WorkspaceService'
+import type { GitService } from './services/GitService'
 
 interface WindowController {
   setMode: (mode: WindowMode) => void
@@ -41,6 +42,7 @@ interface Services {
   memory: MemoryService
   plugins: PluginService
   workspace: WorkspaceService
+  git: GitService
   window: WindowController
 }
 
@@ -83,6 +85,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null, services: Ser
   ipcMain.handle(IPC.TERM_START, () => services.workspace.terminalStart())
   ipcMain.handle(IPC.TERM_INPUT, (_e, command: string) => services.workspace.terminalInput(command))
   ipcMain.handle(IPC.TERM_RESET, () => services.workspace.terminalReset())
+
+  // ── github / git ──
+  ipcMain.handle(IPC.GITHUB_CONNECT, (_e, token: string) => services.git.connect(token))
+  ipcMain.handle(IPC.GITHUB_DISCONNECT, () => services.git.disconnect())
+  ipcMain.handle(IPC.GITHUB_IDENTITY, () => services.git.identity())
+  ipcMain.handle(IPC.GIT_STATUS, () => services.git.status())
 
   ipcMain.handle(IPC.AI_CHAT, async (_e, req: ChatRequest) => {
     const win = getWindow()

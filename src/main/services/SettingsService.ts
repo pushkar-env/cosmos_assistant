@@ -4,8 +4,8 @@ import { join, dirname } from 'path'
 import { BUNDLED_VOICES, DEFAULT_SETTINGS, voiceLanguageOf, type Settings } from '@shared/types'
 import { decryptOrNull, encryptText, isEncrypted } from './secureText'
 
-type SecretKey = 'anthropic' | 'openai' | 'gemini' | 'elevenLabsKey'
-const SECRET_KEYS: SecretKey[] = ['anthropic', 'openai', 'gemini', 'elevenLabsKey']
+type SecretKey = 'anthropic' | 'openai' | 'gemini' | 'elevenLabsKey' | 'githubToken'
+const SECRET_KEYS: SecretKey[] = ['anthropic', 'openai', 'gemini', 'elevenLabsKey', 'githubToken']
 
 /**
  * Persists a single JSON settings document under userData. API keys are
@@ -54,6 +54,7 @@ export class SettingsService {
     const current = this.get()
     const nextKeys = { ...current.apiKeys, ...patch.apiKeys }
     const nextVoice = { ...current.voice, ...patch.voice }
+    const nextGithub = { ...current.github, ...patch.github }
 
     // a freshly-entered secret clears any preserved (undecryptable) blob
     if (patch.apiKeys) {
@@ -62,6 +63,7 @@ export class SettingsService {
       }
     }
     if (patch.voice?.elevenLabsKey !== undefined) this.locked.delete('elevenLabsKey')
+    if (patch.github?.token !== undefined) this.locked.delete('githubToken')
 
     this.cache = {
       ...current,
@@ -69,7 +71,8 @@ export class SettingsService {
       apiKeys: nextKeys,
       providerModels: { ...current.providerModels, ...patch.providerModels },
       location: { ...current.location, ...patch.location },
-      voice: nextVoice
+      voice: nextVoice,
+      github: nextGithub
     }
     this.persist()
     return this.cache
@@ -157,6 +160,7 @@ export class SettingsService {
       providerModels: { ...DEFAULT_SETTINGS.providerModels, ...raw.providerModels },
       location: { ...DEFAULT_SETTINGS.location, ...raw.location },
       voice: { ...DEFAULT_SETTINGS.voice, ...raw.voice },
+      github: { ...DEFAULT_SETTINGS.github, ...raw.github },
       alwaysAllowTools: raw.alwaysAllowTools ?? []
     }
     // migrate: remember the active model for its provider if not already
@@ -187,6 +191,7 @@ export class SettingsService {
     this.resolveSecret(merged, 'openai', merged.apiKeys.openai)
     this.resolveSecret(merged, 'gemini', merged.apiKeys.gemini)
     this.resolveSecret(merged, 'elevenLabsKey', merged.voice.elevenLabsKey)
+    this.resolveSecret(merged, 'githubToken', merged.github.token)
     if (this.locked.size > 0) {
       console.warn(
         `[settings] ${this.locked.size} stored key(s) could not be decrypted ` +
@@ -210,6 +215,7 @@ export class SettingsService {
 
   private assignSecret(target: Settings, key: SecretKey, value: string): void {
     if (key === 'elevenLabsKey') target.voice.elevenLabsKey = value
+    else if (key === 'githubToken') target.github.token = value
     else target.apiKeys[key] = value
   }
 
@@ -241,6 +247,10 @@ export class SettingsService {
       voice: {
         ...this.cache.voice,
         elevenLabsKey: this.secretForDisk('elevenLabsKey', this.cache.voice.elevenLabsKey)
+      },
+      github: {
+        ...this.cache.github,
+        token: this.secretForDisk('githubToken', this.cache.github.token)
       }
     }
     try {

@@ -8,6 +8,7 @@ import { memoryTools } from './memoryTools'
 import { browserTools } from './browserTools'
 import { creatorTools } from './creatorTools'
 import { codingTools } from './codingTools'
+import { gitTools } from './gitTools'
 import type { SystemStatsService } from '../SystemStatsService'
 import type { CommandService } from '../CommandService'
 import type { MemoryService } from '../MemoryService'
@@ -18,6 +19,7 @@ import type { UnityService } from '../unity/UnityService'
 import type { UnrealService } from '../UnrealService'
 import type { MediaService } from '../MediaService'
 import type { WorkspaceService } from '../WorkspaceService'
+import type { GitService } from '../GitService'
 
 export interface RegistryDeps {
   stats: SystemStatsService
@@ -30,6 +32,7 @@ export interface RegistryDeps {
   unreal: UnrealService
   media: MediaService
   workspace: WorkspaceService
+  git: GitService
 }
 
 /** runtime context a tool may need (delegate spawns sub-agents with it) */
@@ -43,6 +46,8 @@ export interface ToolExecContext {
   depth: number
   /** the active project root — bare-relative file paths resolve against it */
   workspaceRoot?: string
+  /** Autonomous Builder on: skip approval for the coding/build tool set */
+  autoApproveCoding?: boolean
 }
 
 export interface ToolSpec {
@@ -67,7 +72,8 @@ export class ToolRegistry {
       ...memoryTools(deps.memory),
       ...browserTools(deps.browser),
       ...creatorTools(deps),
-      ...codingTools(deps.workspace)
+      ...codingTools(deps.workspace),
+      ...gitTools(deps.git)
     ]) {
       this.specs.set(spec.def.name, spec)
     }

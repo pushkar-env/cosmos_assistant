@@ -32,6 +32,7 @@ import { UnrealService } from './services/UnrealService'
 import { PluginService } from './services/PluginService'
 import { MediaService } from './services/MediaService'
 import { WorkspaceService } from './services/WorkspaceService'
+import { GitService } from './services/GitService'
 
 // Pin a stable identity BEFORE any service reads app.getPath('userData').
 // This guarantees `npm run dev` and the installed .exe share one profile
@@ -72,6 +73,7 @@ const memory = new MemoryService(embeddings)
 const browser = new BrowserService()
 const media = new MediaService(browser, settings)
 const workspace = new WorkspaceService(settings)
+const git = new GitService(settings, workspace)
 const tools = new ToolRegistry({
   stats,
   commands,
@@ -82,7 +84,8 @@ const tools = new ToolRegistry({
   unity: new UnityService(),
   unreal: new UnrealService(),
   media,
-  workspace
+  workspace,
+  git
 })
 const ai = new AIService(settings, tools, memory, workspace)
 const stt = new SttService(settings)
@@ -331,6 +334,7 @@ if (!gotLock) {
       memory,
       plugins,
       workspace,
+      git,
       window: {
         setMode: setWindowMode,
         show: showMainWindow,

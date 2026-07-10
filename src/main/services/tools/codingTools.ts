@@ -1,10 +1,28 @@
 import { promises as fs } from 'fs'
-import { dirname } from 'path'
+import { dirname, join, relative, sep } from 'path'
 import type { ToolSpec } from './ToolRegistry'
 import type { WorkspaceService } from '../WorkspaceService'
 import { resolveUserPath } from '../userPaths'
 
 const MAX_READ_BYTES = 60_000
+const SEARCH_SKIP = new Set([
+  'node_modules',
+  '.git',
+  'dist',
+  'out',
+  'build',
+  '.next',
+  '.cache',
+  '__pycache__',
+  'venv',
+  '.venv',
+  'target',
+  'bin',
+  'obj',
+  'coverage'
+])
+const SEARCH_MAX_HITS = 80
+const SEARCH_MAX_FILE_BYTES = 1_000_000
 
 /**
  * Production-grade coding tools for agent mode: surgical edits (cheaper and
@@ -104,6 +122,84 @@ export function codingTools(workspace: WorkspaceService): ToolSpec[] {
         await fs.mkdir(dirname(file), { recursive: true })
         await fs.writeFile(file, updated, 'utf-8')
         return `Edited ${file} — replaced ${a.replace_all === true ? occurrences : 1} occurrence(s).`
+      }
+    },
+    {
+      def: {
+        name: 'search_code',
+        description:
+          'Search the project for a string or regex across file CONTENTS (like grep/ripgrep) — returns matching file:line: text. Use this to find where a symbol, function, import, config value, or piece of text lives before editing. Skips node_modules/.git/build output.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            query: { type: 'string', description: 'Text or JS regex to search for' },
+            path: { type: 'string', description: 'Subfolder to limit the search (optional)' },
+            regex: { type: 'boolean', description: 'Treat query as a regular expression (default false = literal)' },
+            caseSensitive: { type: 'boolean', description: 'Default false' }
+          },
+          required: ['query']
+        },
+        sensitive: false
+      },
+      summary: (a) => `"${String(a.query ?? '')}"`,
+      run: async (a, ctx) => {
+        const rootDir = a.path ? resolve(String(a.path), ctx) : ctx.workspaceRoot ?? resolve('.', ctx)
+        const flags = a.caseSensitive ? 'g' : 'gi'
+        let re: RegExp
+        try {
+          const src = a.regex
+            ? String(a.query)
+            : String(a.query).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+          re = new RegExp(src, flags)
+        } catch (err) {
+          throw new Error(`Invalid regex: ${err instanceof Error ? err.message : String(err)}`)
+        }
+        const hits: string[] = []
+        const walk = async (dir: string): Promise<void> => {
+          if (hits.length >= SEARCH_MAX_HITS) return
+          let entries: import('fs').Dirent[]
+          try {
+            entries = await fs.readdir(dir, { withFileTypes: true })
+          } catch {
+            return
+          }
+          for (const e of entries) {
+            if (hits.length >= SEARCH_MAX_HITS) return
+            if (e.isDirectory()) {
+              if (SEARCH_SKIP.has(e.name) || e.name.startsWith('.')) continue
+              await walk(join(dir, e.name))
+              continue
+            }
+            const abs = join(dir, e.name)
+            let stat: import('fs').Stats
+            try {
+              stat = await fs.stat(abs)
+            } catch {
+              continue
+            }
+            if (stat.size > SEARCH_MAX_FILE_BYTES || stat.size === 0) continue
+            let content: string
+            try {
+              content = await fs.readFile(abs, 'utf-8')
+            } catch {
+              continue
+            }
+            if (/\u0000/.test(content)) continue // skip binary files
+            const relPath = relative(ctx.workspaceRoot ?? dir, abs).split(sep).join('/')
+            const lines = content.split('\n')
+            for (let i = 0; i < lines.length; i++) {
+              re.lastIndex = 0
+              if (re.test(lines[i])) {
+                hits.push(`${relPath}:${i + 1}: ${lines[i].trim().slice(0, 200)}`)
+                if (hits.length >= SEARCH_MAX_HITS) break
+              }
+            }
+          }
+        }
+        await walk(rootDir)
+        if (!hits.length) return 'No matches found.'
+        const capped = hits.length >= SEARCH_MAX_HITS ? `\n… (stopped at ${SEARCH_MAX_HITS} matches)` : ''
+        return hits.join('\n') + capped
       }
     },
     {

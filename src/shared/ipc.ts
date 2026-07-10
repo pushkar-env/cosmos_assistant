@@ -37,6 +37,11 @@ export const IPC = {
   TERM_START: 'term:start',
   TERM_INPUT: 'term:input',
   TERM_RESET: 'term:reset',
+  // ── github / git ──
+  GITHUB_CONNECT: 'github:connect',
+  GITHUB_DISCONNECT: 'github:disconnect',
+  GITHUB_IDENTITY: 'github:identity',
+  GIT_STATUS: 'git:status',
   SETTINGS_GET: 'settings:get',
   SETTINGS_SET: 'settings:set',
   WEATHER_GET: 'weather:get',
