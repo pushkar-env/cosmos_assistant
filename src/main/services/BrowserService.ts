@@ -43,7 +43,15 @@ export class BrowserService {
           args: [
             '--start-maximized',
             '--disable-blink-features=AutomationControlled',
-            '--autoplay-policy=no-user-gesture-required'
+            '--autoplay-policy=no-user-gesture-required',
+            // memory-lean: cap the process explosion (was ~80 processes /
+            // several GB) without hurting playback or automation quality
+            '--renderer-process-limit=4',
+            '--disable-dev-shm-usage',
+            '--disable-extensions',
+            '--disable-component-update',
+            '--disable-background-networking',
+            '--disable-features=Translate,MediaRouter,OptimizationHints'
           ]
         })
         this.context.on('close', () => {
@@ -162,6 +170,26 @@ export class BrowserService {
 
   get isMediaPlaying(): boolean {
     return !!this.mediaPage && !this.mediaPage.isClosed()
+  }
+
+  /**
+   * Whether audio/video is ACTUALLY playing right now (not just a tab left
+   * open). Used by the idle-close so a paused/finished/forgotten media tab no
+   * longer pins the whole browser (and its RAM) open indefinitely.
+   */
+  private async isActuallyPlaying(): Promise<boolean> {
+    if (!this.mediaPage || this.mediaPage.isClosed()) return false
+    try {
+      return await this.mediaPage.evaluate(() => {
+        const doc = (globalThis as { document?: unknown }).document as
+          | { querySelector(sel: string): { paused: boolean; ended: boolean; currentTime: number } | null }
+          | undefined
+        const v = doc?.querySelector('video')
+        return !!v && !v.paused && !v.ended && v.currentTime > 0
+      })
+    } catch {
+      return false
+    }
   }
 
   private async videoAction(page: Page, action: string): Promise<string> {
@@ -374,13 +402,15 @@ export class BrowserService {
     return this.page
   }
 
-  /** Reset the idle-close timer. Media playback keeps the browser alive. */
+  /** Reset the idle-close timer. Active playback keeps the browser alive. */
   private touch(): void {
     if (this.idleTimer) clearTimeout(this.idleTimer)
-    this.idleTimer = setTimeout(() => {
-      // never close mid-playback — reschedule while media is up
-      if (this.isMediaPlaying) this.touch()
-      else void this.close()
-    }, IDLE_CLOSE_MS)
+    this.idleTimer = setTimeout(() => void this.onIdle(), IDLE_CLOSE_MS)
+  }
+
+  /** idle fired: keep the browser only if media is genuinely playing */
+  private async onIdle(): Promise<void> {
+    if (await this.isActuallyPlaying()) this.touch()
+    else await this.close()
   }
 }

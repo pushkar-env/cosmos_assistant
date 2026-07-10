@@ -1,8 +1,18 @@
 import { app } from 'electron'
 import { execFile, spawn } from 'child_process'
-import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'fs'
+import {
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  unlinkSync,
+  utimesSync,
+  writeFileSync,
+  existsSync
+} from 'fs'
 import { dirname, join } from 'path'
-import { randomUUID } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
 import {
   BUNDLED_VOICES,
   DEFAULT_ELEVEN_MODEL,
@@ -36,16 +46,110 @@ export class TtsService {
     if (!clean) return { data: new ArrayBuffer(0), mime: 'audio/wav' }
 
     const voice = this.settings.get().voice
+    // Reuse previously-synthesized audio for identical lines (the launch
+    // greeting, acknowledgements, repeated phrases). This saves ElevenLabs
+    // credits and re-synthesis latency, and is keyed by the exact voice/model
+    // so switching voices never returns stale audio.
+    const ext = voice.ttsProvider === 'elevenlabs' ? 'mp3' : 'wav'
+    const key = this.cacheKey(clean, voice.ttsProvider, voice, ext)
+    const cached = this.readCache(key, ext)
+    if (cached) return cached
+
+    let result: SynthesisResult
     switch (voice.ttsProvider) {
       case 'elevenlabs':
-        return this.elevenLabs(clean, voice.elevenLabsKey, voice.elevenLabsVoiceId, voice.elevenLabsModel)
+        result = await this.elevenLabs(clean, voice.elevenLabsKey, voice.elevenLabsVoiceId, voice.elevenLabsModel)
+        break
       case 'piper': {
         const resolved = this.resolvePiper(voice)
-        return this.piper(clean, resolved.piperPath, resolved.piperModelPath)
+        result = await this.piper(clean, resolved.piperPath, resolved.piperModelPath)
+        break
       }
       case 'windows':
       default:
-        return this.windowsSapi(clean)
+        result = await this.windowsSapi(clean)
+        break
+    }
+    this.writeCache(key, ext, clean, result)
+    return result
+  }
+
+  // ── synthesis cache (LRU, size-capped) ─────────────────────────────────────
+
+  /** longest line we bother caching — repeated lines are short; unique long
+   *  replies rarely recur and would just churn the cache */
+  private static readonly CACHE_MAX_TEXT = 600
+  private static readonly CACHE_MAX_BYTES = 40 * 1024 * 1024
+  private static readonly CACHE_MAX_FILES = 400
+
+  private cacheDir(): string {
+    const dir = join(app.getPath('userData'), 'tts-cache')
+    mkdirSync(dir, { recursive: true })
+    return dir
+  }
+
+  private cacheKey(text: string, provider: string, voice: VoiceSettings, ext: string): string {
+    const id =
+      provider === 'elevenlabs'
+        ? `${voice.elevenLabsVoiceId}:${voice.elevenLabsModel}`
+        : provider === 'piper'
+          ? voice.piperVoiceId
+          : 'sapi'
+    return createHash('sha1').update(`${provider}|${id}|${ext}|${text}`).digest('hex')
+  }
+
+  private readCache(key: string, ext: string): SynthesisResult | null {
+    const file = join(this.cacheDir(), `${key}.${ext}`)
+    if (!existsSync(file)) return null
+    try {
+      const data = readFileSync(file)
+      const now = new Date() // touch mtime → LRU keeps hot lines
+      try {
+        utimesSync(file, now, now)
+      } catch {
+        /* touch is best-effort */
+      }
+      return { data: bufferToArrayBuffer(data), mime: ext === 'mp3' ? 'audio/mpeg' : 'audio/wav' }
+    } catch {
+      return null
+    }
+  }
+
+  private writeCache(key: string, ext: string, text: string, result: SynthesisResult): void {
+    if (text.length > TtsService.CACHE_MAX_TEXT) return
+    if (result.data.byteLength === 0) return
+    try {
+      writeFileSync(join(this.cacheDir(), `${key}.${ext}`), Buffer.from(result.data))
+      this.enforceCacheCap()
+    } catch {
+      /* cache is best-effort — never let it break playback */
+    }
+  }
+
+  /** evict oldest files until under the size/count caps */
+  private enforceCacheCap(): void {
+    try {
+      const dir = this.cacheDir()
+      const files = readdirSync(dir).map((name) => {
+        const st = statSync(join(dir, name))
+        return { path: join(dir, name), size: st.size, mtime: st.mtimeMs }
+      })
+      let total = files.reduce((s, f) => s + f.size, 0)
+      if (total <= TtsService.CACHE_MAX_BYTES && files.length <= TtsService.CACHE_MAX_FILES) return
+      files.sort((a, b) => a.mtime - b.mtime) // oldest first
+      let count = files.length
+      for (const f of files) {
+        if (total <= TtsService.CACHE_MAX_BYTES && count <= TtsService.CACHE_MAX_FILES) break
+        try {
+          unlinkSync(f.path)
+          total -= f.size
+          count--
+        } catch {
+          /* ignore */
+        }
+      }
+    } catch {
+      /* ignore */
     }
   }
 
