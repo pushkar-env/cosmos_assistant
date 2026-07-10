@@ -1,15 +1,7 @@
 /** GLSL for the AI core. Simplex noise: Ashima Arts (MIT). */
 
-export const CORE_VERTEX = /* glsl */ `
-uniform float uTime;
-uniform float uAmp;
-uniform float uSpeed;
-uniform float uPulse;
-
-varying vec3 vNormal;
-varying vec3 vViewDir;
-varying float vDisp;
-
+/** shared 3D simplex noise — prepended to any shader stage that needs it */
+const SIMPLEX = /* glsl */ `
 vec3 mod289(vec3 x){ return x - floor(x * (1.0/289.0)) * 289.0; }
 vec4 mod289(vec4 x){ return x - floor(x * (1.0/289.0)) * 289.0; }
 vec4 permute(vec4 x){ return mod289(((x*34.0)+1.0)*x); }
@@ -58,6 +50,27 @@ float snoise(vec3 v) {
   return 42.0 * dot(m*m, vec4(dot(p0,x0), dot(p1,x1), dot(p2,x2), dot(p3,x3)));
 }
 
+// fractal brownian motion — layered noise for turbulent plasma
+float fbm(vec3 p){
+  float f = 0.0;
+  float a = 0.5;
+  for (int i = 0; i < 5; i++) { f += a * snoise(p); p *= 2.02; a *= 0.5; }
+  return f;
+}
+`
+
+// ── outer holographic membrane (the displaced icosahedron shell) ────────────
+
+export const CORE_VERTEX = /* glsl */ `
+uniform float uTime;
+uniform float uAmp;
+uniform float uSpeed;
+uniform float uPulse;
+
+varying vec3 vNormal;
+varying vec3 vViewDir;
+varying float vDisp;
+${SIMPLEX}
 void main() {
   float t = uTime * uSpeed;
   float n = snoise(position * 1.8 + vec3(t * 0.4, t * 0.3, t * 0.2));
@@ -85,19 +98,83 @@ varying vec3 vViewDir;
 varying float vDisp;
 
 void main() {
-  float fresnel = pow(1.0 - max(dot(vNormal, vViewDir), 0.0), 2.4);
+  float fresnel = pow(1.0 - max(dot(vNormal, vViewDir), 0.0), 2.2);
   float ridge = smoothstep(0.0, 0.22, abs(vDisp)) * 0.9;
+  // energy flowing along the displacement ridges
+  float bands = 0.5 + 0.5 * sin(vDisp * 34.0 - uTime * 3.2);
   float shimmer = 0.06 * sin(uTime * 2.0 + vDisp * 40.0);
 
-  vec3 base = uColor * 0.16;                 // dark translucent body
-  vec3 rim = uColorBright * fresnel * uRim;  // holographic edge
-  vec3 energy = mix(uColor, uColorBright, ridge) * ridge * 0.6;
+  vec3 base = uColor * 0.10;                         // faint translucent body
+  vec3 rim = uColorBright * fresnel * uRim;          // holographic edge
+  vec3 hot = uColorBright * pow(fresnel, 3.5) * 0.7; // hot inner-rim glow
+  vec3 energy = mix(uColor, uColorBright, ridge) * ridge * (0.55 + bands * 0.5);
 
-  vec3 color = base + rim + energy + shimmer * uColorBright;
-  float alpha = clamp(0.22 + fresnel * 0.75 + ridge * 0.35, 0.0, 1.0);
+  vec3 color = base + rim + hot + energy + shimmer * uColorBright;
+  // keep the front glassy so the glowing nucleus + lattice read through it
+  float alpha = clamp(0.07 + fresnel * 0.72 + ridge * 0.42, 0.0, 1.0);
   gl_FragColor = vec4(color, alpha);
 }
 `
+
+// ── glowing plasma nucleus (the hot core at the centre) ─────────────────────
+
+export const NUCLEUS_VERTEX = /* glsl */ `
+uniform float uTime;
+uniform float uAmp;
+uniform float uPulse;
+
+varying vec3 vPos;
+varying vec3 vNormal;
+varying vec3 vViewDir;
+varying float vTurb;
+${SIMPLEX}
+void main() {
+  float t = uTime * 0.6;
+  float turb = fbm(position * 2.6 + vec3(t, t * 0.7, -t * 0.5));
+  float voice = uPulse * (0.5 + 0.5 * sin(uTime * 8.0));
+  float disp = turb * (0.05 + uAmp * 0.5 + voice * 0.18);
+  vec3 displaced = position + normal * disp;
+
+  vTurb = turb;
+  vPos = position;
+  vNormal = normalize(normalMatrix * normal);
+  vec4 mv = modelViewMatrix * vec4(displaced, 1.0);
+  vViewDir = normalize(-mv.xyz);
+  gl_Position = projectionMatrix * mv;
+}
+`
+
+export const NUCLEUS_FRAGMENT = /* glsl */ `
+uniform vec3 uColor;
+uniform vec3 uColorBright;
+uniform float uTime;
+uniform float uPulse;
+uniform float uGlow;
+
+varying vec3 vPos;
+varying vec3 vNormal;
+varying vec3 vViewDir;
+varying float vTurb;
+${SIMPLEX}
+void main() {
+  float facing = max(dot(vNormal, vViewDir), 0.0);
+  // churning plasma veins on the surface
+  float plasma = 0.5 + 0.5 * fbm(vPos * 3.4 + vec3(uTime * 0.6, 0.0, uTime * 0.4));
+  float veins = pow(plasma, 2.0);
+
+  // white-hot centre fading to the theme colour toward the edges
+  vec3 hot = mix(uColor, uColorBright, plasma);
+  float core = pow(facing, 1.6);
+  vec3 color = mix(hot, vec3(1.0), core * 0.7);
+  color *= 0.55 + veins * 1.1;
+
+  float pulse = 1.0 + uPulse * 0.45 * sin(uTime * 7.0);
+  float alpha = (0.30 + core * 0.7) * (0.7 + veins * 0.6) * pulse * uGlow;
+  gl_FragColor = vec4(color * pulse, clamp(alpha, 0.0, 1.0));
+}
+`
+
+// ── orbiting particle field ─────────────────────────────────────────────────
 
 export const PARTICLE_VERTEX = /* glsl */ `
 uniform float uTime;

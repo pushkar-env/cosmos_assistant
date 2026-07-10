@@ -9,6 +9,8 @@ import { LERP_RATE, ORB_STATES, type OrbParams } from './orbConfig'
 import {
   CORE_FRAGMENT,
   CORE_VERTEX,
+  NUCLEUS_FRAGMENT,
+  NUCLEUS_VERTEX,
   PARTICLE_FRAGMENT,
   PARTICLE_VERTEX
 } from './shaders'
@@ -20,6 +22,9 @@ const pointerSignal = { inside: false }
 
 function OrbRig(): React.JSX.Element {
   const coreMat = useRef<THREE.ShaderMaterial>(null)
+  const nucleusMat = useRef<THREE.ShaderMaterial>(null)
+  const nucleusMesh = useRef<THREE.Mesh>(null)
+  const lattice = useRef<THREE.LineSegments>(null)
   const particleMat = useRef<THREE.ShaderMaterial>(null)
   const coreMesh = useRef<THREE.Mesh>(null)
   const ringA = useRef<THREE.Mesh>(null)
@@ -49,6 +54,24 @@ function OrbRig(): React.JSX.Element {
       uColor: { value: new THREE.Color() },
       uColorBright: { value: new THREE.Color() }
     }),
+    []
+  )
+
+  const nucleusUniforms = useMemo(
+    () => ({
+      uTime: { value: 0 },
+      uAmp: { value: ORB_STATES.idle.amp },
+      uPulse: { value: 0 },
+      uGlow: { value: 0.8 },
+      uColor: { value: new THREE.Color() },
+      uColorBright: { value: new THREE.Color() }
+    }),
+    []
+  )
+
+  // a geometric energy lattice suspended between the nucleus and the shell
+  const latticeGeometry = useMemo(
+    () => new THREE.WireframeGeometry(new THREE.IcosahedronGeometry(0.82, 1)),
     []
   )
 
@@ -121,6 +144,28 @@ function OrbRig(): React.JSX.Element {
       ;(u.uColor.value as THREE.Color).copy(accent)
       ;(u.uColorBright.value as THREE.Color).copy(accentBright)
     }
+    if (nucleusMat.current) {
+      const u = nucleusMat.current.uniforms
+      u.uTime.value = t
+      u.uAmp.value = c.amp
+      // the core burns hotter while it speaks/listens, and flares with the voice
+      u.uPulse.value = c.pulse + level * 0.7
+      u.uGlow.value = 0.7 + level * 0.7 + c.pulse * 0.35 + hv * 0.15
+      ;(u.uColor.value as THREE.Color).copy(accent)
+      ;(u.uColorBright.value as THREE.Color).copy(accentBright)
+    }
+    if (nucleusMesh.current) {
+      // slow tumble, slightly swelling as it pulses
+      nucleusMesh.current.rotation.y = t * 0.18
+      nucleusMesh.current.rotation.x = t * 0.1
+      nucleusMesh.current.scale.setScalar(1 + c.pulse * 0.06 + level * 0.08)
+    }
+    if (lattice.current) {
+      // the lattice counter-rotates against the core for a gyroscopic feel
+      lattice.current.rotation.y = -t * 0.22 + px * 0.1 * hv
+      lattice.current.rotation.x = t * 0.14 - py * 0.1 * hv
+      lattice.current.rotation.z = t * 0.06
+    }
     if (particleMat.current) {
       const u = particleMat.current.uniforms
       u.uTime.value = t
@@ -146,7 +191,32 @@ function OrbRig(): React.JSX.Element {
 
   return (
     <>
-      {/* the core */}
+      {/* glowing plasma nucleus — the hot heart of the core */}
+      <mesh ref={nucleusMesh}>
+        <sphereGeometry args={[0.55, 48, 48]} />
+        <shaderMaterial
+          ref={nucleusMat}
+          vertexShader={NUCLEUS_VERTEX}
+          fragmentShader={NUCLEUS_FRAGMENT}
+          uniforms={nucleusUniforms}
+          transparent
+          depthWrite={false}
+          blending={THREE.AdditiveBlending}
+        />
+      </mesh>
+
+      {/* geometric energy lattice around the nucleus */}
+      <lineSegments ref={lattice} geometry={latticeGeometry}>
+        <lineBasicMaterial
+          color={accentBright}
+          transparent
+          opacity={0.32}
+          depthWrite={false}
+          blending={THREE.AdditiveBlending}
+        />
+      </lineSegments>
+
+      {/* the outer holographic membrane */}
       <mesh ref={coreMesh}>
         <icosahedronGeometry args={[1.15, 48]} />
         <shaderMaterial
