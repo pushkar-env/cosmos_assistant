@@ -25,6 +25,7 @@ export const IPC = {
   // ── workspace / studio ──
   WORKSPACE_GET: 'workspace:get',
   WORKSPACE_PICK: 'workspace:pick',
+  WORKSPACE_PICK_FILE: 'workspace:pick-file',
   WORKSPACE_SET: 'workspace:set',
   FILES_TREE: 'files:tree',
   FILES_LIST: 'files:list',
@@ -35,8 +36,11 @@ export const IPC = {
   FILES_DELETE: 'files:delete',
   FILES_REVEAL: 'files:reveal',
   TERM_START: 'term:start',
+  TERM_LIST: 'term:list',
+  TERM_CREATE: 'term:create',
   TERM_INPUT: 'term:input',
   TERM_RESET: 'term:reset',
+  TERM_CLOSE: 'term:close',
   // ── github / git ──
   GITHUB_CONNECT: 'github:connect',
   GITHUB_DISCONNECT: 'github:disconnect',

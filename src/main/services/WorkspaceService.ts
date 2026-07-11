@@ -5,7 +5,7 @@ import { promises as fs } from 'fs'
 import { homedir } from 'os'
 import { basename, dirname, isAbsolute, join, normalize, relative, sep } from 'path'
 import { IPC } from '@shared/ipc'
-import type { FileNode, TerminalChunk } from '@shared/types'
+import type { FileNode, TerminalChunk, TerminalInfo } from '@shared/types'
 import type { SettingsService } from './SettingsService'
 
 /** dirs never shown in the tree / walked by project_tree — noise + huge */
@@ -56,7 +56,14 @@ export class WorkspaceService {
   private getWindow: () => BrowserWindow | null = () => null
   private watcher: FSWatcher | null = null
   private watchDebounce: ReturnType<typeof setTimeout> | null = null
-  private terminal: TerminalSession | null = null
+  /** every live terminal session, keyed by id. The 'primary' one is shared
+   *  with the agent's run_command tool; extra ones are UI-only. */
+  private terminals = new Map<string, TerminalSession>()
+  /** stable human titles per terminal id (survive a reset/respawn) */
+  private termTitles = new Map<string, string>()
+  private termTitleSeq = 0
+  private termIdSeq = 0
+  private static readonly PRIMARY = 'primary'
 
   constructor(private readonly settings: SettingsService) {}
 
@@ -97,10 +104,13 @@ export class WorkspaceService {
     await fs.mkdir(root, { recursive: true })
     this.settings.set({ workspaceRoot: root })
     this.stopWatching() // re-attaches to the new root on next tree()
-    if (this.terminal) {
-      this.terminal.dispose()
-      this.terminal = null
-    }
+    // every terminal is rooted at the old folder — kill them so they respawn
+    // in the new workspace on next use
+    for (const t of this.terminals.values()) t.dispose()
+    this.terminals.clear()
+    this.termTitles.clear()
+    this.termTitleSeq = 0
+    this.termIdSeq = 0
     return root
   }
 
@@ -246,6 +256,23 @@ export class WorkspaceService {
     await shell.trashItem(abs)
   }
 
+  /**
+   * Open a file chosen from anywhere on disk. If it lives inside the current
+   * workspace, just return its relative path; otherwise switch the root to the
+   * file's folder so the tree, sandbox and terminals stay consistent.
+   */
+  async openExternalFile(
+    abs: string
+  ): Promise<{ root: string; relPath: string; switchedRoot: boolean }> {
+    const root = await this.getRoot()
+    const rel = relative(root, abs)
+    if (rel && !rel.startsWith('..') && !isAbsolute(rel)) {
+      return { root, relPath: rel.split(sep).join('/'), switchedRoot: false }
+    }
+    const newRoot = await this.setRoot(dirname(abs))
+    return { root: newRoot, relPath: basename(abs), switchedRoot: true }
+  }
+
   async reveal(relPath?: string): Promise<void> {
     const abs = relPath ? await this.resolve(relPath, true) : await this.getRoot()
     if (existsSync(abs)) shell.showItemInFolder(abs)
@@ -275,39 +302,79 @@ export class WorkspaceService {
 
   // ── terminal ──────────────────────────────────────────────────────────────
 
-  private async ensureTerminal(): Promise<TerminalSession> {
-    // respawn if never started, or if a previous hang/crash killed the shell
-    if (!this.terminal || this.terminal.dead) {
-      this.terminal?.dispose()
-      const root = await this.getRoot()
-      this.terminal = new TerminalSession(root, (chunk) => {
-        const win = this.getWindow()
-        if (win && !win.isDestroyed()) win.webContents.send(IPC.TERM_DATA, chunk)
-      })
-    }
-    return this.terminal
+  /** stream a terminal chunk to the renderer */
+  private readonly emitToWindow = (chunk: TerminalChunk): void => {
+    const win = this.getWindow()
+    if (win && !win.isDestroyed()) win.webContents.send(IPC.TERM_DATA, chunk)
   }
 
-  /** start (or reuse) the UI terminal; returns the current working directory */
+  /** spawn a brand-new shell for `id`, remembering a stable title for it */
+  private async spawnTerminal(id: string): Promise<TerminalSession> {
+    const root = await this.getRoot()
+    let title = this.termTitles.get(id)
+    if (!title) {
+      title = `pwsh ${++this.termTitleSeq}`
+      this.termTitles.set(id, title)
+    }
+    const session = new TerminalSession(id, title, root, this.emitToWindow)
+    this.terminals.set(id, session)
+    return session
+  }
+
+  /** get the session for `id`, respawning it if it never existed or died */
+  private async ensure(id: string): Promise<TerminalSession> {
+    const existing = this.terminals.get(id)
+    if (existing && !existing.dead) return existing
+    existing?.dispose()
+    return this.spawnTerminal(id)
+  }
+
+  private ensurePrimary(): Promise<TerminalSession> {
+    return this.ensure(WorkspaceService.PRIMARY)
+  }
+
+  /** every live terminal (ensures the shared primary exists first) */
+  async terminalList(): Promise<TerminalInfo[]> {
+    await this.ensurePrimary()
+    return [...this.terminals.values()].map((t) => ({ id: t.id, title: t.title, cwd: t.cwd }))
+  }
+
+  /** legacy single-terminal entrypoint — returns the primary shell's cwd */
   async terminalStart(): Promise<string> {
-    const term = await this.ensureTerminal()
+    const term = await this.ensurePrimary()
     return term.cwd
   }
 
-  /** a line typed into the UI terminal (output streams over TERM_DATA) */
-  async terminalInput(command: string): Promise<void> {
-    const term = await this.ensureTerminal()
+  /** open an additional UI terminal, returning its metadata */
+  async terminalCreate(): Promise<TerminalInfo> {
+    const id = `t${++this.termIdSeq}`
+    const term = await this.spawnTerminal(id)
+    return { id: term.id, title: term.title, cwd: term.cwd }
+  }
+
+  /** a line typed into a terminal (output streams over TERM_DATA) */
+  async terminalInput(id: string, command: string): Promise<void> {
+    const term = await this.ensure(id)
     void term.exec(command).catch(() => {})
   }
 
   /** hard reset: kill and respawn the shell in the workspace root */
-  async terminalReset(): Promise<string> {
-    if (this.terminal) {
-      this.terminal.dispose()
-      this.terminal = null
-    }
-    const term = await this.ensureTerminal()
+  async terminalReset(id: string): Promise<string> {
+    this.terminals.get(id)?.dispose()
+    this.terminals.delete(id)
+    const term = await this.ensure(id)
     return term.cwd
+  }
+
+  /** close & dispose a terminal. The shared primary is reset, never removed. */
+  async terminalClose(id: string): Promise<void> {
+    if (id === WorkspaceService.PRIMARY) {
+      await this.terminalReset(id)
+      return
+    }
+    this.terminals.get(id)?.dispose()
+    this.terminals.delete(id)
+    this.termTitles.delete(id)
   }
 
   /**
@@ -319,7 +386,7 @@ export class WorkspaceService {
    * servers, watchers) so the loop isn't blocked.
    */
   async agentRun(command: string, background = false): Promise<string> {
-    const term = await this.ensureTerminal()
+    const term = await this.ensurePrimary()
     if (background) return term.runBackground(command)
     const out = await term.exec(command)
     return out.trim() || '(command produced no output)'
@@ -327,8 +394,8 @@ export class WorkspaceService {
 
   dispose(): void {
     this.stopWatching()
-    this.terminal?.dispose()
-    this.terminal = null
+    for (const t of this.terminals.values()) t.dispose()
+    this.terminals.clear()
   }
 }
 
@@ -362,6 +429,8 @@ class TerminalSession {
   private bgProcs = new Set<ChildProcessWithoutNullStreams>()
 
   constructor(
+    readonly id: string,
+    readonly title: string,
     root: string,
     private readonly onData: (chunk: TerminalChunk) => void
   ) {
@@ -385,16 +454,21 @@ class TerminalSession {
         e.resolve(e.capture + '\n[terminal exited]')
       }
       this.queue = []
-      if (!this.disposed) this.onData({ data: '\n[terminal exited]\n', stream: 'system' })
+      if (!this.disposed) this.emit({ data: '\n[terminal exited]\n', stream: 'system' })
     })
     // silence the default `PS C:\...>` prompt — we render our own
     this.proc.stdin.write("function prompt { '' }\n")
-    this.onData({ data: `Workspace: ${root}\n`, stream: 'system' })
+    this.emit({ data: `Workspace: ${root}\n`, stream: 'system' })
   }
 
   /** true once the shell has crashed / been killed — triggers a respawn */
   get dead(): boolean {
     return this.disposed || this.proc.exitCode !== null || this.proc.killed
+  }
+
+  /** tag every chunk with this session's id before it reaches the renderer */
+  private emit(partial: Omit<TerminalChunk, 'id'>): void {
+    this.onData({ id: this.id, ...partial })
   }
 
   /** run a command; resolves with its stdout+stderr once the sentinel lands */
@@ -406,7 +480,7 @@ class TerminalSession {
       this.queue.push(entry)
       this.armTimers(entry)
       // echo the command so the UI shows what ran, then the sentinel line
-      this.onData({ data: `❯ ${command}\n`, stream: 'system' })
+      this.emit({ data: `❯ ${command}\n`, stream: 'system' })
       this.proc.stdin.write(`${command}\n`)
       // `$?` is true only if the command succeeded (works for native exes AND
       // cmdlets, unlike $LASTEXITCODE which is stale after a cmdlet) — so the
@@ -424,7 +498,7 @@ class TerminalSession {
    */
   runBackground(command: string): string {
     if (this.dead) return '[terminal is not running]'
-    this.onData({ data: `❯ [background] ${command}\n`, stream: 'system' })
+    this.emit({ data: `❯ [background] ${command}\n`, stream: 'system' })
     const child = spawn(
       'powershell.exe',
       ['-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command],
@@ -432,11 +506,11 @@ class TerminalSession {
     )
     child.stdout.setEncoding('utf-8')
     child.stderr.setEncoding('utf-8')
-    child.stdout.on('data', (d: string) => this.onData({ data: d, stream: 'stdout' }))
-    child.stderr.on('data', (d: string) => this.onData({ data: d, stream: 'stderr' }))
+    child.stdout.on('data', (d: string) => this.emit({ data: d, stream: 'stdout' }))
+    child.stderr.on('data', (d: string) => this.emit({ data: d, stream: 'stderr' }))
     child.on('exit', (code) => {
       this.bgProcs.delete(child)
-      this.onData({ data: `\n[background task exited (code ${code})]\n`, stream: 'system' })
+      this.emit({ data: `\n[background task exited (code ${code})]\n`, stream: 'system' })
     })
     this.bgProcs.add(child)
     return `Started in the background (PID ${child.pid ?? '?'}), streaming to the COSMOS terminal. Working directory: ${this.cwd}`
@@ -504,7 +578,7 @@ class TerminalSession {
         entry.resolve(failed ? `${entry.capture}\n[exit code 1 — the command FAILED]` : entry.capture)
       }
       // tell the UI the prompt is ready again (carries the new cwd)
-      this.onData({ data: `${STX}${this.cwd}${ETX}`, stream: 'system' })
+      this.emit({ data: `${STX}${this.cwd}${ETX}`, stream: 'system' })
       return
     }
     const current = this.queue[0]
@@ -512,7 +586,7 @@ class TerminalSession {
       current.capture += line + '\n'
       this.armTimers(current) // output → not stuck, reset the idle timer
     }
-    this.onData({ data: line + '\n', stream: 'stdout' })
+    this.emit({ data: line + '\n', stream: 'stdout' })
   }
 
   private onStderr(chunk: string): void {
@@ -521,7 +595,7 @@ class TerminalSession {
       current.capture += chunk
       this.armTimers(current)
     }
-    this.onData({ data: chunk, stream: 'stderr' })
+    this.emit({ data: chunk, stream: 'stderr' })
   }
 
   dispose(): void {

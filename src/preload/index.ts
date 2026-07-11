@@ -30,6 +30,7 @@ import type {
   SystemCommandId,
   SystemStats,
   TerminalChunk,
+  TerminalInfo,
   TranscriptionResult,
   VoiceLanguageId,
   WeatherInfo
@@ -134,6 +135,8 @@ export const cosmosApi = {
   workspace: {
     getRoot: (): Promise<string> => ipcRenderer.invoke(IPC.WORKSPACE_GET),
     pick: (): Promise<string> => ipcRenderer.invoke(IPC.WORKSPACE_PICK),
+    pickFile: (): Promise<{ root: string; relPath: string; switchedRoot: boolean } | null> =>
+      ipcRenderer.invoke(IPC.WORKSPACE_PICK_FILE),
     setRoot: (dir: string): Promise<string> => ipcRenderer.invoke(IPC.WORKSPACE_SET, dir),
     onFilesChanged: (cb: () => void): Unsubscribe => subscribe(IPC.FILES_CHANGED, cb)
   },
@@ -153,8 +156,12 @@ export const cosmosApi = {
   },
   terminal: {
     start: (): Promise<string> => ipcRenderer.invoke(IPC.TERM_START),
-    input: (command: string): Promise<void> => ipcRenderer.invoke(IPC.TERM_INPUT, command),
-    reset: (): Promise<string> => ipcRenderer.invoke(IPC.TERM_RESET),
+    list: (): Promise<TerminalInfo[]> => ipcRenderer.invoke(IPC.TERM_LIST),
+    create: (): Promise<TerminalInfo> => ipcRenderer.invoke(IPC.TERM_CREATE),
+    input: (id: string, command: string): Promise<void> =>
+      ipcRenderer.invoke(IPC.TERM_INPUT, id, command),
+    reset: (id: string): Promise<string> => ipcRenderer.invoke(IPC.TERM_RESET, id),
+    close: (id: string): Promise<void> => ipcRenderer.invoke(IPC.TERM_CLOSE, id),
     onData: (cb: (chunk: TerminalChunk) => void): Unsubscribe => subscribe(IPC.TERM_DATA, cb)
   },
   github: {

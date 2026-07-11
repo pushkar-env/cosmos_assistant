@@ -46,14 +46,17 @@ export const ORB_STATES: Record<AssistantState, OrbParams> = {
     ringSpeed: 1.25
   },
   thinking: {
-    // focused, not frantic — was the source of the extreme waves/rotations
-    amp: 0.16,
-    speed: 1.05,
-    rim: 1.25,
-    pulse: 0.1,
-    particleRadius: 0.86,
-    particleSpeed: 1.85,
-    ringSpeed: 1.9
+    // Processing state. Reads as quietly focused, not a frantic burst — a
+    // gentle inward draw with a bright rim. Deliberately close to idle so the
+    // long stretch while a (slow, local) model generates, and the settle back
+    // when it finishes, both feel smooth and premium rather than wild.
+    amp: 0.11,
+    speed: 0.72,
+    rim: 1.35,
+    pulse: 0.14,
+    particleRadius: 0.93,
+    particleSpeed: 1.18,
+    ringSpeed: 1.22
   },
   speaking: {
     // composed with a bright rim; the voice reaction supplies the movement
@@ -67,4 +70,7 @@ export const ORB_STATES: Record<AssistantState, OrbParams> = {
   }
 }
 
-export const LERP_RATE = 2.0 // per-second interpolation toward the target state
+// per-second interpolation toward the target state. A touch quicker than a
+// plain crossfade so the orb settles cleanly the moment a reply finishes
+// (no lingering high-energy state), while still easing rather than snapping.
+export const LERP_RATE = 2.5

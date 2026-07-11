@@ -1,4 +1,4 @@
-import { create } from 'zustand'
+import { create, type StoreApi, type UseBoundStore } from 'zustand'
 import type { Attachment, AssistantState, ChatMessage, ConversationMeta } from '@shared/types'
 import { useSettingsStore } from './useSettingsStore'
 import { sound } from '@/core/sound/SoundEngine'
@@ -12,14 +12,33 @@ export type AssistantEvent =
   | { type: 'error' }
 
 type AssistantEventListener = (e: AssistantEvent) => void
-const eventListeners = new Set<AssistantEventListener>()
+
+/**
+ * HMR-safe shared singletons. In dev, React Fast Refresh re-evaluates this
+ * module whenever it — or a component that imports it — is edited. If we
+ * recreated the store (and the listener registry) on each re-eval, the chat UI
+ * would bind to a brand-new store while the IPC + voice listeners set up once at
+ * startup keep driving the ORIGINAL one. The result is the classic split:
+ * replies stream to the voice pipeline but never render on screen, and the Stop
+ * button never appears. Stashing everything on globalThis keeps ONE instance
+ * alive for the life of the page, across any number of hot reloads.
+ */
+interface AssistantGlobals {
+  store?: UseBoundStore<StoreApi<AssistantStore>>
+  listeners: Set<AssistantEventListener>
+  idCounter: number
+  initialized: boolean
+}
+const shared: AssistantGlobals = ((
+  globalThis as { __cosmosAssistant?: AssistantGlobals }
+).__cosmosAssistant ??= { listeners: new Set(), idCounter: 0, initialized: false })
 
 export function subscribeAssistantEvents(cb: AssistantEventListener): () => void {
-  eventListeners.add(cb)
-  return () => eventListeners.delete(cb)
+  shared.listeners.add(cb)
+  return () => shared.listeners.delete(cb)
 }
 
-const notify = (e: AssistantEvent): void => eventListeners.forEach((cb) => cb(e))
+const notify = (e: AssistantEvent): void => shared.listeners.forEach((cb) => cb(e))
 
 export interface UIMessage extends ChatMessage {
   id: string
@@ -64,11 +83,10 @@ interface AssistantStore {
   renameSession: (id: number, title: string) => Promise<void>
 }
 
-let initialized = false
-let idCounter = 0
-const nextId = (): string => `msg-${Date.now()}-${idCounter++}`
+const nextId = (): string => `msg-${Date.now()}-${shared.idCounter++}`
 
-export const useAssistantStore = create<AssistantStore>((set, get) => ({
+export const useAssistantStore: UseBoundStore<StoreApi<AssistantStore>> = (shared.store ??=
+  create<AssistantStore>((set, get) => ({
   state: 'idle',
   messages: [],
   activeRequestId: null,
@@ -76,8 +94,8 @@ export const useAssistantStore = create<AssistantStore>((set, get) => ({
   currentSessionId: null,
 
   init: () => {
-    if (initialized) return
-    initialized = true
+    if (shared.initialized) return
+    shared.initialized = true
 
     // restore the persisted conversation + the sessions list
     void window.cosmos.history.get().then((history) => {
@@ -305,4 +323,10 @@ export const useAssistantStore = create<AssistantStore>((set, get) => ({
     await window.cosmos.sessions.rename(id, title)
     await get().loadSessions()
   }
-}))
+})))
+
+// Self-accept HMR: with the singleton above, a hot re-eval reuses the existing
+// store + listeners, so accepting here just avoids needlessly invalidating every
+// importer. (Editing this file's store LOGIC still needs a manual reload to take
+// effect — an acceptable dev trade-off for never desyncing the live chat.)
+;(import.meta as { hot?: { accept: () => void } }).hot?.accept()

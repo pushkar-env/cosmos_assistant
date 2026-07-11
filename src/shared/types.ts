@@ -276,7 +276,9 @@ export interface Settings {
   apiKeys: { anthropic: string; openai: string; gemini: string }
   ollamaUrl: string
   /** Ollama context window in tokens — larger = more room for agentic
-   *  tool use (needs more VRAM). 8192 is a good default for tool tasks. */
+   *  tool use (needs more VRAM). Acts as a baseline: the Ollama provider
+   *  automatically raises it to fit the active tool payload (so tool
+   *  definitions never truncate), but a larger value here always wins. */
   ollamaNumCtx: number
   theme: ThemeId
   soundEnabled: boolean
@@ -323,8 +325,19 @@ export interface FileNode {
 
 /** A single streamed chunk from the integrated terminal. */
 export interface TerminalChunk {
+  /** which terminal session this chunk belongs to */
+  id: string
   data: string
   stream: 'stdout' | 'stderr' | 'system'
+}
+
+/** Metadata for one integrated-terminal session. */
+export interface TerminalInfo {
+  id: string
+  /** human label shown on the terminal tab, e.g. "pwsh 1" */
+  title: string
+  /** current working directory */
+  cwd: string
 }
 
 export type MemoryCategory = 'preference' | 'project' | 'fact' | 'goal'

@@ -114,6 +114,7 @@ function createWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      webviewTag: true, // Studio's live preview pane embeds a <webview>
       backgroundThrottling: false // keep voice/audio alive when hidden to tray
     }
   })
@@ -158,9 +159,19 @@ function createWindow(): void {
   })
 
   // closing the window hides COSMOS to the tray — it keeps running in the
-  // background until the user explicitly quits from the tray menu
+  // background until the user explicitly quits from the tray menu.
+  // In DEV, closing fully quits instead: otherwise a hidden dev instance keeps
+  // holding the single-instance lock, and the next `npm run dev` bounces off it
+  // and surfaces the OLD, stale instance's window (in whatever mode it was in)
+  // rather than the freshly built code — which reads as the app "looking
+  // different"/inconsistent between runs. Packaged builds keep hide-to-tray.
   mainWindow.on('close', (e) => {
     if (isQuitting) return
+    if (!app.isPackaged) {
+      isQuitting = true
+      app.quit()
+      return
+    }
     e.preventDefault()
     hideToTray()
   })

@@ -1,4 +1,4 @@
-import { voiceSignal } from './voiceSignal'
+import { voiceSignal, spectralPitch } from './voiceSignal'
 
 export interface SegmentHandlers {
   /** a complete speech segment was captured. `duringSpeech` is true when the
@@ -103,6 +103,7 @@ export class MicRecorder {
     this.beginSegment(handlers)
 
     const timeData = new Float32Array(this.analyser.fftSize)
+    const freqData = new Uint8Array(this.analyser.frequencyBinCount)
 
     // NB: a setInterval (not requestAnimationFrame) drives VAD — rAF is paused
     // when the window is hidden and throttled when it's unfocused, which is
@@ -122,6 +123,14 @@ export class MicRecorder {
       for (let i = 0; i < timeData.length; i++) sum += timeData[i] * timeData[i]
       const rms = Math.sqrt(sum / timeData.length)
       voiceSignal.level = Math.min(1, rms * 8)
+      // spectral brightness → the orb's pitch reaction (skip on near-silence so
+      // it settles instead of chasing room noise)
+      if (rms > 0.008 && this.ctx) {
+        this.analyser.getByteFrequencyData(freqData)
+        voiceSignal.pitch = spectralPitch(freqData, this.ctx.sampleRate, this.analyser.fftSize)
+      } else {
+        voiceSignal.pitch = 0
+      }
 
       // Flag segments that overlap the assistant's own playback (the store's
       // echo filter decides whether they're echo or the user talking over it).
@@ -167,6 +176,7 @@ export class MicRecorder {
     }
     this.lastSpeaking = false
     voiceSignal.level = 0
+    voiceSignal.pitch = 0
     if (this.recorder && this.recorder.state !== 'inactive') {
       this.recorder.onstop = null
       this.recorder.stop()

@@ -64,7 +64,7 @@ float fbm(vec3 p){
 export const CORE_VERTEX = /* glsl */ `
 uniform float uTime;
 uniform float uAmp;
-uniform float uSpeed;
+uniform float uFlow;
 uniform float uPulse;
 
 varying vec3 vNormal;
@@ -72,7 +72,11 @@ varying vec3 vViewDir;
 varying float vDisp;
 ${SIMPLEX}
 void main() {
-  float t = uTime * uSpeed;
+  // uFlow is the time-integrated noise-scroll phase (accumulated on the CPU at
+  // the current speed). Using an accumulated phase — instead of uTime * uSpeed —
+  // means a change in speed never retroactively jumps the noise field, so state
+  // transitions stay smooth instead of popping.
+  float t = uFlow;
   float n = snoise(position * 1.8 + vec3(t * 0.4, t * 0.3, t * 0.2));
   // voice pulse: layered LFO that reads as speech cadence
   float voice = uPulse * (0.5 + 0.5 * sin(uTime * 9.0) * sin(uTime * 4.7 + 1.3));
@@ -180,7 +184,7 @@ void main() {
 export const PARTICLE_VERTEX = /* glsl */ `
 uniform float uTime;
 uniform float uRadiusScale;
-uniform float uSpeed;
+uniform float uSpin;
 uniform float uSize;
 
 attribute float aSeed;
@@ -189,8 +193,12 @@ attribute float aShell;
 varying float vTwinkle;
 
 void main() {
-  // each particle orbits on its own tilted circle
-  float angle = uTime * uSpeed * (0.15 + aSeed * 0.25) + aSeed * 6.28318;
+  // uSpin is the time-integrated orbital phase (accumulated on the CPU at the
+  // current particle speed). Deriving the angle from an accumulated phase —
+  // rather than uTime * uSpeed — is essential: uTime is large and growing, so
+  // any change in speed (voice reaction, state lerp) would otherwise multiply
+  // through it and teleport every particle, which reads as violent jitter.
+  float angle = uSpin * (0.15 + aSeed * 0.25) + aSeed * 6.28318;
   float tilt = aSeed * 3.14159;
   float radius = aShell * uRadiusScale;
 

@@ -18,23 +18,68 @@ interface TermSegment {
   stream: TerminalChunk['stream']
 }
 
+/** one integrated-terminal session in the UI, with its own scrollback */
+export interface UITerminal {
+  id: string
+  title: string
+  cwd: string
+  ready: boolean
+  segments: TermSegment[]
+}
+
+/** which docked panels are currently visible */
+export type PanelId = 'explorer' | 'chat' | 'terminal' | 'preview'
+
+interface PanelState {
+  explorer: boolean
+  chat: boolean
+  terminal: boolean
+  preview: boolean
+}
+
+interface SizeState {
+  explorerWidth: number
+  chatWidth: number
+  terminalHeight: number
+  previewWidth: number
+}
+
 interface StudioStore {
   root: string
   nodes: FileNode[]
   expanded: Set<string>
   tabs: OpenTab[]
   activePath: string | null
-  term: TermSegment[]
-  cwd: string
-  ready: boolean
   loading: boolean
   git: GitStatus | null
+
+  // ── layout ──
+  panels: PanelState
+  sizes: SizeState
+  togglePanel: (panel: PanelId) => void
+  setPanel: (panel: PanelId, open: boolean) => void
+  setSize: <K extends keyof SizeState>(key: K, value: number) => void
+
+  // ── terminals ──
+  terminals: UITerminal[]
+  activeTermId: string | null
+  createTerminal: () => Promise<void>
+  closeTerminal: (id: string) => Promise<void>
+  setActiveTerm: (id: string) => void
+  sendTerminal: (id: string, command: string) => void
+  resetTerminal: (id: string) => Promise<void>
+  clearTerminal: (id: string) => void
+
+  // ── preview ──
+  previewUrl: string
+  setPreviewUrl: (url: string) => void
 
   init: () => Promise<void>
   refreshTree: () => Promise<void>
   refreshGit: () => Promise<void>
   toggleDir: (node: FileNode) => Promise<void>
   openFile: (path: string) => Promise<void>
+  openFileDialog: () => Promise<void>
   setActive: (path: string) => void
   closeTab: (path: string) => void
   editActive: (content: string) => void
@@ -44,13 +89,52 @@ interface StudioStore {
   deleteNode: (path: string) => Promise<void>
   pickRoot: () => Promise<void>
   reveal: (path?: string) => void
-  sendTerminal: (command: string) => void
-  resetTerminal: () => Promise<void>
-  clearTerminal: () => void
 }
 
 let wired = false
 const MAX_TERM_SEGMENTS = 1200
+
+// ── layout persistence ──────────────────────────────────────────────────────
+const LAYOUT_KEY = 'cosmos.studio.layout'
+const DEFAULT_PANELS: PanelState = { explorer: true, chat: true, terminal: true, preview: false }
+const DEFAULT_SIZES: SizeState = {
+  explorerWidth: 248,
+  chatWidth: 360,
+  terminalHeight: 240,
+  previewWidth: 520
+}
+
+function loadLayout(): { panels: PanelState; sizes: SizeState; previewUrl: string } {
+  try {
+    const raw = localStorage.getItem(LAYOUT_KEY)
+    if (raw) {
+      const p = JSON.parse(raw) as Partial<{
+        panels: PanelState
+        sizes: SizeState
+        previewUrl: string
+      }>
+      return {
+        panels: { ...DEFAULT_PANELS, ...p.panels },
+        sizes: { ...DEFAULT_SIZES, ...p.sizes },
+        previewUrl: p.previewUrl ?? 'http://localhost:3000'
+      }
+    }
+  } catch {
+    /* corrupt / unavailable — fall back to defaults */
+  }
+  return { panels: DEFAULT_PANELS, sizes: DEFAULT_SIZES, previewUrl: 'http://localhost:3000' }
+}
+
+function saveLayout(s: StudioStore): void {
+  try {
+    localStorage.setItem(
+      LAYOUT_KEY,
+      JSON.stringify({ panels: s.panels, sizes: s.sizes, previewUrl: s.previewUrl })
+    )
+  } catch {
+    /* storage full / unavailable — layout just won't persist */
+  }
+}
 
 /** replace the node at `path` inside a tree, returning a new tree */
 function patchNode(nodes: FileNode[], path: string, fn: (n: FileNode) => FileNode): FileNode[] {
@@ -63,17 +147,42 @@ function patchNode(nodes: FileNode[], path: string, fn: (n: FileNode) => FileNod
   })
 }
 
+const initialLayout = loadLayout()
+
 export const useStudioStore = create<StudioStore>((set, get) => ({
   root: '',
   nodes: [],
   expanded: new Set(),
   tabs: [],
   activePath: null,
-  term: [],
-  cwd: '',
-  ready: false,
   loading: false,
   git: null,
+
+  panels: initialLayout.panels,
+  sizes: initialLayout.sizes,
+  terminals: [],
+  activeTermId: null,
+  previewUrl: initialLayout.previewUrl,
+
+  togglePanel: (panel) => {
+    set((s) => ({ panels: { ...s.panels, [panel]: !s.panels[panel] } }))
+    saveLayout(get())
+  },
+
+  setPanel: (panel, open) => {
+    set((s) => ({ panels: { ...s.panels, [panel]: open } }))
+    saveLayout(get())
+  },
+
+  setSize: (key, value) => {
+    set((s) => ({ sizes: { ...s.sizes, [key]: value } }))
+    saveLayout(get())
+  },
+
+  setPreviewUrl: (url) => {
+    set({ previewUrl: url })
+    saveLayout(get())
+  },
 
   init: async () => {
     set({ loading: true })
@@ -89,10 +198,30 @@ export const useStudioStore = create<StudioStore>((set, get) => ({
         void reloadOpenTabs(get, set)
         void get().refreshGit()
       })
-      window.cosmos.terminal.onData((chunk) => appendTerm(chunk, set, get))
+      window.cosmos.terminal.onData((chunk) => appendTerm(chunk, set))
     }
-    const cwd = await window.cosmos.terminal.start()
-    set({ cwd, ready: true })
+
+    // populate terminals (ensures the shared primary exists), preserving any
+    // scrollback we already have for still-live sessions
+    const infos = await window.cosmos.terminal.list()
+    set((s) => {
+      const existing = new Map(s.terminals.map((t) => [t.id, t]))
+      const terminals: UITerminal[] = infos.map(
+        (info) =>
+          existing.get(info.id) ?? {
+            id: info.id,
+            title: info.title,
+            cwd: info.cwd,
+            ready: true,
+            segments: []
+          }
+      )
+      const activeTermId =
+        s.activeTermId && terminals.some((t) => t.id === s.activeTermId)
+          ? s.activeTermId
+          : (terminals[0]?.id ?? null)
+      return { terminals, activeTermId }
+    })
   },
 
   refreshGit: async () => {
@@ -150,6 +279,17 @@ export const useStudioStore = create<StudioStore>((set, get) => ({
     }))
   },
 
+  openFileDialog: async () => {
+    const res = await window.cosmos.workspace.pickFile()
+    if (!res) return
+    if (res.switchedRoot) {
+      // opening a file outside the workspace re-rooted us — reload everything
+      set({ root: res.root, tabs: [], activePath: null, expanded: new Set(), terminals: [], activeTermId: null })
+      await get().init()
+    }
+    await get().openFile(res.relPath)
+  },
+
   setActive: (path) => set({ activePath: path }),
 
   closeTab: (path) =>
@@ -162,9 +302,7 @@ export const useStudioStore = create<StudioStore>((set, get) => ({
 
   editActive: (content) =>
     set((s) => ({
-      tabs: s.tabs.map((t) =>
-        t.path === s.activePath ? { ...t, content, dirty: true } : t
-      )
+      tabs: s.tabs.map((t) => (t.path === s.activePath ? { ...t, content, dirty: true } : t))
     })),
 
   saveActive: async () => {
@@ -209,41 +347,92 @@ export const useStudioStore = create<StudioStore>((set, get) => ({
 
   pickRoot: async () => {
     const root = await window.cosmos.workspace.pick()
-    set({ root, tabs: [], activePath: null, expanded: new Set(), term: [] })
+    set({
+      root,
+      tabs: [],
+      activePath: null,
+      expanded: new Set(),
+      terminals: [],
+      activeTermId: null
+    })
     await get().init()
   },
 
   reveal: (path) => void window.cosmos.files.reveal(path),
 
-  sendTerminal: (command) => {
-    set({ ready: false })
-    void window.cosmos.terminal.input(command)
+  // ── terminals ──
+  createTerminal: async () => {
+    const info = await window.cosmos.terminal.create()
+    set((s) => ({
+      terminals: [
+        ...s.terminals,
+        { id: info.id, title: info.title, cwd: info.cwd, ready: true, segments: [] }
+      ],
+      activeTermId: info.id,
+      panels: { ...s.panels, terminal: true }
+    }))
+    saveLayout(get())
   },
 
-  resetTerminal: async () => {
-    const cwd = await window.cosmos.terminal.reset()
-    set({ term: [], cwd, ready: true })
+  closeTerminal: async (id) => {
+    await window.cosmos.terminal.close(id)
+    // the shared primary is never removed — closing it just clears its scrollback
+    if (id === 'primary') {
+      set((s) => ({
+        terminals: s.terminals.map((t) => (t.id === id ? { ...t, segments: [], ready: true } : t))
+      }))
+      return
+    }
+    set((s) => {
+      const terminals = s.terminals.filter((t) => t.id !== id)
+      const activeTermId =
+        s.activeTermId === id ? (terminals[terminals.length - 1]?.id ?? null) : s.activeTermId
+      return { terminals, activeTermId }
+    })
   },
 
-  clearTerminal: () => set({ term: [] })
+  setActiveTerm: (id) => set({ activeTermId: id }),
+
+  sendTerminal: (id, command) => {
+    set((s) => ({
+      terminals: s.terminals.map((t) => (t.id === id ? { ...t, ready: false } : t))
+    }))
+    void window.cosmos.terminal.input(id, command)
+  },
+
+  resetTerminal: async (id) => {
+    const cwd = await window.cosmos.terminal.reset(id)
+    set((s) => ({
+      terminals: s.terminals.map((t) => (t.id === id ? { ...t, segments: [], cwd, ready: true } : t))
+    }))
+  },
+
+  clearTerminal: (id) =>
+    set((s) => ({
+      terminals: s.terminals.map((t) => (t.id === id ? { ...t, segments: [] } : t))
+    }))
 }))
 
-/** parse a streamed chunk: system ready-markers update cwd, everything else prints */
+/** route a streamed chunk to its terminal: system ready-markers update cwd */
 function appendTerm(
   chunk: TerminalChunk,
-  set: (fn: (s: StudioStore) => Partial<StudioStore>) => void,
-  _get: () => StudioStore
+  set: (fn: (s: StudioStore) => Partial<StudioStore>) => void
 ): void {
   if (chunk.stream === 'system' && chunk.data.startsWith(STX) && chunk.data.endsWith(ETX)) {
     const cwd = chunk.data.slice(1, -1)
-    set(() => ({ cwd, ready: true }))
+    set((s) => ({
+      terminals: s.terminals.map((t) => (t.id === chunk.id ? { ...t, cwd, ready: true } : t))
+    }))
     return
   }
-  set((s) => {
-    const term = [...s.term, { text: chunk.data, stream: chunk.stream }]
-    if (term.length > MAX_TERM_SEGMENTS) term.splice(0, term.length - MAX_TERM_SEGMENTS)
-    return { term }
-  })
+  set((s) => ({
+    terminals: s.terminals.map((t) => {
+      if (t.id !== chunk.id) return t
+      const segments = [...t.segments, { text: chunk.data, stream: chunk.stream }]
+      if (segments.length > MAX_TERM_SEGMENTS) segments.splice(0, segments.length - MAX_TERM_SEGMENTS)
+      return { ...t, segments }
+    })
+  }))
 }
 
 /** after an external change, silently reload the on-disk content of clean tabs */

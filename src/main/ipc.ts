@@ -68,6 +68,17 @@ export function registerIpc(getWindow: () => BrowserWindow | null, services: Ser
     return services.workspace.setRoot(res.filePaths[0])
   })
 
+  ipcMain.handle(IPC.WORKSPACE_PICK_FILE, async () => {
+    const win = getWindow()
+    const res = await dialog.showOpenDialog(win ?? undefined!, {
+      title: 'Open a file in COSMOS Studio',
+      defaultPath: await services.workspace.getRoot(),
+      properties: ['openFile']
+    })
+    if (res.canceled || !res.filePaths[0]) return null
+    return services.workspace.openExternalFile(res.filePaths[0])
+  })
+
   ipcMain.handle(IPC.WORKSPACE_SET, (_e, dir: string) => services.workspace.setRoot(dir))
 
   ipcMain.handle(IPC.FILES_TREE, () => services.workspace.tree())
@@ -86,8 +97,13 @@ export function registerIpc(getWindow: () => BrowserWindow | null, services: Ser
   ipcMain.handle(IPC.FILES_REVEAL, (_e, relPath?: string) => services.workspace.reveal(relPath))
 
   ipcMain.handle(IPC.TERM_START, () => services.workspace.terminalStart())
-  ipcMain.handle(IPC.TERM_INPUT, (_e, command: string) => services.workspace.terminalInput(command))
-  ipcMain.handle(IPC.TERM_RESET, () => services.workspace.terminalReset())
+  ipcMain.handle(IPC.TERM_LIST, () => services.workspace.terminalList())
+  ipcMain.handle(IPC.TERM_CREATE, () => services.workspace.terminalCreate())
+  ipcMain.handle(IPC.TERM_INPUT, (_e, id: string, command: string) =>
+    services.workspace.terminalInput(id, command)
+  )
+  ipcMain.handle(IPC.TERM_RESET, (_e, id: string) => services.workspace.terminalReset(id))
+  ipcMain.handle(IPC.TERM_CLOSE, (_e, id: string) => services.workspace.terminalClose(id))
 
   // ── github / git ──
   ipcMain.handle(IPC.GITHUB_CONNECT, (_e, token: string) => services.git.connect(token))

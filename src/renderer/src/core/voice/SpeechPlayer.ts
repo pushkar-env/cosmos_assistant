@@ -1,4 +1,4 @@
-import { voiceSignal } from './voiceSignal'
+import { voiceSignal, spectralPitch } from './voiceSignal'
 
 interface PlayerEvents {
   onStart: () => void
@@ -122,12 +122,21 @@ export class SpeechPlayer {
 
   private watchLevel(): void {
     const data = new Float32Array(this.analyser!.fftSize)
+    const freq = new Uint8Array(this.analyser!.frequencyBinCount)
     const tick = (): void => {
       if (!this.playing || !this.analyser) return
       this.analyser.getFloatTimeDomainData(data)
       let sum = 0
       for (let i = 0; i < data.length; i++) sum += data[i] * data[i]
-      voiceSignal.level = Math.min(1, Math.sqrt(sum / data.length) * 5)
+      const rms = Math.sqrt(sum / data.length)
+      voiceSignal.level = Math.min(1, rms * 5)
+      // spectral brightness of the reply → the orb shifts with its pitch
+      if (rms > 0.006 && this.ctx) {
+        this.analyser.getByteFrequencyData(freq)
+        voiceSignal.pitch = spectralPitch(freq, this.ctx.sampleRate, this.analyser.fftSize)
+      } else {
+        voiceSignal.pitch = 0
+      }
       this.raf = requestAnimationFrame(tick)
     }
     this.raf = requestAnimationFrame(tick)
@@ -137,6 +146,7 @@ export class SpeechPlayer {
     this.playing = false
     voiceSignal.speaking = false
     voiceSignal.level = 0
+    voiceSignal.pitch = 0
     cancelAnimationFrame(this.raf)
   }
 }

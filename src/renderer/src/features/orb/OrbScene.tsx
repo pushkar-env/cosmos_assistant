@@ -38,6 +38,15 @@ function OrbRig(): React.JSX.Element {
   /** smoothed voice envelope — quick attack, gentle release, so the orb
    *  breathes with speech instead of jittering frame-to-frame */
   const smoothLevel = useRef(0)
+  /** smoothed voice pitch/brightness — drives the hue shimmer + rim, so the
+   *  orb shifts colour with pitch, not just size with volume */
+  const smoothPitch = useRef(0)
+  /** time-integrated animation phases. Accumulating phase at the current speed
+   *  (rather than multiplying elapsed time by a changing speed in the shader)
+   *  keeps motion continuous when the speed changes — no teleport/jitter. */
+  const flowPhase = useRef(0)
+  const spinPhase = useRef(0)
+  const ringPhase = useRef(0)
 
   const theme = useSettingsStore((s) => s.settings.theme)
   const { accent, accentBright } = useMemo(() => {
@@ -47,12 +56,15 @@ function OrbRig(): React.JSX.Element {
       accentBright: new THREE.Color(t.accentBright)
     }
   }, [theme])
+  // scratch colour reused each frame for the pitch-driven hue shimmer (no
+  // per-frame allocation)
+  const voiceColor = useMemo(() => new THREE.Color(), [])
 
   const coreUniforms = useMemo(
     () => ({
       uTime: { value: 0 },
       uAmp: { value: ORB_STATES.idle.amp },
-      uSpeed: { value: ORB_STATES.idle.speed },
+      uFlow: { value: 0 },
       uPulse: { value: 0 },
       uRim: { value: 1 },
       uColor: { value: new THREE.Color() },
@@ -83,7 +95,7 @@ function OrbRig(): React.JSX.Element {
     () => ({
       uTime: { value: 0 },
       uRadiusScale: { value: 1 },
-      uSpeed: { value: 1 },
+      uSpin: { value: 0 },
       uSize: { value: 9 },
       uColor: { value: new THREE.Color() }
     }),
@@ -140,12 +152,30 @@ function OrbRig(): React.JSX.Element {
     let env = smoothLevel.current
     let voiceGain = 1.0
     if (st === 'speaking') {
-      voiceGain = 1.15
+      voiceGain = 1.4
     } else if (activelyListening) {
       env = Math.pow(env, 0.5) // quiet speech → much more visible
-      voiceGain = 1.9
+      voiceGain = 2.15
     }
-    const level = Math.min(1.25, env * voiceGain)
+    const level = Math.min(1.5, env * voiceGain)
+
+    // smoothed pitch (spectral brightness), gated by how live the voice is so it
+    // only tints while actually speaking/listening — snappier attack than the
+    // volume envelope so pitch changes read instantly.
+    const rawPitch = voiceSignal.pitch
+    const sp = smoothPitch.current
+    smoothPitch.current += (rawPitch - sp) * Math.min(delta * (rawPitch > sp ? 14 : 6), 1)
+    const voicePitch = smoothPitch.current * Math.min(1, level * 2.2)
+
+    // Advance the integrated animation phases at the current speeds. Clamp the
+    // step so a stalled/backgrounded frame (large delta) can't jump the phase.
+    // The particle field quickens a little with the voice (louder + higher →
+    // livelier), but because we integrate the RATE the transition is seamless.
+    const dt = Math.min(delta, 0.05)
+    flowPhase.current += dt * c.speed
+    const particleSpeed = c.particleSpeed * (1 + level * 0.28 + voicePitch * 0.18)
+    spinPhase.current += dt * particleSpeed
+    ringPhase.current += dt * c.ringSpeed
 
     // pointer proximity to the orb (screen centre) → premium hover reaction
     const px = state.pointer.x
@@ -159,16 +189,20 @@ function OrbRig(): React.JSX.Element {
     hover.current += (proximity - hover.current) * Math.min(delta * 2, 1)
     const hv = hover.current
 
+    // pitch shimmer: lean the core hue toward the bright accent as the voice
+    // rises in pitch, so timbre — not just loudness — moves the orb
+    voiceColor.copy(accent).lerp(accentBright, Math.min(0.7, voicePitch * 0.7))
+
     if (coreMat.current) {
       const u = coreMat.current.uniforms
       u.uTime.value = t
-      // the voice drives LIGHT (rim glow) most, plus a moderate wave — the orb
-      // visibly lights up and ripples to the audio, without frantic geometry
-      u.uAmp.value = c.amp * (1 + level * 0.45)
-      u.uSpeed.value = c.speed
-      u.uPulse.value = c.pulse * 0.3 + level * 0.8
-      u.uRim.value = c.rim + level * 0.85 + hv * 0.28
-      ;(u.uColor.value as THREE.Color).copy(accent)
+      // the voice drives LIGHT (rim glow) most, plus a lively wave — the orb
+      // visibly lights up and ripples to the audio, pitch adding extra rim
+      u.uAmp.value = c.amp * (1 + level * 0.6)
+      u.uFlow.value = flowPhase.current
+      u.uPulse.value = c.pulse * 0.3 + level * 1.05
+      u.uRim.value = c.rim + level * 1.1 + voicePitch * 0.5 + hv * 0.28
+      ;(u.uColor.value as THREE.Color).copy(voiceColor)
       ;(u.uColorBright.value as THREE.Color).copy(accentBright)
     }
     if (nucleusMat.current) {
@@ -176,16 +210,16 @@ function OrbRig(): React.JSX.Element {
       u.uTime.value = t
       u.uAmp.value = c.amp
       // the hot core flares with the voice — the most eye-catching reaction
-      u.uPulse.value = c.pulse + level * 0.5
-      u.uGlow.value = 0.72 + level * 0.85 + c.pulse * 0.2 + hv * 0.15
-      ;(u.uColor.value as THREE.Color).copy(accent)
+      u.uPulse.value = c.pulse + level * 0.7
+      u.uGlow.value = 0.72 + level * 1.1 + c.pulse * 0.2 + hv * 0.15
+      ;(u.uColor.value as THREE.Color).copy(voiceColor)
       ;(u.uColorBright.value as THREE.Color).copy(accentBright)
     }
     if (nucleusMesh.current) {
-      // slow tumble; a light swell on the voice, kept small so it reads premium
+      // slow tumble; a swell on the voice, kept controlled so it reads premium
       nucleusMesh.current.rotation.y = t * 0.18
       nucleusMesh.current.rotation.x = t * 0.1
-      nucleusMesh.current.scale.setScalar(1 + c.pulse * 0.02 + level * 0.05)
+      nucleusMesh.current.scale.setScalar(1 + c.pulse * 0.02 + level * 0.08)
     }
     if (lattice.current) {
       // the lattice counter-rotates against the core for a gyroscopic feel
@@ -197,8 +231,11 @@ function OrbRig(): React.JSX.Element {
       const u = particleMat.current.uniforms
       u.uTime.value = t
       u.uRadiusScale.value = c.particleRadius
-      u.uSpeed.value = c.particleSpeed
-      ;(u.uColor.value as THREE.Color).copy(accent)
+      // orbital motion comes from the integrated spin phase (see above); size
+      // brightens a little with volume for a responsive shimmer
+      u.uSpin.value = spinPhase.current
+      u.uSize.value = 9 * (1 + level * 0.18)
+      ;(u.uColor.value as THREE.Color).copy(voiceColor)
     }
     if (coreMesh.current) {
       // gentle parallax lean toward the cursor — small and smooth
@@ -207,11 +244,13 @@ function OrbRig(): React.JSX.Element {
       coreMesh.current.scale.setScalar(1 + hv * 0.02)
     }
     if (ringA.current) {
-      ringA.current.rotation.z = t * 0.4 * c.ringSpeed
+      // spin from the integrated ring phase so a state change in ringSpeed
+      // eases in instead of jumping (same reason as the particle spin)
+      ringA.current.rotation.z = ringPhase.current * 0.4
       ringA.current.rotation.x = Math.PI / 2.6 + Math.sin(t * 0.3) * 0.15
     }
     if (ringB.current) {
-      ringB.current.rotation.z = -t * 0.28 * c.ringSpeed
+      ringB.current.rotation.z = -ringPhase.current * 0.28
       ringB.current.rotation.x = -Math.PI / 3.2 + Math.cos(t * 0.25) * 0.12
     }
   })

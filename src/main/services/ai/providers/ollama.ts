@@ -55,6 +55,22 @@ function toWire(system: string | undefined, messages: AgentMessage[]): OllamaMes
   return out
 }
 
+/**
+ * Pick a safe num_ctx floor for a given number of tool definitions. Budgets
+ * ~2.8k tokens for the system prompt, ~90 tokens per tool definition, and ~1.8k
+ * of headroom for conversation + tool results, then rounds UP to a standard
+ * window. The curated local-chat set (~34 tools) lands at 8192 — the same
+ * window chat has always used, so no VRAM regression — while the full ~79-tool
+ * agent/ultra set escalates to 16384 so its definitions never truncate. No tools
+ * → a small window. Capped so a huge set can't demand an unloadable context.
+ */
+function contextFloor(toolCount: number): number {
+  if (toolCount === 0) return 4096
+  const needed = 2800 + toolCount * 90 + 1800
+  for (const window of [8192, 16384, 24576]) if (needed <= window) return window
+  return 32768
+}
+
 export const ollamaProvider: AIProvider = {
   id: 'ollama',
   supportsTools: true,
@@ -74,10 +90,15 @@ export const ollamaProvider: AIProvider = {
       // keep the model loaded between tool rounds (no reload latency)
       keep_alive: '15m',
       options: {
-        // CRITICAL for agentic use: the big system prompt + ~45 tool
-        // definitions + tool results overflow Ollama's small default
-        // context (2048) and the model silently loses its tools.
-        num_ctx: ctx.numCtx && ctx.numCtx >= 2048 ? ctx.numCtx : 8192,
+        // CRITICAL for agentic use. The fixed prompt overhead is large — a
+        // ~2.7k-token system prompt PLUS every tool definition (~90–110 tokens
+        // each) — and tool results pile on top. If num_ctx can't hold all of it,
+        // Ollama silently truncates the prompt and the model loses its tools
+        // ("I don't have tools to do that") or starts ignoring instructions.
+        // Ollama's default is only 2048, so we size the window to the actual
+        // tool payload and floor it well above the overhead. A larger user
+        // setting always wins; cap keeps VRAM sane on huge tool sets.
+        num_ctx: Math.max(ctx.numCtx ?? 0, contextFloor(req.tools?.length ?? 0)),
         // lower temperature → more reliable, deterministic tool calls
         temperature: 0.6
       }
