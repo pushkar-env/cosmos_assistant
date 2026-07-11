@@ -5,6 +5,106 @@ import type { WorkspaceService } from '../WorkspaceService'
 import { resolveUserPath } from '../userPaths'
 
 const MAX_READ_BYTES = 60_000
+
+interface EditResult {
+  content?: string
+  count?: number
+  fuzzy?: boolean
+  error?: string
+}
+
+/**
+ * Apply a find/replace robustly. Weaker (local) models rarely reproduce a
+ * snippet byte-for-byte — line endings, indentation and trailing whitespace
+ * drift — so a strict match makes fs_edit fail in a loop. Strategy ladder:
+ *   1. exact match (after normalizing CRLF→LF)
+ *   2. line-based match that ignores each line's leading/trailing whitespace
+ * The CODE still has to be correct; only whitespace is forgiven. Uniqueness is
+ * always required unless replace_all.
+ */
+function robustEdit(content: string, oldStr: string, newStr: string, replaceAll: boolean): EditResult {
+  const c = content.replace(/\r\n?/g, '\n')
+  const o = oldStr.replace(/\r\n?/g, '\n')
+  const n = newStr.replace(/\r\n?/g, '\n')
+
+  // 1. exact (post line-ending normalization)
+  const exact = c.split(o).length - 1
+  if (exact > 0) {
+    if (exact > 1 && !replaceAll) {
+      return { error: `The snippet appears ${exact} times — add more surrounding context to make it unique, or set replace_all:true.` }
+    }
+    const updated = replaceAll ? c.split(o).join(n) : c.replace(o, () => n)
+    return { content: updated, count: replaceAll ? exact : 1 }
+  }
+
+  // tiers 2+: line-based matching, tried strict→loose. A weaker model may
+  // drift on indentation, operator spacing, or drop spaces entirely — so if a
+  // stricter comparison finds nothing, fall back to a looser one. Uniqueness
+  // is still required, which guards against a loose tier over-matching.
+  let oLines = o.split('\n')
+  let nLines = n.split('\n')
+  if (oLines.length > 1 && oLines[oLines.length - 1] === '') oLines = oLines.slice(0, -1)
+  if (nLines.length > 1 && nLines[nLines.length - 1] === '') nLines = nLines.slice(0, -1)
+  // If old_string was copied from read_file's numbered gutter ("   15  code"),
+  // strip the leading line numbers so it matches the real file. Only when most
+  // lines look like a gutter, so real code that happens to start with a number
+  // is untouched.
+  const gutterLines = oLines.filter((l) => /^\s*\d+\s{2,}\S/.test(l)).length
+  if (oLines.length > 0 && gutterLines >= Math.ceil(oLines.length * 0.6)) {
+    oLines = oLines.map((l) => l.replace(/^\s*\d+\s{2,}/, ''))
+  }
+  const cLines = c.split('\n')
+  const normalizers: Array<(s: string) => string> = [
+    (s) => s.trim(), // ignore indentation + trailing whitespace
+    (s) => s.trim().replace(/\s+/g, ' '), // + collapse internal spacing runs
+    (s) => s.replace(/\s+/g, '') // + ignore whitespace entirely
+  ]
+  let matches: number[] = []
+  for (const norm of normalizers) {
+    const oN = oLines.map(norm)
+    const found: number[] = []
+    for (let i = 0; i + oLines.length <= cLines.length; i++) {
+      let ok = true
+      for (let j = 0; j < oLines.length; j++) {
+        if (norm(cLines[i + j]) !== oN[j]) {
+          ok = false
+          break
+        }
+      }
+      if (ok) found.push(i)
+    }
+    if (found.length > 0) {
+      matches = found
+      break
+    }
+  }
+  if (matches.length === 0) {
+    return {
+      error:
+        'old_string was not found — even ignoring whitespace. Call read_file to get the current exact text, then copy a unique snippet of it verbatim (a few lines is enough).'
+    }
+  }
+  if (matches.length > 1 && !replaceAll) {
+    return { error: `The snippet matches ${matches.length} places — include more surrounding lines to make it unique, or set replace_all:true.` }
+  }
+  // non-overlapping targets, applied last→first so indices stay valid
+  let targets = [matches[0]]
+  if (replaceAll) {
+    targets = []
+    let lastEnd = -1
+    for (const m of matches) {
+      if (m >= lastEnd) {
+        targets.push(m)
+        lastEnd = m + oLines.length
+      }
+    }
+  }
+  for (let k = targets.length - 1; k >= 0; k--) {
+    cLines.splice(targets[k], oLines.length, ...nLines)
+  }
+  return { content: cLines.join('\n'), count: targets.length, fuzzy: true }
+}
+
 const SEARCH_SKIP = new Set([
   'node_modules',
   '.git',
@@ -86,7 +186,7 @@ export function codingTools(workspace: WorkspaceService): ToolSpec[] {
       def: {
         name: 'fs_edit',
         description:
-          'Make a surgical edit to an existing file by replacing an exact snippet — far cheaper and safer than rewriting the whole file. `old_string` must appear EXACTLY once (include enough surrounding context to be unique) unless replace_all is true. Use this for bug fixes and incremental changes; use fs_write only for brand-new files or full rewrites.',
+          'Make a surgical edit to an existing file by replacing a snippet — cheaper than rewriting the whole file. Provide `old_string`, a snippet copied VERBATIM from the file (copy it exactly; do NOT include read_file line-number prefixes), and `new_string` to replace it with. Indentation, trailing spaces and line endings are matched flexibly — but the code text itself must be correct, and the snippet must be unique (include a few surrounding lines) unless replace_all is true. If an fs_edit fails to match twice on the same file, stop retrying and use fs_write to save the whole updated file instead — that always works for small/medium files.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -111,17 +211,24 @@ export function codingTools(workspace: WorkspaceService): ToolSpec[] {
         } catch {
           throw new Error(`Cannot edit — ${file} does not exist. Use fs_write to create it.`)
         }
-        const occurrences = content.split(oldStr).length - 1
-        if (occurrences === 0) {
-          throw new Error('old_string was not found in the file. Read the file again and copy the exact text (including whitespace).')
+        const res = robustEdit(content, oldStr, newStr, a.replace_all === true)
+        if (res.error || res.content === undefined) {
+          // track repeated misses on this file and escalate: after a couple of
+          // failures, stop the model from looping on fs_edit and route it to a
+          // full-file fs_write, which can't fail on matching.
+          const fails = (ctx.editFailures?.get(file) ?? 0) + 1
+          ctx.editFailures?.set(file, fails)
+          const nudge =
+            fails >= 2
+              ? ` You've failed to match this file ${fails} times — STOP retrying fs_edit here. Call read_file to get its exact current content, then use fs_write to save the ENTIRE file with your change applied (reliable for a file this size).`
+              : ''
+          throw new Error((res.error ?? 'Edit failed.') + nudge)
         }
-        if (occurrences > 1 && a.replace_all !== true) {
-          throw new Error(`old_string appears ${occurrences} times — add more surrounding context to make it unique, or set replace_all:true.`)
-        }
-        const updated = a.replace_all === true ? content.split(oldStr).join(newStr) : content.replace(oldStr, newStr)
+        ctx.editFailures?.delete(file) // a success clears the streak
         await fs.mkdir(dirname(file), { recursive: true })
-        await fs.writeFile(file, updated, 'utf-8')
-        return `Edited ${file} — replaced ${a.replace_all === true ? occurrences : 1} occurrence(s).`
+        await fs.writeFile(file, res.content, 'utf-8')
+        const how = res.fuzzy ? ' (matched ignoring whitespace)' : ''
+        return `Edited ${file} — replaced ${res.count} occurrence(s)${how}.`
       }
     },
     {
@@ -206,7 +313,7 @@ export function codingTools(workspace: WorkspaceService): ToolSpec[] {
       def: {
         name: 'run_command',
         description:
-          "Run a shell command in the project workspace and get its output back. This is the agent's terminal — it shares the working directory and live output with the COSMOS Studio terminal the user sees, so `cd` persists between calls. Use it to scaffold projects (npm/npx/git/python/pip), install dependencies, build, run tests, and verify your changes actually work. For long-lived processes (a dev server), set background:true so the loop isn't blocked.",
+          "Run a shell command in the project workspace and get its output back. This is the agent's terminal — it shares the working directory and live output with the COSMOS Studio terminal the user sees, so `cd` persists between calls. Use it to scaffold projects (npm/npx/git/python/pip), install dependencies, build, run tests, and verify your changes actually work. A failed command reports a non-zero exit ('[exit code 1 — the command FAILED]') — treat that as an error to diagnose and fix yourself, not a reason to stop. For long-lived processes (a dev server), set background:true so the loop isn't blocked.",
         inputSchema: {
           type: 'object',
           properties: {

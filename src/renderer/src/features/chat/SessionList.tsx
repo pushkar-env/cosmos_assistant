@@ -70,7 +70,7 @@ export function SessionList({ onClose }: { onClose: () => void }): React.JSX.Ele
         </button>
       </div>
 
-      <div className="max-h-[370px] overflow-y-auto py-1">
+      <div className="smooth-scroll max-h-[370px] overflow-y-auto py-1">
         {sessions.length === 0 && (
           <p className="px-3 py-6 text-center font-ui text-xs text-dim">
             No saved chats yet. Start talking and this chat will be saved here.

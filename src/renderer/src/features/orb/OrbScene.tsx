@@ -3,6 +3,7 @@ import { Canvas, useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { useAssistantStore } from '@/core/stores/useAssistantStore'
 import { useSettingsStore } from '@/core/stores/useSettingsStore'
+import { useVoiceStore } from '@/features/voice/useVoiceStore'
 import { voiceSignal } from '@/core/voice/voiceSignal'
 import { THEMES } from '@/core/theme/themes'
 import { LERP_RATE, ORB_STATES, type OrbParams } from './orbConfig'
@@ -34,6 +35,9 @@ function OrbRig(): React.JSX.Element {
   const current = useRef<OrbParams>({ ...ORB_STATES.idle })
   /** 0..1 hover intensity — the orb leans toward and brightens near the cursor */
   const hover = useRef(0)
+  /** smoothed voice envelope — quick attack, gentle release, so the orb
+   *  breathes with speech instead of jittering frame-to-frame */
+  const smoothLevel = useRef(0)
 
   const theme = useSettingsStore((s) => s.settings.theme)
   const { accent, accentBright } = useMemo(() => {
@@ -104,7 +108,8 @@ function OrbRig(): React.JSX.Element {
   }, [])
 
   useFrame((state, delta) => {
-    const target = ORB_STATES[useAssistantStore.getState().state]
+    const st = useAssistantStore.getState().state
+    const target = ORB_STATES[st]
     const c = current.current
     const k = Math.min(delta * LERP_RATE, 1)
 
@@ -118,8 +123,29 @@ function OrbRig(): React.JSX.Element {
 
     const t = state.clock.elapsedTime
 
-    // real audio envelope (mic while listening, TTS while speaking)
-    const level = voiceSignal.level
+    // real audio envelope (mic while listening, TTS while speaking), smoothed
+    // like a VU meter: rises quickly, falls gently — reads as calm breathing
+    // rather than a twitchy reaction to every syllable.
+    const raw = voiceSignal.level
+    const sl = smoothLevel.current
+    smoothLevel.current += (raw - sl) * Math.min(delta * (raw > sl ? 11 : 3.5), 1)
+    // the voice is the star. Apply the strong listening reaction whenever the
+    // mic is actively capturing — that includes HANDS-FREE passive listening,
+    // where the assistant state is still 'idle' while it waits for the wake
+    // word, so the orb clearly reacts to "Cosmos…". Lift the envelope with a
+    // perceptual curve (pow < 1) so even QUIET speech is visible, then a strong
+    // gain. Speaking (its own reply) reacts too, a touch softer.
+    const micLive = useVoiceStore.getState().micMode !== 'off'
+    const activelyListening = st === 'listening' || (micLive && st === 'idle')
+    let env = smoothLevel.current
+    let voiceGain = 1.0
+    if (st === 'speaking') {
+      voiceGain = 1.15
+    } else if (activelyListening) {
+      env = Math.pow(env, 0.5) // quiet speech → much more visible
+      voiceGain = 1.9
+    }
+    const level = Math.min(1.25, env * voiceGain)
 
     // pointer proximity to the orb (screen centre) → premium hover reaction
     const px = state.pointer.x
@@ -136,11 +162,12 @@ function OrbRig(): React.JSX.Element {
     if (coreMat.current) {
       const u = coreMat.current.uniforms
       u.uTime.value = t
-      // subtle hover: a soft warm glow on the rim only — no turbulence spike
-      u.uAmp.value = c.amp * (1 + level * 0.9)
+      // the voice drives LIGHT (rim glow) most, plus a moderate wave — the orb
+      // visibly lights up and ripples to the audio, without frantic geometry
+      u.uAmp.value = c.amp * (1 + level * 0.45)
       u.uSpeed.value = c.speed
-      u.uPulse.value = c.pulse * 0.35 + level * 1.1
-      u.uRim.value = c.rim + level * 0.5 + hv * 0.28
+      u.uPulse.value = c.pulse * 0.3 + level * 0.8
+      u.uRim.value = c.rim + level * 0.85 + hv * 0.28
       ;(u.uColor.value as THREE.Color).copy(accent)
       ;(u.uColorBright.value as THREE.Color).copy(accentBright)
     }
@@ -148,17 +175,17 @@ function OrbRig(): React.JSX.Element {
       const u = nucleusMat.current.uniforms
       u.uTime.value = t
       u.uAmp.value = c.amp
-      // the core burns hotter while it speaks/listens, and flares with the voice
-      u.uPulse.value = c.pulse + level * 0.7
-      u.uGlow.value = 0.7 + level * 0.7 + c.pulse * 0.35 + hv * 0.15
+      // the hot core flares with the voice — the most eye-catching reaction
+      u.uPulse.value = c.pulse + level * 0.5
+      u.uGlow.value = 0.72 + level * 0.85 + c.pulse * 0.2 + hv * 0.15
       ;(u.uColor.value as THREE.Color).copy(accent)
       ;(u.uColorBright.value as THREE.Color).copy(accentBright)
     }
     if (nucleusMesh.current) {
-      // slow tumble, slightly swelling as it pulses
+      // slow tumble; a light swell on the voice, kept small so it reads premium
       nucleusMesh.current.rotation.y = t * 0.18
       nucleusMesh.current.rotation.x = t * 0.1
-      nucleusMesh.current.scale.setScalar(1 + c.pulse * 0.06 + level * 0.08)
+      nucleusMesh.current.scale.setScalar(1 + c.pulse * 0.02 + level * 0.05)
     }
     if (lattice.current) {
       // the lattice counter-rotates against the core for a gyroscopic feel
@@ -193,7 +220,7 @@ function OrbRig(): React.JSX.Element {
     <>
       {/* glowing plasma nucleus — the hot heart of the core */}
       <mesh ref={nucleusMesh}>
-        <sphereGeometry args={[0.55, 48, 48]} />
+        <sphereGeometry args={[0.55, 32, 32]} />
         <shaderMaterial
           ref={nucleusMat}
           vertexShader={NUCLEUS_VERTEX}
@@ -218,7 +245,7 @@ function OrbRig(): React.JSX.Element {
 
       {/* the outer holographic membrane */}
       <mesh ref={coreMesh}>
-        <icosahedronGeometry args={[1.15, 48]} />
+        <icosahedronGeometry args={[1.15, 24]} />
         <shaderMaterial
           ref={coreMat}
           vertexShader={CORE_VERTEX}
@@ -261,7 +288,7 @@ export function OrbScene(): React.JSX.Element {
   return (
     <Canvas
       camera={{ position: [0, 0, 6], fov: 42 }}
-      dpr={[1, 2]}
+      dpr={[1, 1.75]}
       gl={{ antialias: true, alpha: true, powerPreference: 'high-performance' }}
       style={{ background: 'transparent' }}
       onPointerMove={() => {

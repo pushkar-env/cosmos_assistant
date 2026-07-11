@@ -143,7 +143,7 @@ export function CommandPalette(): React.JSX.Element {
                     ESC
                   </kbd>
                 </div>
-                <div className="max-h-[340px] overflow-y-auto py-2">
+                <div className="smooth-scroll max-h-[340px] overflow-y-auto py-2">
                   {filtered.length === 0 && (
                     <p className="px-5 py-6 text-center font-ui text-sm text-dim">
                       No matching commands

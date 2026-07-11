@@ -18,43 +18,53 @@ export interface OrbParams {
   ringSpeed: number
 }
 
+/*
+ * These state baselines are deliberately CALM and cohesive — the dynamic
+ * "life" comes from the live voice envelope (see OrbScene), not from the state
+ * itself. Keeping particleSpeed / ringSpeed / amp in a tight range avoids the
+ * dramatic wave/rotation/particle bursts on "executing" (thinking) and on the
+ * transition back when a reply finishes.
+ */
 export const ORB_STATES: Record<AssistantState, OrbParams> = {
   idle: {
     amp: 0.08,
-    speed: 0.25,
+    speed: 0.3,
     rim: 1.0,
     pulse: 0,
     particleRadius: 1.0,
-    particleSpeed: 1.0,
-    ringSpeed: 1.0
+    particleSpeed: 0.9,
+    ringSpeed: 0.8
   },
   listening: {
-    amp: 0.16,
-    speed: 0.9,
-    rim: 1.6,
-    pulse: 0.35,
-    particleRadius: 1.15,
-    particleSpeed: 2.2,
-    ringSpeed: 3.0
+    // gently alive — the strong voice reaction adds the real life on top
+    amp: 0.13,
+    speed: 0.7,
+    rim: 1.45,
+    pulse: 0.28,
+    particleRadius: 1.06,
+    particleSpeed: 1.35,
+    ringSpeed: 1.25
   },
   thinking: {
-    amp: 0.3,
-    speed: 1.6,
-    rim: 1.3,
-    pulse: 0.15,
-    particleRadius: 0.62,
-    particleSpeed: 3.4,
-    ringSpeed: 5.0
+    // focused, not frantic — was the source of the extreme waves/rotations
+    amp: 0.16,
+    speed: 1.05,
+    rim: 1.25,
+    pulse: 0.1,
+    particleRadius: 0.86,
+    particleSpeed: 1.85,
+    ringSpeed: 1.9
   },
   speaking: {
-    amp: 0.2,
-    speed: 0.7,
-    rim: 1.8,
-    pulse: 1.0,
-    particleRadius: 1.25,
-    particleSpeed: 1.6,
-    ringSpeed: 2.0
+    // composed with a bright rim; the voice reaction supplies the movement
+    amp: 0.12,
+    speed: 0.6,
+    rim: 1.65,
+    pulse: 0.3,
+    particleRadius: 1.1,
+    particleSpeed: 1.2,
+    ringSpeed: 1.15
   }
 }
 
-export const LERP_RATE = 2.2 // per-second interpolation toward the target state
+export const LERP_RATE = 2.0 // per-second interpolation toward the target state

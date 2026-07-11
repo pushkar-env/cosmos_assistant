@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import type { NoteMeta } from '@shared/types'
 import { useUIStore } from '@/core/stores/useUIStore'
 import { Glass } from '@/shared/ui/Glass'
+import { Markdown } from '@/shared/ui/Markdown'
 
 /**
  * The AI Workspace: persistent notes (markdown-friendly), shared with
@@ -19,6 +20,7 @@ export function WorkspacePanel(): React.JSX.Element {
   const [content, setContent] = useState('')
   const [renamingId, setRenamingId] = useState<number | null>(null)
   const [renameValue, setRenameValue] = useState('')
+  const [preview, setPreview] = useState(false)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const dirty = useRef(false)
 
@@ -71,6 +73,7 @@ export function WorkspacePanel(): React.JSX.Element {
     setActiveId(null)
     setTitle('')
     setContent('')
+    setPreview(false) // a fresh note opens ready to type
   }
 
   const remove = async (): Promise<void> => {
@@ -137,7 +140,7 @@ export function WorkspacePanel(): React.JSX.Element {
                     +
                   </button>
                 </div>
-                <div className="flex-1 overflow-y-auto">
+                <div className="smooth-scroll flex-1 overflow-y-auto">
                   {notes.map((n) => (
                     <div
                       key={n.id}
@@ -203,6 +206,17 @@ export function WorkspacePanel(): React.JSX.Element {
                     placeholder="Untitled"
                     className="flex-1 bg-transparent font-ui text-base font-semibold text-body placeholder:text-dim focus:outline-none"
                   />
+                  <button
+                    onClick={() => setPreview((p) => !p)}
+                    title={preview ? 'Back to editing' : 'Preview rendered markdown'}
+                    className={`flex items-center gap-1 rounded-md px-2 py-0.5 font-mono text-[10px] uppercase tracking-widest transition-colors ${
+                      preview
+                        ? 'text-[var(--accent-bright)]'
+                        : 'text-dim hover:bg-white/5 hover:text-body'
+                    }`}
+                  >
+                    {preview ? '✎ Edit' : '◉ Preview'}
+                  </button>
                   {activeId !== null && (
                     <button
                       onClick={() => void remove()}
@@ -218,16 +232,26 @@ export function WorkspacePanel(): React.JSX.Element {
                     ESC
                   </button>
                 </div>
-                <textarea
-                  value={content}
-                  onChange={(e) => {
-                    setContent(e.target.value)
-                    scheduleSave(title, e.target.value)
-                  }}
-                  placeholder="Write in markdown…  (auto-saves)"
-                  spellCheck={false}
-                  className="flex-1 resize-none select-text bg-transparent px-5 py-4 font-mono text-sm leading-relaxed text-body placeholder:text-dim focus:outline-none"
-                />
+                {preview ? (
+                  <div className="smooth-scroll flex-1 select-text overflow-y-auto px-5 py-4 font-body text-sm leading-relaxed text-body">
+                    {content.trim() ? (
+                      <Markdown>{content}</Markdown>
+                    ) : (
+                      <p className="font-ui text-sm text-dim">Nothing to preview yet — write some markdown.</p>
+                    )}
+                  </div>
+                ) : (
+                  <textarea
+                    value={content}
+                    onChange={(e) => {
+                      setContent(e.target.value)
+                      scheduleSave(title, e.target.value)
+                    }}
+                    placeholder="Write in markdown…  (auto-saves)"
+                    spellCheck={false}
+                    className="smooth-scroll flex-1 resize-none select-text bg-transparent px-5 py-4 font-mono text-sm leading-relaxed text-body placeholder:text-dim focus:outline-none"
+                  />
+                )}
               </div>
             </Glass>
           </motion.div>

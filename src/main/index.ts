@@ -33,6 +33,7 @@ import { PluginService } from './services/PluginService'
 import { MediaService } from './services/MediaService'
 import { WorkspaceService } from './services/WorkspaceService'
 import { GitService } from './services/GitService'
+import { NotesExportService } from './services/NotesExportService'
 
 // Pin a stable identity BEFORE any service reads app.getPath('userData').
 // This guarantees `npm run dev` and the installed .exe share one profile
@@ -57,6 +58,9 @@ let windowMode: WindowMode = 'full'
 let fullBounds: Electron.Rectangle | null = null
 /** full mode opens maximized by default; remember if the user un-maximized it */
 let fullMaximized = true
+/** where the user dragged the floating orb — restored instead of re-snapping
+ *  it to the bottom-right corner every time orb mode is entered */
+let orbPosition: { x: number; y: number } | null = null
 
 const MODE_SIZES = {
   full: { width: 1500, height: 940 },
@@ -69,7 +73,9 @@ const stats = new SystemStatsService()
 const weather = new WeatherService(settings)
 const commands = new CommandService()
 const embeddings = new EmbeddingService(settings)
+const notesExport = new NotesExportService(settings)
 const memory = new MemoryService(embeddings)
+memory.attachNotesExport(notesExport) // mirror notes + research reports to .md
 const browser = new BrowserService()
 const media = new MediaService(browser, settings)
 const workspace = new WorkspaceService(settings)
@@ -124,6 +130,15 @@ function createWindow(): void {
   })
   mainWindow.on('unmaximize', () => {
     if (windowMode === 'full') fullMaximized = false
+  })
+
+  // remember where the user drags the floating orb (native-drag 'moved' event)
+  // so it reopens in the same spot instead of snapping back to the corner
+  mainWindow.on('moved', () => {
+    if (windowMode === 'orb' && mainWindow && !mainWindow.isDestroyed()) {
+      const [x, y] = mainWindow.getPosition()
+      orbPosition = { x, y }
+    }
   })
 
   // Tell the renderer when the window comes back from minimize/hidden. The
@@ -183,15 +198,34 @@ function setWindowMode(mode: WindowMode): void {
     mainWindow.setMinimumSize(size.width, size.height)
     mainWindow.setAlwaysOnTop(true, 'floating')
     mainWindow.setSize(size.width, size.height)
-    const area = screen.getPrimaryDisplay().workArea
-    const margin = 24
-    mainWindow.setPosition(
-      area.x + area.width - size.width - margin,
-      area.y + area.height - size.height - margin
-    )
+    // orb mode restores where the user dragged it (clamped back on-screen in
+    // case it was left at an edge); otherwise park bottom-right
+    if (mode === 'orb' && orbPosition) {
+      const c = clampToScreen(orbPosition.x, orbPosition.y, size.width, size.height)
+      mainWindow.setPosition(c.x, c.y)
+    } else {
+      const area = screen.getPrimaryDisplay().workArea
+      const margin = 24
+      mainWindow.setPosition(
+        area.x + area.width - size.width - margin,
+        area.y + area.height - size.height - margin
+      )
+    }
   }
   if (!mainWindow.isVisible()) mainWindow.show()
   mainWindow.webContents.send(IPC.WINDOW_MODE_CHANGED, mode)
+}
+
+/**
+ * Clamp a window position to the nearest display so the orb can never be
+ * dropped fully off-screen and lost.
+ */
+function clampToScreen(x: number, y: number, w: number, h: number): { x: number; y: number } {
+  const { bounds } = screen.getDisplayNearestPoint({ x: Math.round(x), y: Math.round(y) })
+  return {
+    x: Math.round(Math.min(Math.max(x, bounds.x - w / 3), bounds.x + bounds.width - w / 1.5)),
+    y: Math.round(Math.min(Math.max(y, bounds.y), bounds.y + bounds.height - h / 1.5))
+  }
 }
 
 function showMainWindow(mode: WindowMode = 'full'): void {
@@ -335,6 +369,7 @@ if (!gotLock) {
       plugins,
       workspace,
       git,
+      notesExport,
       window: {
         setMode: setWindowMode,
         show: showMainWindow,

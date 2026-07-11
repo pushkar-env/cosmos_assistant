@@ -23,6 +23,7 @@ import type { MemoryService } from './services/MemoryService'
 import type { PluginService } from './services/PluginService'
 import type { WorkspaceService } from './services/WorkspaceService'
 import type { GitService } from './services/GitService'
+import type { NotesExportService } from './services/NotesExportService'
 
 interface WindowController {
   setMode: (mode: WindowMode) => void
@@ -43,6 +44,7 @@ interface Services {
   plugins: PluginService
   workspace: WorkspaceService
   git: GitService
+  notesExport: NotesExportService
   window: WindowController
 }
 
@@ -175,6 +177,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null, services: Ser
   )
 
   ipcMain.handle(IPC.NOTES_DELETE, (_e, id: number) => services.memory.deleteNote(id))
+
+  ipcMain.handle(IPC.NOTES_FOLDER_GET, () => services.notesExport.folder())
+  ipcMain.handle(IPC.NOTES_FOLDER_PICK, () => services.notesExport.pick(getWindow()))
+  ipcMain.handle(IPC.NOTES_FOLDER_REVEAL, () => services.notesExport.reveal())
 
   ipcMain.handle(IPC.PLUGINS_GET, () => services.plugins.list())
 

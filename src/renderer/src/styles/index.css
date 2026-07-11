@@ -51,6 +51,23 @@ body {
   background: var(--accent);
 }
 
+/* Compositor-isolated scrolling. A scroll area INSIDE a backdrop-filter
+   panel can't use the browser's fast (GPU) scroll path — every wheel tick
+   repaints on the main thread, which reads as lag. Promoting the scroller to
+   its own layer (translateZ) restores smooth compositor scrolling, and
+   overscroll-behavior stops scroll-chaining hitches at the ends. */
+.smooth-scroll {
+  transform: translateZ(0);
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+/* stop scroll-chaining bounce on every scroll area (cheap, no layer cost) */
+.overflow-y-auto,
+.overflow-auto {
+  overscroll-behavior: contain;
+}
+
 /* ── The glass recipe (see DESIGN_SYSTEM.md §3) ── */
 .glass {
   background: color-mix(in srgb, var(--bg-elevated) 72%, transparent);

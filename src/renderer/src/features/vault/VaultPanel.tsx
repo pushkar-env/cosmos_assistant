@@ -108,7 +108,7 @@ export function VaultPanel(): React.JSX.Element {
                       className="flex-1 bg-transparent font-ui text-sm text-body placeholder:text-dim focus:outline-none"
                     />
                   </div>
-                  <div className="flex-1 overflow-y-auto px-6 py-3">
+                  <div className="smooth-scroll flex-1 overflow-y-auto px-6 py-3">
                     {memories.length === 0 && (
                       <p className="py-10 text-center font-ui text-sm text-dim">
                         Nothing remembered yet. Tell COSMOS about yourself — durable facts get
@@ -143,7 +143,7 @@ export function VaultPanel(): React.JSX.Element {
               )}
 
               {tab === 'permissions' && (
-                <div className="flex-1 overflow-y-auto px-6 py-4">
+                <div className="smooth-scroll flex-1 overflow-y-auto px-6 py-4">
                   <p className="mb-4 font-ui text-xs text-dim">
                     Tools granted permanent approval via “Always”. Revoked tools ask again next
                     time.

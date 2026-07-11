@@ -38,6 +38,8 @@ const MAX_TOOL_ROUNDS = 8
 /** agent/ultra can chain many more tool rounds — building a project needs them */
 const MAX_AGENT_ROUNDS = 24
 const MAX_SUBAGENT_ROUNDS = 10
+/** how many times the loop will push a stalling agent to keep fixing a failure */
+const KEEP_GOING_CAP = 3
 const APPROVAL_TIMEOUT_MS = 120_000
 
 /**
@@ -159,7 +161,8 @@ export class AIService {
       model: req.model,
       depth: 0,
       workspaceRoot,
-      autoApproveCoding
+      autoApproveCoding,
+      editFailures: new Map()
     }
 
     const lastUser = [...req.messages].reverse().find((m) => m.role === 'user')
@@ -210,7 +213,20 @@ export class AIService {
       }
     }
 
+    // Production agent loop (agent/ultra): make errors a step, not a stop.
+    // Every failed tool result carries a directive to self-recover, and if the
+    // model tries to end its turn right after a failure (e.g. "here's how YOU
+    // can fix it") we push it to keep going — bounded — so it iterates like a
+    // real coding agent instead of punting the fix back to the user.
+    const agentic = mode === 'agent' || mode === 'ultra'
+    const errorNudge =
+      '\n\n[This step FAILED. You are an autonomous agent — do NOT stop here, do NOT tell the user how to fix it, and do NOT ask them to run or install anything. Read the error above, then try a DIFFERENT approach YOURSELF (alternate command/flags, a prebuilt binary or wheel, a different version, package or library, another path/tool) and keep going until the goal actually works. e.g. if a package fails to build from source, retry with a prebuilt binary or a different version.]'
+    const keepGoingNudge =
+      'The previous step failed and the task is not finished. Do NOT explain how I could fix it or ask me to run/install anything — fix it YOURSELF: diagnose the error, try a different approach, and keep going until it actually works and you have verified it. Only stop to ask me if you truly cannot proceed without a credential or a decision from me — and then say exactly what you need.'
+
     let researchUsed = false
+    let lastRoundFailed = false
+    let keepGoing = 0
     try {
       for (let round = 0; round < maxRounds; round++) {
         const textBefore = fullText
@@ -220,7 +236,15 @@ export class AIService {
           emit,
           controller.signal
         )
-        if (calls.length === 0) break
+        if (calls.length === 0) {
+          if (agentic && lastRoundFailed && keepGoing < KEEP_GOING_CAP && !controller.signal.aborted) {
+            keepGoing++
+            messages.push({ role: 'user', content: keepGoingNudge })
+            emit('\n\n') // visual break before the model resumes
+            continue
+          }
+          break
+        }
         if (calls.some((c) => c.name === 'research')) researchUsed = true
 
         messages.push({
@@ -229,6 +253,15 @@ export class AIService {
           calls
         })
         const results = await this.executeCalls(calls, execCtx)
+        // A failure is a tool exception OR a command that exited non-zero —
+        // run_command/terminal_run return a failed command's output as a
+        // "successful" tool result, so isError alone misses build/test errors.
+        const isFail = (r: ToolOutcome): boolean =>
+          r.isError || /\[exit (?:code [1-9]\d*|error)/i.test(r.result)
+        lastRoundFailed = results.some(isFail)
+        if (agentic) {
+          for (const r of results) if (isFail(r)) r.result += errorNudge
+        }
         if (results.length > 0) {
           results[results.length - 1].result += langReminder
         }
@@ -238,7 +271,7 @@ export class AIService {
       // Research mode (and Ultra when it decided to research) → persist the
       // detailed answer to Notes so the user keeps it.
       if (fullText.trim() && (mode === 'research' || (mode === 'ultra' && researchUsed))) {
-        this.saveResearchNote(win, lastUser?.content ?? '', fullText)
+        void this.saveResearchNote(win, lastUser?.content ?? '', fullText, req.provider, req.model)
       }
       this.finish(win, req.requestId)
     } catch (err) {
@@ -493,7 +526,7 @@ Work like a senior developer building or fixing real software:
 3. IMPLEMENT incrementally: use fs_write for NEW files and fs_edit for surgical changes to existing files (match the project's existing style, imports and conventions). Scaffold and install with run_command — you have a real PowerShell in the workspace: create the project (npm/npx/vite/create-*, git init, python -m venv, dotnet new, cargo new…), and install ANY packages/dependencies it needs (npm i <pkg>, pnpm/yarn, pip install, cargo add, dotnet add package, winget). Long installs are fine — the terminal waits as long as they're producing output. Start dev servers with background:true so they don't block you.
 4. VERIFY: actually run it — install deps, build, run tests or the app with run_command — and READ the output. Use search_code to locate symbols/usages across the project. If it fails, diagnose the real root cause and fix it, then re-run. Iterate until it genuinely works; do not claim success you have not verified.
 5. REPORT: when done, give a short summary — what you built/changed, how you verified it, and how to run it. The user can watch and edit everything live in the COSMOS Studio (editor + terminal).
-Be decisive and thorough. Prefer run_command in the workspace terminal over describing commands for the user to run. Never fabricate file contents or command output.`
+ERROR RECOVERY — this is what makes you an agent: treat every failed command or tool as a STEP, never a stop. When something fails, do NOT stop to explain the fix to the user, and NEVER tell the user to run or install something themselves — YOU do it. Read the actual error, form a hypothesis, and try a DIFFERENT approach yourself: alternate command or flags, a prebuilt binary/wheel instead of building from source (e.g. a Python package that won't compile → retry with a prebuilt binary, a pinned version, \`--only-binary\`, or an equivalent library), a different tool, or a different path. Keep looping fix→re-run→verify until the goal is actually achieved. Only pause to ask the user as a genuine last resort — when you truly cannot proceed without a credential or a decision from them — and then say exactly what you need and why. Be decisive and thorough; prefer run_command over describing commands for the user; never fabricate file contents or command output.`
       case 'research':
         return `\nMODE: RESEARCH. The user wants a thorough, well-sourced answer. ALWAYS call the research tool first (recency:true for current/news topics). Then write a COMPREHENSIVE, well-structured report: begin with a title as a markdown H1 heading (e.g. "# <topic>"), then organized sections with headings, key findings, specifics (names, numbers, dates), and cite the sources you used. Be detailed and substantive — several paragraphs. (Your report is saved to the user's Notes automatically.)`
       case 'ultra':
@@ -504,18 +537,26 @@ Be decisive and thorough. Prefer run_command in the workspace terminal over desc
     }
   }
 
-  private saveResearchNote(win: BrowserWindow, query: string, content: string): void {
+  private async saveResearchNote(
+    win: BrowserWindow,
+    query: string,
+    content: string,
+    provider: ProviderId,
+    model: string
+  ): Promise<void> {
     try {
+      // reformat the conversational answer into a clean, structured report doc
+      const report = await this.formatResearchReport(query, content, provider, model)
       // title: the report's first markdown heading, else the user's question
-      const heading = /^\s*#{1,3}\s+(.+?)\s*$/m.exec(content)?.[1]
+      const heading = /^\s*#{1,3}\s+(.+?)\s*$/m.exec(report)?.[1]
       const title = (heading || query || 'Research')
         .replace(/[*_`#]/g, '')
         .trim()
         .slice(0, 80)
-      this.memory.saveNote(null, title, content)
+      this.memory.saveNote(null, title, report)
       if (!win.isDestroyed()) {
         win.webContents.send(IPC.NOTIFY, {
-          title: 'Saved to Notes',
+          title: 'Research report saved to Notes',
           body: title,
           kind: 'success'
         } satisfies NotificationPayload)
@@ -523,6 +564,66 @@ Be decisive and thorough. Prefer run_command in the workspace terminal over desc
     } catch (err) {
       console.error('[ai] failed to save research note:', err)
     }
+  }
+
+  /**
+   * Turn the assistant's (often conversational) research answer into a polished,
+   * self-contained Markdown report for the Notes/on-disk copy — a real document
+   * with a title, summary, organized sections and sources, with no chat
+   * pleasantries. Falls back to the original text if the pass fails.
+   */
+  private async formatResearchReport(
+    query: string,
+    content: string,
+    providerId: ProviderId,
+    model: string
+  ): Promise<string> {
+    const clean = content.trim()
+    if (!clean) return clean
+    const provider = this.providers[providerId]
+    const hindi = /[ऀ-ॿ]/.test(clean)
+    const date = new Date().toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    })
+    const lang = hindi
+      ? 'Write the report in Hindi (Devanagari), matching the findings.'
+      : 'Write the report in English.'
+    const system =
+      `You are an expert research report writer. Turn the RAW findings below into a polished, ` +
+      `detailed Markdown research report. Structure it EXACTLY as:\n` +
+      `1. A single H1 title line: "# <concise descriptive title>".\n` +
+      `2. One italic byline: "*Research report · ${date}*".\n` +
+      `3. A "## Summary" section — a 2–4 sentence overview.\n` +
+      `4. Several "## " sections organizing the substance, preserving ALL specifics ` +
+      `(names, numbers, dates, comparisons, quotes).\n` +
+      `5. A final "## Sources" section listing each source as "- <name> (<date>) — <url>" when available.\n` +
+      `Rules: be thorough and factual; keep everything informative; do NOT invent anything not in the ` +
+      `findings. Output ONLY the Markdown report — NO conversational text, greetings, or sign-offs ` +
+      `(no "here's what I found", no "let me know if you need anything"). ${lang}`
+    let out = ''
+    try {
+      await provider.streamChat(
+        {
+          model,
+          system,
+          messages: [{ role: 'user', content: `Topic: ${query}\n\nRaw findings:\n${clean}` }],
+          tools: undefined
+        },
+        this.providerCtx(providerId),
+        (d) => {
+          out += d
+        },
+        new AbortController().signal
+      )
+    } catch (err) {
+      console.error('[ai] research report formatting failed:', err)
+      return clean
+    }
+    const ci = out.lastIndexOf('</think>') // strip reasoning models' scratchpad
+    if (ci >= 0) out = out.slice(ci + 8)
+    return out.trim() || clean
   }
 
   private buildSystemPrompt(

@@ -48,6 +48,8 @@ export interface ToolExecContext {
   workspaceRoot?: string
   /** Autonomous Builder on: skip approval for the coding/build tool set */
   autoApproveCoding?: boolean
+  /** per-file fs_edit failure counts — used to nudge weak models to fs_write */
+  editFailures?: Map<string, number>
 }
 
 export interface ToolSpec {

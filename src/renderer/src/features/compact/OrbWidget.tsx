@@ -6,10 +6,13 @@ import { useVoiceStore } from '@/features/voice/useVoiceStore'
 import { OrbScene } from '@/features/orb/OrbScene'
 
 /**
- * The floating round orb — a tiny always-on-top presence. The ring lights
- * up when hands-free is on or COSMOS is listening; click it to talk
- * (push-to-talk); the expand control opens the full window. Everything
- * outside the circle is transparent (the window is transparent).
+ * The floating round orb — a tiny always-on-top presence. The ring lights up
+ * when hands-free is on or COSMOS is listening. CLICK it to talk
+ * (push-to-talk); DRAG it to move the orb anywhere on screen. Dragging uses the
+ * OS-native window drag (-webkit-app-region: drag) — a clean click still fires,
+ * but moving the pointer drags the window at the compositor level, which keeps
+ * the transparent window artifact-free (no black trails). The expand control
+ * opens the full window. Everything outside the circle is transparent.
  */
 export function OrbWidget(): React.JSX.Element {
   const setMode = useUIStore((s) => s.setMode)
@@ -50,12 +53,15 @@ export function OrbWidget(): React.JSX.Element {
           transition={active || listening ? { duration: 1.4, repeat: Infinity } : undefined}
         />
 
-        {/* click target = push-to-talk (whole orb) */}
+        {/* whole orb = click-to-talk; a click fires even on the drag region,
+            while moving the pointer drags the window natively */}
         <button
           onClick={() => void togglePTT()}
-          title="Click to talk"
+          title="Click to talk · drag to move"
           className="absolute inset-0 rounded-full"
-          style={{ WebkitAppRegion: 'no-drag', background: 'transparent' } as React.CSSProperties}
+          style={
+            { background: 'transparent', cursor: 'grab', WebkitAppRegion: 'drag' } as React.CSSProperties
+          }
         />
 
         {/* mic glyph */}
@@ -70,7 +76,7 @@ export function OrbWidget(): React.JSX.Element {
         </div>
       </div>
 
-      {/* hover controls: expand + close-to-tray */}
+      {/* hover controls: expand + close-to-tray (no-drag so they stay clickable) */}
       <motion.div
         className="absolute right-1 top-1 flex gap-1"
         style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}

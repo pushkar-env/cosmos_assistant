@@ -12,6 +12,7 @@ import type {
 } from '@shared/types'
 import { decryptText, encryptText } from './secureText'
 import { cosine, type EmbeddingService } from './EmbeddingService'
+import type { NotesExportService } from './NotesExportService'
 
 interface SqliteDatabase {
   exec(sql: string): void
@@ -44,7 +45,14 @@ export class MemoryService {
   private jsonFile = ''
   private json: JsonStore = { messages: [], memories: [], audit: [], notes: [] }
 
+  private notesExport?: NotesExportService
+
   constructor(private readonly embeddings: EmbeddingService) {}
+
+  /** wire the on-disk .md export (set once at startup) */
+  attachNotesExport(exporter: NotesExportService): void {
+    this.notesExport = exporter
+  }
 
   async init(): Promise<void> {
     const dir = app.getPath('userData')
@@ -385,6 +393,13 @@ export class MemoryService {
 
   saveNote(id: number | null, title: string, content: string): number {
     const now = new Date().toISOString()
+    const savedId = this.writeNote(id, title, content, now)
+    // mirror to the on-disk .md file (keeps the notes folder in sync)
+    this.notesExport?.write(savedId, title, content)
+    return savedId
+  }
+
+  private writeNote(id: number | null, title: string, content: string, now: string): number {
     if (this.db) {
       if (id != null && this.getNote(id)) {
         this.db
@@ -410,6 +425,7 @@ export class MemoryService {
   }
 
   deleteNote(id: number): void {
+    this.notesExport?.remove(id)
     if (this.db) {
       this.db.prepare('DELETE FROM notes WHERE id = ?').run(id)
       return

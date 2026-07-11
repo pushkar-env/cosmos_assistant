@@ -172,7 +172,7 @@ export function AppCenterPanel(): React.JSX.Element {
                 </button>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-4">
+              <div className="smooth-scroll flex-1 overflow-y-auto p-4">
                 {loading && apps.length === 0 ? (
                   <div className="flex h-full items-center justify-center">
                     <p className="font-mono text-xs text-dim">

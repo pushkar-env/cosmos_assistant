@@ -117,7 +117,10 @@ export const cosmosApi = {
     get: (id: number): Promise<Note | null> => ipcRenderer.invoke(IPC.NOTES_GET, id),
     save: (id: number | null, title: string, content: string): Promise<number> =>
       ipcRenderer.invoke(IPC.NOTES_SAVE, id, title, content),
-    delete: (id: number): Promise<void> => ipcRenderer.invoke(IPC.NOTES_DELETE, id)
+    delete: (id: number): Promise<void> => ipcRenderer.invoke(IPC.NOTES_DELETE, id),
+    getFolder: (): Promise<string> => ipcRenderer.invoke(IPC.NOTES_FOLDER_GET),
+    pickFolder: (): Promise<string> => ipcRenderer.invoke(IPC.NOTES_FOLDER_PICK),
+    revealFolder: (): Promise<void> => ipcRenderer.invoke(IPC.NOTES_FOLDER_REVEAL)
   },
   plugins: {
     get: (): Promise<PluginManifest[]> => ipcRenderer.invoke(IPC.PLUGINS_GET)

@@ -256,6 +256,11 @@ export interface Settings {
    */
   workspaceRoot: string
   /**
+   * Where notes & research reports are also written as .md files on disk.
+   * Empty → resolved lazily to Documents/COSMOS Notes.
+   */
+  notesFolder: string
+  /**
    * Autonomous Builder: in Agent/Ultra mode, auto-approve the agent's coding
    * tools (run_command, fs_write, fs_edit, fs_mkdir, fs_move) so it can build a
    * whole project — install packages, scaffold, build, test — without a prompt
@@ -377,6 +382,7 @@ export const DEFAULT_SETTINGS: Settings = {
   mediaPlayer: 'dedicated',
   assistantMode: 'chat',
   workspaceRoot: '',
+  notesFolder: '',
   agentAutoApprove: false,
   github: DEFAULT_GITHUB_SETTINGS,
   alwaysAllowTools: []

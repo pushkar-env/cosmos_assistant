@@ -40,6 +40,7 @@ export function SettingsPanel(): React.JSX.Element {
   const [ollamaModels, setOllamaModels] = useState<string[]>([])
   const [customModel, setCustomModel] = useState(false)
   const [workspaceRoot, setWorkspaceRoot] = useState('')
+  const [notesFolder, setNotesFolder] = useState('')
   const [ghIdentity, setGhIdentity] = useState<GithubIdentity | null>(null)
   const [ghToken, setGhToken] = useState('')
   const [ghBusy, setGhBusy] = useState(false)
@@ -111,6 +112,18 @@ export function SettingsPanel(): React.JSX.Element {
     void window.cosmos.workspace.pick().then((root) => {
       setWorkspaceRoot(root)
       void update({ workspaceRoot: root })
+    })
+  }
+
+  // resolve the notes/research .md export folder
+  useEffect(() => {
+    if (settingsOpen) void window.cosmos.notes.getFolder().then(setNotesFolder)
+  }, [settingsOpen, settings.notesFolder])
+
+  const changeNotesFolder = (): void => {
+    void window.cosmos.notes.pickFolder().then((dir) => {
+      setNotesFolder(dir)
+      void update({ notesFolder: dir })
     })
   }
 
@@ -281,6 +294,33 @@ export function SettingsPanel(): React.JSX.Element {
               className="shrink-0 rounded-lg border border-[var(--accent-dim)] px-3 py-2 font-ui text-[10px] font-bold uppercase tracking-widest text-[var(--accent-bright)] transition-colors hover:bg-white/5"
             >
               Open Studio
+            </button>
+          </div>
+        )
+      },
+      {
+        id: 'notes-folder',
+        label: 'Notes Folder',
+        keywords: 'notes folder research reports markdown md save location export documents',
+        render: () => (
+          <div className="flex items-center gap-2">
+            <span
+              className="w-64 truncate rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-mono text-xs text-body"
+              title={notesFolder}
+            >
+              {notesFolder || 'Documents\\COSMOS Notes'}
+            </span>
+            <button
+              onClick={changeNotesFolder}
+              className="shrink-0 rounded-lg border border-white/10 px-3 py-2 font-ui text-[10px] font-bold uppercase tracking-widest text-dim transition-colors hover:border-[var(--accent-dim)] hover:text-body"
+            >
+              Change
+            </button>
+            <button
+              onClick={() => void window.cosmos.notes.revealFolder()}
+              className="shrink-0 rounded-lg border border-white/10 px-3 py-2 font-ui text-[10px] font-bold uppercase tracking-widest text-dim transition-colors hover:border-[var(--accent-dim)] hover:text-body"
+            >
+              Open
             </button>
           </div>
         )
@@ -632,7 +672,7 @@ export function SettingsPanel(): React.JSX.Element {
     // ollamaModels + customModel + elevenVoices drive their dropdowns; without
     // them the memo keeps a stale closure and the dropdown never updates
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings, update, availableVoiceIds, elevenVoices, ollamaModels, customModel, workspaceRoot, ghIdentity, ghToken, ghBusy, ghError])
+  }, [settings, update, availableVoiceIds, elevenVoices, ollamaModels, customModel, workspaceRoot, notesFolder, ghIdentity, ghToken, ghBusy, ghError])
 
   const filtered = rows.filter(
     (r) =>
@@ -679,7 +719,7 @@ export function SettingsPanel(): React.JSX.Element {
                   className="w-full bg-transparent font-ui text-sm text-body placeholder:text-dim focus:outline-none"
                 />
               </div>
-              <div className="flex-1 overflow-y-auto px-6 py-2">
+              <div className="smooth-scroll flex-1 overflow-y-auto px-6 py-2">
                 {filtered.map((row) => (
                   <div
                     key={row.id}

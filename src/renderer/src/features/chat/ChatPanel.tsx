@@ -126,7 +126,7 @@ export function ChatPanel(): React.JSX.Element {
         <div
           ref={scrollRef}
           onScroll={onScroll}
-          className="flex-1 space-y-4 overflow-y-auto overflow-x-hidden px-4 py-4 select-text"
+          className="smooth-scroll flex-1 space-y-4 overflow-y-auto overflow-x-hidden px-4 py-4 select-text"
         >
           {messages.length === 0 && (
             <div className="flex h-full flex-col items-center justify-center gap-2 text-center">

@@ -408,8 +408,11 @@ class TerminalSession {
       // echo the command so the UI shows what ran, then the sentinel line
       this.onData({ data: `❯ ${command}\n`, stream: 'system' })
       this.proc.stdin.write(`${command}\n`)
+      // `$?` is true only if the command succeeded (works for native exes AND
+      // cmdlets, unlike $LASTEXITCODE which is stale after a cmdlet) — so the
+      // agent loop can tell a FAILED command from a successful one.
       this.proc.stdin.write(
-        `Write-Output "${marker}:$($LASTEXITCODE):$((Get-Location).Path)${ETX}"\n`
+        `Write-Output "${marker}:$(if($?){0}else{1}):$((Get-Location).Path)${ETX}"\n`
       )
     })
   }
@@ -488,15 +491,17 @@ class TerminalSession {
     const sentinel = line.indexOf(STX)
     if (sentinel !== -1 && line.includes(ETX)) {
       const payload = line.slice(sentinel + 1, line.indexOf(ETX))
-      // payload = "<seq>:<exitcode>:<cwd>"
+      // payload = "<seq>:<0|1>:<cwd>" — middle field is 1 when the command failed
       const firstColon = payload.indexOf(':')
       const secondColon = payload.indexOf(':', firstColon + 1)
+      const failed = payload.slice(firstColon + 1, secondColon) === '1'
       const cwd = payload.slice(secondColon + 1)
       if (cwd) this.cwd = cwd
       const entry = this.queue.shift()
       if (entry) {
         this.clearTimers(entry)
-        entry.resolve(entry.capture)
+        // surface the non-zero exit so the model + the agent loop see the failure
+        entry.resolve(failed ? `${entry.capture}\n[exit code 1 — the command FAILED]` : entry.capture)
       }
       // tell the UI the prompt is ready again (carries the new cwd)
       this.onData({ data: `${STX}${this.cwd}${ETX}`, stream: 'system' })

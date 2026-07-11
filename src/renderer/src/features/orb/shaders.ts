@@ -168,7 +168,8 @@ void main() {
   vec3 color = mix(hot, vec3(1.0), core * 0.7);
   color *= 0.55 + veins * 1.1;
 
-  float pulse = 1.0 + uPulse * 0.45 * sin(uTime * 7.0);
+  // gentle, slow breathing rather than a fast flicker
+  float pulse = 1.0 + uPulse * 0.22 * sin(uTime * 2.6);
   float alpha = (0.30 + core * 0.7) * (0.7 + veins * 0.6) * pulse * uGlow;
   gl_FragColor = vec4(color * pulse, clamp(alpha, 0.0, 1.0));
 }
