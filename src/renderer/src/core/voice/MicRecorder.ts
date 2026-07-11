@@ -70,6 +70,13 @@ export class MicRecorder {
     return this.running
   }
 
+  /** whether the current segment has already captured qualifying speech — lets
+   *  a manual stop decide between submitting the utterance and just turning the
+   *  mic off. */
+  get hasSpeech(): boolean {
+    return this.running && this.hadSpeech
+  }
+
   async start(handsFree: boolean, handlers: SegmentHandlers): Promise<void> {
     if (this.running) return
     const opts = handsFree ? HANDS_FREE : PUSH_TO_TALK

@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import type { AIProvider } from '../types'
-import { sseEvents, raiseForStatus } from '../types'
+import { sseEvents, raiseForStatus, splitAttachments, withDocuments } from '../types'
 import type { AgentMessage, ToolCall, ToolDef } from '@shared/tools'
 
 interface GeminiPart {
   text?: string
+  inlineData?: { mimeType: string; data: string }
   functionCall?: { name: string; args?: Record<string, unknown> }
   functionResponse?: { name: string; response: { result: string } }
 }
@@ -29,7 +30,17 @@ function toWire(messages: AgentMessage[]): { role: 'user' | 'model'; parts: Gemi
         }))
       })
     } else if (m.role !== 'system') {
-      out.push({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })
+      // Gemini reads images AND PDFs via inline_data; text docs are inlined
+      if (m.role === 'user' && m.attachments?.length) {
+        const { media, docs } = splitAttachments(m.attachments)
+        const parts: GeminiPart[] = []
+        const text = withDocuments(m.content, docs)
+        if (text) parts.push({ text })
+        for (const a of media) parts.push({ inlineData: { mimeType: a.mime, data: a.data ?? '' } })
+        out.push({ role: 'user', parts: parts.length ? parts : [{ text: m.content }] })
+      } else {
+        out.push({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })
+      }
     }
   }
   return out

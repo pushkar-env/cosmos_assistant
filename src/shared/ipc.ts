@@ -78,6 +78,8 @@ export const IPC = {
   APPS_LAUNCH: 'apps:launch',
   WINDOW_SET_MODE: 'window:set-mode',
   WINDOW_MODE_CHANGED: 'window:mode-changed',
+  /** renderer drives the floating orb's position (manual drag, orb mode only) */
+  WINDOW_ORB_MOVE: 'window:orb-move',
   APP_QUIT: 'app:quit',
   HANDSFREE_TOGGLE: 'app:handsfree-toggle',
   START_PTT: 'app:start-ptt'

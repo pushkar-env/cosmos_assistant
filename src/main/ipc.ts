@@ -30,6 +30,7 @@ interface WindowController {
   show: (mode?: WindowMode) => void
   hide: () => void
   quit: () => void
+  moveOrb: (x: number, y: number) => void
   onHandsFreeChanged: () => void
 }
 
@@ -193,6 +194,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null, services: Ser
   )
 
   ipcMain.handle(IPC.WINDOW_SET_MODE, (_e, mode: WindowMode) => services.window.setMode(mode))
+
+  // fire-and-forget (send, not invoke) so orb drag stays smooth — one position
+  // update per animation frame, no await round-trip per mouse move
+  ipcMain.on(IPC.WINDOW_ORB_MOVE, (_e, x: number, y: number) => services.window.moveOrb(x, y))
 
   ipcMain.handle(IPC.APP_QUIT, () => services.window.quit())
 

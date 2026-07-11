@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ASSISTANT_MODES, DEFAULT_MODELS, type ProviderId } from '@shared/types'
+import { ASSISTANT_MODES, DEFAULT_MODELS, type Attachment, type ProviderId } from '@shared/types'
 import { useAssistantStore } from '@/core/stores/useAssistantStore'
 import { useSettingsStore } from '@/core/stores/useSettingsStore'
 import { useVoiceStore } from '@/features/voice/useVoiceStore'
+import { useNotificationStore } from '@/core/stores/useNotificationStore'
 import { MicButton } from '@/features/voice/MicButton'
 import { ToolCard } from './ToolCard'
 import { ApprovalCard } from './ApprovalCard'
 import { SessionList } from './SessionList'
+import { AttachmentChips } from './AttachmentChips'
+import { processFiles } from './attachments'
 import { Glass } from '@/shared/ui/Glass'
 import { StatusDot } from '@/shared/ui/StatusDot'
 import { Markdown } from '@/shared/ui/Markdown'
@@ -29,10 +32,14 @@ export function ChatPanel(): React.JSX.Element {
   const micMode = useVoiceStore((s) => s.micMode)
   const stopSpeech = useVoiceStore((s) => s.stopSpeech)
   const [input, setInput] = useState('')
+  const [attachments, setAttachments] = useState<Attachment[]>([])
+  const [dragging, setDragging] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   /** stay pinned to the bottom only while the user hasn't scrolled up */
   const stickToBottom = useRef(true)
+  const notify = useNotificationStore((s) => s.push)
 
   const onScroll = (): void => {
     const el = scrollRef.current
@@ -49,13 +56,46 @@ export function ChatPanel(): React.JSX.Element {
   }, [messages])
 
   const busy = state === 'thinking' || state === 'speaking'
+  const canSend = input.trim().length > 0 || attachments.length > 0
 
   const submit = (): void => {
-    if (!input.trim()) return
+    if (!canSend) return
     stickToBottom.current = true // a fresh message always scrolls into view
-    void send(input)
+    void send(input, attachments)
     setInput('')
+    setAttachments([])
   }
+
+  /** ingest picked / dropped / pasted files, surfacing any per-file problems */
+  const addFiles = async (files: FileList | File[]): Promise<void> => {
+    const { attachments: added, errors } = await processFiles(files, attachments.length)
+    if (added.length) setAttachments((prev) => [...prev, ...added])
+    if (errors.length) {
+      notify({ title: 'Attachment', body: errors[0], kind: 'error' })
+    }
+  }
+
+  const onPickFiles = (e: React.ChangeEvent<HTMLInputElement>): void => {
+    if (e.target.files?.length) void addFiles(e.target.files)
+    e.target.value = '' // allow re-picking the same file
+  }
+
+  const onDrop = (e: React.DragEvent): void => {
+    e.preventDefault()
+    setDragging(false)
+    if (e.dataTransfer.files?.length) void addFiles(e.dataTransfer.files)
+  }
+
+  const onPaste = (e: React.ClipboardEvent): void => {
+    const files = Array.from(e.clipboardData.files)
+    if (files.length) {
+      e.preventDefault()
+      void addFiles(files)
+    }
+  }
+
+  const removeAttachment = (id: string): void =>
+    setAttachments((prev) => prev.filter((a) => a.id !== id))
 
   const switchProvider = (id: ProviderId): void => {
     // restore this provider's last-used model instead of resetting to default
@@ -70,7 +110,26 @@ export function ChatPanel(): React.JSX.Element {
       animate={{ opacity: 1, x: 0 }}
       transition={{ delay: 0.3, duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
     >
-      <Glass className="flex max-h-full min-h-[70%] flex-col overflow-hidden">
+      <Glass
+        className="relative flex max-h-full min-h-[70%] flex-col overflow-hidden"
+        onDragOver={(e) => {
+          if (e.dataTransfer.types.includes('Files')) {
+            e.preventDefault()
+            if (!dragging) setDragging(true)
+          }
+        }}
+        onDragLeave={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false)
+        }}
+        onDrop={onDrop}
+      >
+        {dragging && (
+          <div className="pointer-events-none absolute inset-0 z-40 grid place-items-center rounded-[inherit] border-2 border-dashed border-[var(--accent)] bg-black/70 backdrop-blur-sm">
+            <p className="neon font-display text-sm uppercase tracking-[0.3em]">
+              Drop to attach
+            </p>
+          </div>
+        )}
         {/* sessions bar */}
         <div className="relative flex items-center gap-2 border-b border-white/5 px-4 py-2">
           <button
@@ -143,7 +202,10 @@ export function ChatPanel(): React.JSX.Element {
             {messages
               .filter(
                 (m, i) =>
-                  m.tool || m.content !== '' || (i === messages.length - 1 && busy)
+                  m.tool ||
+                  m.content !== '' ||
+                  (m.attachments?.length ?? 0) > 0 ||
+                  (i === messages.length - 1 && busy)
               )
               .map((m) =>
                 m.tool ? (
@@ -177,13 +239,18 @@ export function ChatPanel(): React.JSX.Element {
                       : undefined
                   }
                 >
+                  {m.attachments?.length ? (
+                    <div className={m.content ? 'mb-2' : ''}>
+                      <AttachmentChips attachments={m.attachments} />
+                    </div>
+                  ) : null}
                   {m.content ? (
                     m.role === 'assistant' && !m.error ? (
                       <Markdown>{m.content}</Markdown>
                     ) : (
                       m.content
                     )
-                  ) : (
+                  ) : m.role === 'assistant' && !m.attachments?.length ? (
                     <span className="inline-flex gap-1">
                       {[0, 1, 2].map((i) => (
                         <motion.span
@@ -195,7 +262,7 @@ export function ChatPanel(): React.JSX.Element {
                         />
                       ))}
                     </span>
-                  )}
+                  ) : null}
                 </div>
               </motion.div>
                 )
@@ -233,12 +300,35 @@ export function ChatPanel(): React.JSX.Element {
               {voiceError ?? 'Hands-free active — say "Cosmos…"'}
             </p>
           )}
+          {attachments.length > 0 && (
+            <div className="mb-2">
+              <AttachmentChips attachments={attachments} onRemove={removeAttachment} />
+            </div>
+          )}
           <div className="flex items-end gap-2">
             <MicButton />
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,text/*,.md,.csv,.json,.xml,.yaml,.yml,.log,.py,.js,.ts,.tsx,.jsx,.html,.css,.java,.c,.cpp,.cs,.go,.rs,.rb,.php,.sh,.sql"
+              onChange={onPickFiles}
+              className="hidden"
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              title="Attach image or document"
+              className="grid h-[42px] w-[42px] shrink-0 place-items-center rounded-lg border border-white/10 bg-transparent text-dim transition-colors hover:border-[var(--accent-dim)] hover:text-[var(--accent-bright)]"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+              </svg>
+            </button>
             <textarea
               ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
+              onPaste={onPaste}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault()
@@ -259,7 +349,7 @@ export function ChatPanel(): React.JSX.Element {
             ) : (
               <button
                 onClick={submit}
-                disabled={!input.trim()}
+                disabled={!canSend}
                 className="h-[42px] rounded-lg px-4 font-ui text-xs font-bold uppercase tracking-widest transition-all disabled:opacity-30"
                 style={{
                   background: 'color-mix(in srgb, var(--accent) 18%, transparent)',
@@ -272,7 +362,7 @@ export function ChatPanel(): React.JSX.Element {
             )}
           </div>
           <p className="mt-1.5 px-1 font-mono text-[10px] text-dim">
-            {settings.model} · Enter to send · Shift+Enter for newline
+            {settings.model} · Enter to send · Shift+Enter for newline · 📎 to attach
           </p>
         </div>
       </Glass>

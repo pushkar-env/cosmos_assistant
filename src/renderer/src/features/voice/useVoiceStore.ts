@@ -251,12 +251,14 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
       const handsFreeEnabled = useSettingsStore.getState().settings.voice.handsFree
       if (handsFreeEnabled) {
         if (get().micMode === 'handsfree') {
+          sound.play('mic-off')
           recorder.stop()
           clearSpeech()
           set({ micMode: 'off', micStatus: 'idle' })
           useAssistantStore.getState().setState('idle')
         } else {
           // resume hands-free listening (the setting stays on)
+          sound.play('mic-on')
           set({ micMode: 'handsfree', micStatus: 'listening', error: null })
           await recorder.start(true, handlers)
           if (!recorder.active) set({ micMode: 'off', micStatus: 'idle' })
@@ -269,8 +271,19 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
     togglePushToTalk: async () => {
       const { micMode } = get()
       if (micMode === 'ptt') {
-        // second press while talking = "I'm done" — cut the segment now
-        recorder.flush(handlers)
+        // second press = toggle the mic OFF. If a spoken segment was already
+        // captured, flush it so the utterance is still sent (the transcript
+        // handler then stops the mic); if nothing was heard yet, stop the
+        // recorder right away so the tap reliably turns the mic off instead
+        // of leaving it silently listening.
+        sound.play('mic-off')
+        if (recorder.hasSpeech) {
+          recorder.flush(handlers)
+        } else {
+          recorder.stop()
+          set({ micMode: 'off', micStatus: 'idle' })
+          useAssistantStore.getState().setState('idle')
+        }
         return
       }
       if (micMode === 'handsfree') recorder.stop()
@@ -278,7 +291,7 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
       clearSpeech()
       useAssistantStore.getState().interrupt()
       set({ micMode: 'ptt', micStatus: 'listening', error: null })
-      sound.play('activate')
+      sound.play('mic-on')
       useAssistantStore.getState().setState('listening')
       await recorder.start(false, handlers)
       if (!recorder.active) {

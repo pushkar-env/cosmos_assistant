@@ -4,7 +4,16 @@
  * they read as "interface", not "music".
  */
 
-export type SoundId = 'boot' | 'hover' | 'activate' | 'success' | 'error' | 'open' | 'close'
+export type SoundId =
+  | 'boot'
+  | 'hover'
+  | 'activate'
+  | 'success'
+  | 'error'
+  | 'open'
+  | 'close'
+  | 'mic-on'
+  | 'mic-off'
 
 class SoundEngine {
   private ctx: AudioContext | null = null
@@ -66,6 +75,16 @@ class SoundEngine {
         break
       case 'close':
         this.sweep(ctx, master, t, 1400, 300, 0.18)
+        break
+      // mic engaged: a bright two-note rise
+      case 'mic-on':
+        this.blip(ctx, master, t, 620, 0.07, 0.5)
+        this.blip(ctx, master, t + 0.05, 940, 0.11, 0.55)
+        break
+      // mic disengaged: the same interval, falling
+      case 'mic-off':
+        this.blip(ctx, master, t, 700, 0.07, 0.45)
+        this.blip(ctx, master, t + 0.05, 460, 0.12, 0.4)
         break
       case 'boot': {
         // filtered saw swell — the "power on" moment

@@ -6,9 +6,31 @@ export type ThemeId = 'cyber-blue' | 'crimson' | 'nebula-purple' | 'emerald' | '
 
 export type AssistantState = 'idle' | 'listening' | 'thinking' | 'speaking'
 
+/**
+ * A file the user attached to a chat message. Images and PDFs travel to
+ * vision-capable models as base64 blocks; text documents are extracted to
+ * plain text and inlined into the prompt, so every provider can read them.
+ */
+export interface Attachment {
+  id: string
+  name: string
+  /** MIME type, e.g. image/png, application/pdf, text/markdown */
+  mime: string
+  /** how the model consumes it */
+  kind: 'image' | 'pdf' | 'text'
+  /** base64-encoded bytes (no data: prefix) — set for image | pdf */
+  data?: string
+  /** extracted UTF-8 text — set for text documents */
+  text?: string
+  /** original size in bytes (for the UI) */
+  size: number
+}
+
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system'
   content: string
+  /** files attached to this message (user messages only) */
+  attachments?: Attachment[]
 }
 
 /** A saved chat session, shown in the sessions list. */

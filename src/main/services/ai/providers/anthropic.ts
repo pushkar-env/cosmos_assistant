@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { AIProvider } from '../types'
-import { sseEvents, raiseForStatus } from '../types'
+import { sseEvents, raiseForStatus, splitAttachments, withDocuments } from '../types'
 import type { AgentMessage, ToolCall } from '@shared/tools'
 
 interface AnthropicUsage {
@@ -19,8 +19,12 @@ interface AnthropicStreamEvent {
   index?: number
 }
 
+type AnthropicSource = { type: 'base64'; media_type: string; data: string }
+
 type AnthropicContent =
   | { type: 'text'; text: string }
+  | { type: 'image'; source: AnthropicSource }
+  | { type: 'document'; source: AnthropicSource }
   | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
   | { type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean }
 
@@ -43,7 +47,25 @@ function toWire(messages: AgentMessage[]): { role: 'user' | 'assistant'; content
         }))
       })
     } else if (m.role !== 'system') {
-      out.push({ role: m.role, content: m.content })
+      // a user message may carry images/PDFs (native blocks) and text docs
+      // (inlined) — Claude reads both images and PDFs natively
+      if (m.role === 'user' && m.attachments?.length) {
+        const { media, docs } = splitAttachments(m.attachments)
+        const content: AnthropicContent[] = []
+        const text = withDocuments(m.content, docs)
+        if (text) content.push({ type: 'text', text })
+        for (const a of media) {
+          const source: AnthropicSource = { type: 'base64', media_type: a.mime, data: a.data ?? '' }
+          content.push(
+            a.kind === 'image'
+              ? { type: 'image', source }
+              : { type: 'document', source: { ...source, media_type: 'application/pdf' } }
+          )
+        }
+        out.push({ role: 'user', content: content.length ? content : m.content })
+      } else {
+        out.push({ role: m.role, content: m.content })
+      }
     }
   }
   return out

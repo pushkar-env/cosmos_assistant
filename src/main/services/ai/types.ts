@@ -1,4 +1,4 @@
-import type { ProviderId } from '@shared/types'
+import type { Attachment, ProviderId } from '@shared/types'
 import type { AgentMessage, ToolCall, ToolDef } from '@shared/tools'
 
 export interface ProviderContext {
@@ -38,6 +38,30 @@ export interface AIProvider {
     emit: (delta: string) => void,
     signal: AbortSignal
   ): Promise<TurnResult>
+}
+
+/**
+ * Split a user message's attachments into media (image/pdf → native provider
+ * blocks) and text documents (inlined into the prompt so every provider,
+ * vision-capable or not, can still read them).
+ */
+export function splitAttachments(atts?: Attachment[]): { media: Attachment[]; docs: Attachment[] } {
+  const media: Attachment[] = []
+  const docs: Attachment[] = []
+  for (const a of atts ?? []) {
+    if (a.kind === 'text') docs.push(a)
+    else media.push(a)
+  }
+  return { media, docs }
+}
+
+/** Fold extracted document text into a user message's text content. */
+export function withDocuments(content: string, docs: Attachment[]): string {
+  if (!docs.length) return content
+  const blocks = docs
+    .map((d) => `[Attached document: ${d.name}]\n\`\`\`\n${(d.text ?? '').trim()}\n\`\`\``)
+    .join('\n\n')
+  return content ? `${content}\n\n${blocks}` : blocks
 }
 
 /** flatten agent messages for providers without tool support */

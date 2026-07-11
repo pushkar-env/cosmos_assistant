@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { AssistantState, ChatMessage, ConversationMeta } from '@shared/types'
+import type { Attachment, AssistantState, ChatMessage, ConversationMeta } from '@shared/types'
 import { useSettingsStore } from './useSettingsStore'
 import { sound } from '@/core/sound/SoundEngine'
 import { voiceSignal } from '@/core/voice/voiceSignal'
@@ -47,7 +47,7 @@ interface AssistantStore {
   /** the session currently shown in the chat panel */
   currentSessionId: number | null
   init: () => void
-  send: (text: string) => Promise<void>
+  send: (text: string, attachments?: Attachment[]) => Promise<void>
   interrupt: () => void
   /** start a fresh chat (past conversations remain stored) */
   clear: () => void
@@ -186,9 +186,11 @@ export const useAssistantStore = create<AssistantStore>((set, get) => ({
     })
   },
 
-  send: async (text) => {
+  send: async (text, attachments) => {
     const trimmed = text.trim()
-    if (!trimmed) return
+    const atts = attachments?.length ? attachments : undefined
+    // allow an attachment-only message (no typed text)
+    if (!trimmed && !atts) return
     // barge-in: a new message interrupts any in-flight response
     get().interrupt()
 
@@ -197,7 +199,7 @@ export const useAssistantStore = create<AssistantStore>((set, get) => ({
     const requestId = nextId()
     const userMsgId = nextId()
     // show the message immediately (original text) so the UI is responsive
-    const userMsg: UIMessage = { id: userMsgId, role: 'user', content: trimmed }
+    const userMsg: UIMessage = { id: userMsgId, role: 'user', content: trimmed, attachments: atts }
     const assistantMsg: UIMessage = { id: nextId(), role: 'assistant', content: '' }
     set({
       messages: [...get().messages, userMsg, assistantMsg],
@@ -211,7 +213,7 @@ export const useAssistantStore = create<AssistantStore>((set, get) => ({
     // query and the assistant answers in that language (text + voice).
     let content = trimmed
     const queryLang = /[ऀ-ॿ]/.test(trimmed) ? 'hi' : 'en'
-    if (queryLang !== target) {
+    if (trimmed && queryLang !== target) {
       try {
         const t = (await window.cosmos.ai.translate(trimmed, target)).trim()
         if (t) {
@@ -230,8 +232,8 @@ export const useAssistantStore = create<AssistantStore>((set, get) => ({
     // build history from the (translated) messages, dropping the empty
     // assistant placeholder we just added
     const history: ChatMessage[] = get()
-      .messages.filter((m) => !m.error && !m.tool && m.content !== '')
-      .map(({ role, content }) => ({ role, content }))
+      .messages.filter((m) => !m.error && !m.tool && (m.content !== '' || m.attachments?.length))
+      .map(({ role, content, attachments }) => ({ role, content, attachments }))
       .slice(-CONTEXT_WINDOW)
 
     await window.cosmos.ai.chat({

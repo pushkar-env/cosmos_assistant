@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { AIProvider } from '../types'
-import { ndjsonLines } from '../types'
+import { ndjsonLines, splitAttachments, withDocuments } from '../types'
 import type { AgentMessage, ToolCall } from '@shared/tools'
 
 interface OllamaToolCall {
@@ -13,7 +13,7 @@ interface OllamaStreamChunk {
 }
 
 type OllamaMessage =
-  | { role: 'system' | 'user' | 'assistant'; content: string }
+  | { role: 'system' | 'user' | 'assistant'; content: string; images?: string[] }
   | {
       role: 'assistant'
       content: string
@@ -34,6 +34,20 @@ function toWire(system: string | undefined, messages: AgentMessage[]): OllamaMes
     } else if (m.role === 'tool-results') {
       // tool_name helps newer Ollama match results to the right call
       for (const r of m.results) out.push({ role: 'tool', content: r.result, tool_name: r.name })
+    } else if (m.role === 'user' && m.attachments?.length) {
+      // multimodal Ollama models accept a base64 `images` array; text docs are
+      // inlined, and PDFs (unsupported here) are noted
+      const { media, docs } = splitAttachments(m.attachments)
+      const images = media.filter((a) => a.kind === 'image').map((a) => a.data ?? '')
+      const pdfs = media.filter((a) => a.kind === 'pdf')
+      let text = withDocuments(m.content, docs)
+      if (pdfs.length) {
+        const note = `[Attached PDF${pdfs.length > 1 ? 's' : ''}: ${pdfs
+          .map((p) => p.name)
+          .join(', ')} — this model may not read PDFs. Switch to Claude or Gemini to analyze PDF files.]`
+        text = text ? `${text}\n\n${note}` : note
+      }
+      out.push(images.length ? { role: 'user', content: text, images } : { role: 'user', content: text })
     } else {
       out.push(m)
     }

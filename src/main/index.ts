@@ -228,6 +228,18 @@ function clampToScreen(x: number, y: number, w: number, h: number): { x: number;
   }
 }
 
+/**
+ * Move the floating orb window to an absolute screen position. Driven by the
+ * renderer's manual drag (we no longer use -webkit-app-region: drag, which on
+ * Windows swallowed the click-to-talk tap and jittered the transparent window).
+ * Only honored in orb mode; the `moved` handler keeps orbPosition in sync so it
+ * reopens where the user left it. No animation → 1:1 with the cursor.
+ */
+function moveOrb(x: number, y: number): void {
+  if (windowMode !== 'orb' || !mainWindow || mainWindow.isDestroyed()) return
+  mainWindow.setPosition(Math.round(x), Math.round(y), false)
+}
+
 function showMainWindow(mode: WindowMode = 'full'): void {
   if (!mainWindow) {
     createWindow()
@@ -378,6 +390,7 @@ if (!gotLock) {
           isQuitting = true
           app.quit()
         },
+        moveOrb,
         onHandsFreeChanged: refreshTrayMenu
       }
     })

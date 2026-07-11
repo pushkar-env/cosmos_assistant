@@ -1,5 +1,7 @@
 /** Tool-use types shared between main, preload and renderer. */
 
+import type { Attachment } from './types'
+
 export interface ToolDef {
   name: string
   description: string
@@ -27,7 +29,7 @@ export interface ToolOutcome {
  * their wire format; the loop itself stays provider-agnostic.
  */
 export type AgentMessage =
-  | { role: 'user' | 'assistant' | 'system'; content: string }
+  | { role: 'user' | 'assistant' | 'system'; content: string; attachments?: Attachment[] }
   | { role: 'assistant-tools'; text: string; calls: ToolCall[] }
   | { role: 'tool-results'; results: ToolOutcome[] }
 

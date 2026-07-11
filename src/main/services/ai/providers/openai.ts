@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { AIProvider } from '../types'
-import { sseEvents, raiseForStatus } from '../types'
+import { sseEvents, raiseForStatus, splitAttachments, withDocuments } from '../types'
 import type { AgentMessage, ToolCall } from '@shared/tools'
 
 interface OpenAIStreamChunk {
@@ -16,8 +16,13 @@ interface OpenAIStreamChunk {
   }[]
 }
 
+type OpenAIContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } }
+
 type OpenAIMessage =
   | { role: 'system' | 'user' | 'assistant'; content: string }
+  | { role: 'user'; content: OpenAIContentPart[] }
   | {
       role: 'assistant'
       content: string | null
@@ -43,6 +48,26 @@ function toWire(system: string | undefined, messages: AgentMessage[]): OpenAIMes
       for (const r of m.results) {
         out.push({ role: 'tool', tool_call_id: r.id, content: r.result })
       }
+    } else if (m.role === 'user' && m.attachments?.length) {
+      // GPT vision reads images inline; text docs are inlined; PDFs aren't
+      // supported on the chat-completions path, so we note them instead
+      const { media, docs } = splitAttachments(m.attachments)
+      const pdfs = media.filter((a) => a.kind === 'pdf')
+      let text = withDocuments(m.content, docs)
+      if (pdfs.length) {
+        const note = `[Attached PDF${pdfs.length > 1 ? 's' : ''}: ${pdfs
+          .map((p) => p.name)
+          .join(', ')} — the current model can't read PDFs directly. Switch to Claude or Gemini to analyze PDF files.]`
+        text = text ? `${text}\n\n${note}` : note
+      }
+      const parts: OpenAIContentPart[] = []
+      if (text) parts.push({ type: 'text', text })
+      for (const a of media) {
+        if (a.kind === 'image') {
+          parts.push({ type: 'image_url', image_url: { url: `data:${a.mime};base64,${a.data ?? ''}` } })
+        }
+      }
+      out.push(parts.length ? { role: 'user', content: parts } : { role: 'user', content: text })
     } else {
       out.push(m)
     }

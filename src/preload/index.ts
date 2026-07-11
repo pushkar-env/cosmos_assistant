@@ -169,6 +169,8 @@ export const cosmosApi = {
     windowControl: (action: WindowControlAction): Promise<void> =>
       ipcRenderer.invoke(IPC.WINDOW_CONTROL, action),
     setMode: (mode: WindowMode): Promise<void> => ipcRenderer.invoke(IPC.WINDOW_SET_MODE, mode),
+    // drive the floating orb's position during a manual drag (orb mode only)
+    orbMove: (x: number, y: number): void => ipcRenderer.send(IPC.WINDOW_ORB_MOVE, x, y),
     onModeChanged: (cb: (mode: WindowMode) => void): Unsubscribe =>
       subscribe(IPC.WINDOW_MODE_CHANGED, cb),
     // window returned from minimize / hidden (for re-arming hands-free)
