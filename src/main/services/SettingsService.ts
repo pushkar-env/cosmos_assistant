@@ -4,8 +4,15 @@ import { join, dirname } from 'path'
 import { BUNDLED_VOICES, DEFAULT_SETTINGS, voiceLanguageOf, type Settings } from '@shared/types'
 import { decryptOrNull, encryptText, isEncrypted } from './secureText'
 
-type SecretKey = 'anthropic' | 'openai' | 'gemini' | 'elevenLabsKey' | 'githubToken'
-const SECRET_KEYS: SecretKey[] = ['anthropic', 'openai', 'gemini', 'elevenLabsKey', 'githubToken']
+type SecretKey = 'anthropic' | 'openai' | 'gemini' | 'elevenLabsKey' | 'groqKey' | 'githubToken'
+const SECRET_KEYS: SecretKey[] = [
+  'anthropic',
+  'openai',
+  'gemini',
+  'elevenLabsKey',
+  'groqKey',
+  'githubToken'
+]
 
 /**
  * Persists a single JSON settings document under userData. API keys are
@@ -63,6 +70,7 @@ export class SettingsService {
       }
     }
     if (patch.voice?.elevenLabsKey !== undefined) this.locked.delete('elevenLabsKey')
+    if (patch.voice?.groqApiKey !== undefined) this.locked.delete('groqKey')
     if (patch.github?.token !== undefined) this.locked.delete('githubToken')
 
     this.cache = {
@@ -191,6 +199,7 @@ export class SettingsService {
     this.resolveSecret(merged, 'openai', merged.apiKeys.openai)
     this.resolveSecret(merged, 'gemini', merged.apiKeys.gemini)
     this.resolveSecret(merged, 'elevenLabsKey', merged.voice.elevenLabsKey)
+    this.resolveSecret(merged, 'groqKey', merged.voice.groqApiKey)
     this.resolveSecret(merged, 'githubToken', merged.github.token)
     if (this.locked.size > 0) {
       console.warn(
@@ -215,6 +224,7 @@ export class SettingsService {
 
   private assignSecret(target: Settings, key: SecretKey, value: string): void {
     if (key === 'elevenLabsKey') target.voice.elevenLabsKey = value
+    else if (key === 'groqKey') target.voice.groqApiKey = value
     else if (key === 'githubToken') target.github.token = value
     else target.apiKeys[key] = value
   }
@@ -246,7 +256,8 @@ export class SettingsService {
       },
       voice: {
         ...this.cache.voice,
-        elevenLabsKey: this.secretForDisk('elevenLabsKey', this.cache.voice.elevenLabsKey)
+        elevenLabsKey: this.secretForDisk('elevenLabsKey', this.cache.voice.elevenLabsKey),
+        groqApiKey: this.secretForDisk('groqKey', this.cache.voice.groqApiKey)
       },
       github: {
         ...this.cache.github,

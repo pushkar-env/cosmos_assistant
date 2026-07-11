@@ -5,10 +5,12 @@ import {
   DEFAULT_MODELS,
   ELEVEN_MODELS,
   PROVIDER_MODELS,
+  STT_PROVIDERS,
   VOICE_LANGUAGES,
   type ElevenVoice,
   type GithubIdentity,
   type ProviderId,
+  type SttProviderId,
   type ThemeId,
   type TtsProviderId,
   type VoiceLanguageId
@@ -564,6 +566,53 @@ export function SettingsPanel(): React.JSX.Element {
         )
       },
       {
+        id: 'stt-provider',
+        label: 'Speech-to-Text Engine',
+        keywords:
+          'speech to text stt transcription mic whisper openai groq elevenlabs scribe free source voice input dictation',
+        render: () => (
+          <select
+            value={settings.voice.sttProvider}
+            onChange={(e) =>
+              void update({
+                voice: { ...settings.voice, sttProvider: e.target.value as SttProviderId }
+              })
+            }
+            className="w-64 rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-ui text-sm text-body focus:border-[var(--accent)] focus:outline-none"
+          >
+            {STT_PROVIDERS.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+        )
+      },
+      {
+        id: 'groq-key',
+        label: 'Groq API Key',
+        keywords: 'groq api key whisper stt speech free source secret',
+        when: settings.voice.sttProvider === 'groq',
+        render: () => (
+          <div className="flex flex-col gap-1.5">
+            {textInput(
+              settings.voice.groqApiKey,
+              (v) => void update({ voice: { ...settings.voice, groqApiKey: v } }),
+              'gsk_…',
+              true
+            )}
+            <button
+              onClick={() =>
+                void window.cosmos.commands.run('open-url', 'https://console.groq.com/keys')
+              }
+              className="self-start font-ui text-[10px] text-dim underline-offset-2 hover:text-body hover:underline"
+            >
+              Get a free Groq API key →
+            </button>
+          </div>
+        )
+      },
+      {
         id: 'tts-provider',
         label: 'Voice Engine',
         keywords: 'voice tts engine elevenlabs piper windows sapi speech synthesis',
@@ -586,8 +635,11 @@ export function SettingsPanel(): React.JSX.Element {
       {
         id: 'elevenlabs-key',
         label: 'ElevenLabs API Key',
-        keywords: 'elevenlabs api key voice tts secret',
-        when: settings.voice.ttsProvider === 'elevenlabs',
+        keywords: 'elevenlabs api key voice tts stt scribe speech secret',
+        // needed for ElevenLabs TTS and/or ElevenLabs speech-to-text
+        when:
+          settings.voice.ttsProvider === 'elevenlabs' ||
+          settings.voice.sttProvider === 'elevenlabs',
         render: () =>
           textInput(
             settings.voice.elevenLabsKey,

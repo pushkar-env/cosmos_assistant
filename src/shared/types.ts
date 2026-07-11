@@ -99,6 +99,15 @@ export interface WeatherInfo {
 
 export type TtsProviderId = 'windows' | 'elevenlabs' | 'piper'
 
+/** Speech-to-text engine the mic uses. */
+export type SttProviderId = 'openai' | 'groq' | 'elevenlabs'
+
+export const STT_PROVIDERS: { id: SttProviderId; label: string }[] = [
+  { id: 'openai', label: 'OpenAI Whisper — accurate (OpenAI key)' },
+  { id: 'groq', label: 'Groq Whisper — free & fast (free Groq key)' },
+  { id: 'elevenlabs', label: 'ElevenLabs Scribe — multilingual (ElevenLabs key)' }
+]
+
 export type VoiceLanguageId = 'en' | 'hi'
 
 /** A neural voice bundled inside the app (see resources/piper/voices). */
@@ -166,6 +175,10 @@ export interface VoiceSettings {
   voiceReplies: boolean
   /** always-on mic: VAD segments speech, only "Cosmos …" utterances execute */
   handsFree: boolean
+  /** which speech-to-text engine transcribes the mic */
+  sttProvider: SttProviderId
+  /** Groq API key (free Whisper large-v3) — encrypted at rest */
+  groqApiKey: string
   /**
    * Unified conversation language — drives speech-to-text transcription, the
    * reply language, and the wake-word acknowledgement. Independent of the TTS
@@ -188,6 +201,8 @@ export interface VoiceSettings {
 export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   voiceReplies: true,
   handsFree: false,
+  sttProvider: 'openai',
+  groqApiKey: '',
   language: 'en',
   ttsProvider: 'windows',
   elevenLabsKey: '',
