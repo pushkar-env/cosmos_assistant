@@ -56,6 +56,79 @@ function toWire(system: string | undefined, messages: AgentMessage[]): OllamaMes
 }
 
 /**
+ * Reasoning-capable local models (qwen3, deepseek-r1, granite…) stream their
+ * chain-of-thought INLINE in message.content, wrapped in <think>…</think>.
+ * Frontier providers keep reasoning on a separate channel, so only Ollama leaks
+ * it here. Left in, that reasoning is rendered in the chat bubble and — worse for
+ * a voice-first assistant — read aloud by the TTS, so the user hears the model
+ * think out loud (a "weird" second voice) alongside the actual answer. This
+ * strips the think blocks from the streamed text so only the visible answer
+ * reaches the UI, the speech pipeline, and the stored history.
+ *
+ * It is stateful: a think block spans many stream chunks, and either tag can be
+ * split across a chunk boundary, so we hold back a short tail that might be the
+ * start of a tag until the next chunk (or the final flush) resolves it.
+ */
+const THINK_OPEN = '<think>'
+const THINK_CLOSE = '</think>'
+
+/** longest suffix of `s` that is a non-empty proper prefix of any given tag */
+function partialTagSuffix(s: string, tags: string[]): string {
+  let best = 0
+  for (const tag of tags) {
+    const max = Math.min(s.length, tag.length - 1)
+    for (let n = max; n > best; n--) {
+      if (s.slice(s.length - n) === tag.slice(0, n)) {
+        best = n
+        break
+      }
+    }
+  }
+  return best > 0 ? s.slice(s.length - best) : ''
+}
+
+class ThinkFilter {
+  private inThink = false
+  /** buffered tail that might be the split prefix of a <think>/</think> tag */
+  private held = ''
+
+  feed(chunk: string): string {
+    let s = this.held + chunk
+    this.held = ''
+    let out = ''
+    for (;;) {
+      if (this.inThink) {
+        const close = s.indexOf(THINK_CLOSE)
+        if (close === -1) {
+          this.held = partialTagSuffix(s, [THINK_CLOSE])
+          return out
+        }
+        s = s.slice(close + THINK_CLOSE.length)
+        this.inThink = false
+      } else {
+        const open = s.indexOf(THINK_OPEN)
+        if (open === -1) {
+          const keep = partialTagSuffix(s, [THINK_OPEN])
+          out += s.slice(0, s.length - keep.length)
+          this.held = keep
+          return out
+        }
+        out += s.slice(0, open)
+        s = s.slice(open + THINK_OPEN.length)
+        this.inThink = true
+      }
+    }
+  }
+
+  /** emit any leftover at stream end — a held partial tag was never real text */
+  flush(): string {
+    const rest = this.inThink ? '' : this.held
+    this.held = ''
+    return rest
+  }
+}
+
+/**
  * Pick a safe num_ctx floor for a given number of tool definitions. Budgets
  * ~2.8k tokens for the system prompt, ~90 tokens per tool definition, and ~1.8k
  * of headroom for conversation + tool results, then rounds UP to a standard
@@ -132,8 +205,13 @@ export const ollamaProvider: AIProvider = {
     if (!res.body) throw new Error('Ollama returned no stream body')
 
     const calls: ToolCall[] = []
+    const think = new ThinkFilter()
     for await (const chunk of ndjsonLines<OllamaStreamChunk>(res.body, signal)) {
-      if (chunk.message?.content) emit(chunk.message.content)
+      if (chunk.message?.content) {
+        // drop any <think>…</think> reasoning so it's never shown or spoken
+        const visible = think.feed(chunk.message.content)
+        if (visible) emit(visible)
+      }
       for (const tc of chunk.message?.tool_calls ?? []) {
         if (tc.function?.name) {
           calls.push({
@@ -148,6 +226,8 @@ export const ollamaProvider: AIProvider = {
       }
       if (chunk.done) break
     }
+    const tail = think.flush()
+    if (tail) emit(tail)
     return { calls }
   }
 }

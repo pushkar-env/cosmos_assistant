@@ -8,6 +8,10 @@ const EMOJI_RE =
 export function toSpeakable(text: string): string {
   return (
     text
+      // reasoning models (via Ollama) leak <think>…</think> chain-of-thought —
+      // the provider strips it, but never let a stray tag reach the voice engine
+      .replace(/<think>[\s\S]*?<\/think>/gi, ' ')
+      .replace(/<\/?think>/gi, ' ')
       .replace(/```[\s\S]*?```/g, ' Code block omitted. ') // fenced code
       .replace(/`([^`]+)`/g, '$1') // inline code → its text
       .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ') // images → nothing
