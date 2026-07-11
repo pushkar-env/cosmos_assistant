@@ -85,6 +85,62 @@ interface AssistantStore {
 
 const nextId = (): string => `msg-${Date.now()}-${shared.idCounter++}`
 
+/**
+ * Streaming-token coalescer. The model emits many deltas per second; naively
+ * committing each one to the store re-renders the chat and — because the live
+ * bubble is markdown — makes react-markdown RE-PARSE the whole growing reply on
+ * every token (O(n²) over a long answer). That work runs on the same main
+ * thread as the always-animating orb's R3F loop, so a long reply visibly
+ * starves the orb into a multi-second stutter until streaming ends.
+ *
+ * Instead we buffer incoming text and commit it to the store at most once per
+ * animation frame, and no more often than every FLUSH_INTERVAL_MS — so the
+ * markdown re-parse happens ~25×/s regardless of token rate, leaving the frame
+ * budget the orb needs. The voice pipeline still sees every token immediately
+ * (see notify in onToken), so speech pacing is unaffected.
+ */
+let pendingDelta = ''
+let flushHandle = 0
+let lastFlushAt = 0
+const FLUSH_INTERVAL_MS = 40
+
+function commitPendingTokens(): void {
+  const delta = pendingDelta
+  pendingDelta = ''
+  if (!delta) return
+  lastFlushAt = performance.now()
+  const { messages } = useAssistantStore.getState()
+  const last = messages[messages.length - 1]
+  // only append while the live bubble is still the open assistant reply
+  if (!last || last.role !== 'assistant' || last.tool) return
+  useAssistantStore.setState({
+    messages: [...messages.slice(0, -1), { ...last, content: last.content + delta }]
+  })
+}
+
+/** commit buffered tokens on the next frame, throttled to FLUSH_INTERVAL_MS */
+function scheduleTokenFlush(): void {
+  if (flushHandle) return
+  flushHandle = requestAnimationFrame(() => {
+    flushHandle = 0
+    // too soon since the last commit → coalesce another frame's worth
+    if (performance.now() - lastFlushAt < FLUSH_INTERVAL_MS) {
+      scheduleTokenFlush()
+      return
+    }
+    commitPendingTokens()
+  })
+}
+
+/** flush immediately (before any handler that reads/mutates messages) */
+function flushTokensNow(): void {
+  if (flushHandle) {
+    cancelAnimationFrame(flushHandle)
+    flushHandle = 0
+  }
+  commitPendingTokens()
+}
+
 export const useAssistantStore: UseBoundStore<StoreApi<AssistantStore>> = (shared.store ??=
   create<AssistantStore>((set, get) => ({
   state: 'idle',
@@ -109,6 +165,7 @@ export const useAssistantStore: UseBoundStore<StoreApi<AssistantStore>> = (share
     void get().loadSessions()
 
     window.cosmos.tools.onEvent(({ requestId, callId, tool, status, summary, agent }) => {
+      flushTokensNow() // land any buffered reply text before we reshape the list
       const messages = [...get().messages]
 
       if (status === 'running') {
@@ -154,14 +211,17 @@ export const useAssistantStore: UseBoundStore<StoreApi<AssistantStore>> = (share
       // audio actually starts, streaming text is still "thinking"
       const voiceReplies = useSettingsStore.getState().settings.voice.voiceReplies
       if (!voiceReplies && state !== 'speaking') set({ state: 'speaking' })
-      set({
-        messages: [...messages.slice(0, -1), { ...last, content: last.content + delta }]
-      })
+      // buffer the text and let the UI catch up ~25×/s (see scheduleTokenFlush)
+      // so a long reply's markdown re-parse can't starve the orb's frame loop;
+      // the voice pipeline still hears every token immediately.
+      pendingDelta += delta
+      scheduleTokenFlush()
       notify({ type: 'delta', text: delta })
     })
 
     window.cosmos.ai.onDone(({ requestId }) => {
       if (requestId !== get().activeRequestId) return
+      flushTokensNow() // ensure the final buffered tokens are committed first
       // drop a trailing empty bubble (model ended on a tool call)
       const messages = [...get().messages]
       const last = messages[messages.length - 1]
@@ -179,8 +239,9 @@ export const useAssistantStore: UseBoundStore<StoreApi<AssistantStore>> = (share
     })
 
     window.cosmos.ai.onError(({ requestId, message }) => {
-      const { activeRequestId, messages } = get()
-      if (requestId !== activeRequestId) return
+      if (requestId !== get().activeRequestId) return
+      flushTokensNow() // preserve whatever partial reply had streamed in
+      const { messages } = get()
       const last = messages[messages.length - 1]
       const errored: UIMessage =
         last && last.role === 'assistant' && last.content === ''
@@ -264,6 +325,7 @@ export const useAssistantStore: UseBoundStore<StoreApi<AssistantStore>> = (share
   },
 
   interrupt: () => {
+    flushTokensNow() // commit any buffered partial reply and drop the pending frame
     const { activeRequestId } = get()
     // abort the in-flight request if there is one, but ALWAYS land on idle —
     // Stop can also be pressed while merely speaking a finished reply (no
