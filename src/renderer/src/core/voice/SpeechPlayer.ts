@@ -26,6 +26,13 @@ export class SpeechPlayer {
   private current: AudioBufferSourceNode | null = null
   private pauseTimer: ReturnType<typeof setTimeout> | null = null
   private playing = false
+  /**
+   * True while a playback chain is in flight. Set SYNCHRONOUSLY in enqueue()
+   * so a burst of clips can never spin up a second, overlapping chain. This is
+   * distinct from `playing` (which flips only after the first clip decodes) —
+   * see the note in enqueue() for why that gap caused doubled/parallel audio.
+   */
+  private pumping = false
   private raf = 0
   private events: PlayerEvents | null = null
 
@@ -40,11 +47,22 @@ export class SpeechPlayer {
   enqueue(data: ArrayBuffer, pauseAfterMs = 0): void {
     if (data.byteLength === 0) return
     this.queue.push({ data, pauseAfterMs })
-    if (!this.playing) void this.playNext()
+    // Start a playback chain only if one isn't already running. The guard MUST
+    // be `pumping`, not `playing`: playNext() awaits (ctx.resume + decode)
+    // before it could ever set `playing`, so a second clip enqueued during that
+    // await would see `playing === false`, launch a SECOND playNext(), and
+    // start its buffer on top of the first — the same reply spoken over itself
+    // in parallel. `pumping` is flipped here, before any await, so exactly one
+    // chain ever exists; extra clips just wait their turn in the queue.
+    if (!this.pumping) {
+      this.pumping = true
+      void this.playNext()
+    }
   }
 
   stop(): void {
     this.queue = []
+    this.pumping = false
     if (this.pauseTimer !== null) {
       clearTimeout(this.pauseTimer)
       this.pauseTimer = null
@@ -64,6 +82,7 @@ export class SpeechPlayer {
   private async playNext(): Promise<void> {
     const clip = this.queue.shift()
     if (!clip) {
+      this.pumping = false
       this.endPlayback()
       this.events?.onDrained()
       return
@@ -81,10 +100,14 @@ export class SpeechPlayer {
     try {
       buffer = await this.ctx.decodeAudioData(clip.data.slice(0))
     } catch {
-      // skip undecodable chunk, keep the queue moving
-      void this.playNext()
+      // skip undecodable chunk, keep the same chain moving
+      if (this.pumping) void this.playNext()
       return
     }
+
+    // stop()/barge-in landed while we were decoding — drop this now-stale clip
+    // rather than starting audio the caller already cancelled.
+    if (!this.pumping) return
 
     if (!this.playing) {
       this.playing = true
