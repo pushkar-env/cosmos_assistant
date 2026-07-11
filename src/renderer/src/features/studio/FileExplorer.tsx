@@ -22,10 +22,12 @@ function TreeRow({ node, depth }: { node: FileNode; depth: number }): React.JSX.
   const openFile = useStudioStore((s) => s.openFile)
   const renameNode = useStudioStore((s) => s.renameNode)
   const deleteNode = useStudioStore((s) => s.deleteNode)
+  const openPreview = useStudioStore((s) => s.openPreview)
   const [renaming, setRenaming] = useState(false)
   const [name, setName] = useState(node.name)
 
   const isActive = activePath === node.path
+  const isHtml = node.kind === 'file' && /\.html?$/i.test(node.name)
   const commitRename = (): void => {
     setRenaming(false)
     const next = name.trim()
@@ -75,6 +77,18 @@ function TreeRow({ node, depth }: { node: FileNode; depth: number }): React.JSX.
           >
             {node.name}
           </span>
+        )}
+        {isHtml && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              void openPreview(node.path)
+            }}
+            title="Play in preview"
+            className="shrink-0 rounded px-1 font-mono text-[10px] text-dim opacity-0 hover:text-[var(--accent-bright)] group-hover:opacity-100"
+          >
+            ▶
+          </button>
         )}
         <button
           onClick={(e) => {

@@ -1,4 +1,4 @@
-import { ipcMain, dialog, type BrowserWindow } from 'electron'
+import { ipcMain, dialog, shell, type BrowserWindow } from 'electron'
 import {
   IPC,
   type ApprovalDecision,
@@ -9,6 +9,7 @@ import type {
   ChatRequest,
   InstalledApp,
   MemoryCategory,
+  SecretInput,
   Settings,
   SystemCommandId,
   VoiceLanguageId
@@ -20,8 +21,10 @@ import type { CommandService } from './services/CommandService'
 import type { SttService } from './services/voice/SttService'
 import type { TtsService } from './services/voice/TtsService'
 import type { MemoryService } from './services/MemoryService'
+import type { SecretsService } from './services/SecretsService'
 import type { PluginService } from './services/PluginService'
 import type { WorkspaceService } from './services/WorkspaceService'
+import type { PreviewServer } from './services/PreviewServer'
 import type { GitService } from './services/GitService'
 import type { NotesExportService } from './services/NotesExportService'
 
@@ -42,8 +45,10 @@ interface Services {
   stt: SttService
   tts: TtsService
   memory: MemoryService
+  secrets: SecretsService
   plugins: PluginService
   workspace: WorkspaceService
+  preview: PreviewServer
   git: GitService
   notesExport: NotesExportService
   window: WindowController
@@ -104,6 +109,14 @@ export function registerIpc(getWindow: () => BrowserWindow | null, services: Ser
   )
   ipcMain.handle(IPC.TERM_RESET, (_e, id: string) => services.workspace.terminalReset(id))
   ipcMain.handle(IPC.TERM_CLOSE, (_e, id: string) => services.workspace.terminalClose(id))
+
+  // ── live preview ──
+  ipcMain.handle(IPC.PREVIEW_SERVE, (_e, relPath?: string) => services.preview.urlFor(relPath))
+  ipcMain.handle(IPC.APP_OPEN_EXTERNAL, (_e, url: string) => {
+    // only ever hand real web/loopback URLs to the OS browser
+    if (!/^https?:\/\//i.test(url)) throw new Error('Refusing to open a non-http(s) URL.')
+    return shell.openExternal(url)
+  })
 
   // ── github / git ──
   ipcMain.handle(IPC.GITHUB_CONNECT, (_e, token: string) => services.git.connect(token))
@@ -184,6 +197,15 @@ export function registerIpc(getWindow: () => BrowserWindow | null, services: Ser
   ipcMain.handle(IPC.MEMORY_DELETE, (_e, id: number) => services.memory.deleteMemory(id))
 
   ipcMain.handle(IPC.AUDIT_LIST, (_e, limit?: number) => services.memory.listAudit(limit))
+
+  // ── secrets vault ──
+  ipcMain.handle(IPC.SECRETS_LIST, () => services.secrets.list())
+  ipcMain.handle(IPC.SECRETS_REVEAL, (_e, id: number) => services.secrets.reveal(id))
+  ipcMain.handle(IPC.SECRETS_CREATE, (_e, input: SecretInput) => services.secrets.create(input))
+  ipcMain.handle(IPC.SECRETS_UPDATE, (_e, id: number, input: SecretInput) =>
+    services.secrets.update(id, input)
+  )
+  ipcMain.handle(IPC.SECRETS_DELETE, (_e, id: number) => services.secrets.delete(id))
 
   ipcMain.handle(IPC.NOTES_LIST, () => services.memory.listNotes())
 

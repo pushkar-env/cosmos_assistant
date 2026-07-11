@@ -25,6 +25,8 @@ import type {
   NoteMeta,
   NotificationPayload,
   PluginManifest,
+  SecretInput,
+  SecretMeta,
   Settings,
   SynthesisResult,
   SystemCommandId,
@@ -95,6 +97,15 @@ export const cosmosApi = {
     listAudit: (limit?: number): Promise<AuditEntry[]> =>
       ipcRenderer.invoke(IPC.AUDIT_LIST, limit)
   },
+  secrets: {
+    list: (): Promise<SecretMeta[]> => ipcRenderer.invoke(IPC.SECRETS_LIST),
+    reveal: (id: number): Promise<string | null> => ipcRenderer.invoke(IPC.SECRETS_REVEAL, id),
+    create: (input: SecretInput): Promise<SecretMeta> =>
+      ipcRenderer.invoke(IPC.SECRETS_CREATE, input),
+    update: (id: number, input: SecretInput): Promise<SecretMeta | null> =>
+      ipcRenderer.invoke(IPC.SECRETS_UPDATE, id, input),
+    delete: (id: number): Promise<void> => ipcRenderer.invoke(IPC.SECRETS_DELETE, id)
+  },
   settings: {
     get: (): Promise<Settings> => ipcRenderer.invoke(IPC.SETTINGS_GET),
     set: (patch: Partial<Settings>): Promise<Settings> =>
@@ -154,6 +165,10 @@ export const cosmosApi = {
     delete: (relPath: string): Promise<void> => ipcRenderer.invoke(IPC.FILES_DELETE, relPath),
     reveal: (relPath?: string): Promise<void> => ipcRenderer.invoke(IPC.FILES_REVEAL, relPath)
   },
+  preview: {
+    /** ensure the static preview server is up; get a URL for a workspace file */
+    serve: (relPath?: string): Promise<string> => ipcRenderer.invoke(IPC.PREVIEW_SERVE, relPath)
+  },
   terminal: {
     start: (): Promise<string> => ipcRenderer.invoke(IPC.TERM_START),
     list: (): Promise<TerminalInfo[]> => ipcRenderer.invoke(IPC.TERM_LIST),
@@ -175,6 +190,8 @@ export const cosmosApi = {
     onNotify: (cb: (n: NotificationPayload) => void): Unsubscribe => subscribe(IPC.NOTIFY, cb),
     windowControl: (action: WindowControlAction): Promise<void> =>
       ipcRenderer.invoke(IPC.WINDOW_CONTROL, action),
+    openExternal: (url: string): Promise<void> =>
+      ipcRenderer.invoke(IPC.APP_OPEN_EXTERNAL, url),
     setMode: (mode: WindowMode): Promise<void> => ipcRenderer.invoke(IPC.WINDOW_SET_MODE, mode),
     // drive the floating orb's position during a manual drag (orb mode only)
     orbMove: (x: number, y: number): void => ipcRenderer.send(IPC.WINDOW_ORB_MOVE, x, y),

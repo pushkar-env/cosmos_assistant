@@ -120,6 +120,16 @@ export function StudioPreview(): React.JSX.Element {
           Go
         </button>
         <button
+          onClick={() => {
+            const url = normalizeUrl(address) || previewUrl
+            if (url) void window.cosmos.app.openExternal(url)
+          }}
+          title="Open in your default browser"
+          className="rounded px-1.5 font-mono text-xs text-dim hover:bg-white/5 hover:text-body"
+        >
+          ↗
+        </button>
+        <button
           onClick={() => togglePanel('preview')}
           title="Hide preview"
           className="rounded px-1.5 font-mono text-xs text-dim hover:bg-white/5 hover:text-body"
@@ -138,8 +148,12 @@ export function StudioPreview(): React.JSX.Element {
             style={{ display: 'inline-flex', width: '100%', height: '100%' }}
           />
         ) : (
-          <div className="flex h-full items-center justify-center bg-black/40 p-6 text-center font-ui text-xs text-dim">
-            Enter a URL above to preview a running dev server.
+          <div className="flex h-full flex-col items-center justify-center gap-1.5 bg-black/40 p-6 text-center font-ui text-xs text-dim">
+            <p>
+              Hit <span className="text-[var(--accent-bright)]">▶</span> on an HTML file in the
+              Explorer to play it right here.
+            </p>
+            <p>Or enter a URL above to preview a running dev server.</p>
           </div>
         )}
         {failed && (

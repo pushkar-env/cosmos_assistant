@@ -358,6 +358,69 @@ export interface AuditEntry {
   status: 'ok' | 'error' | 'denied'
 }
 
+// ── secrets vault ────────────────────────────────────────────────
+
+/** The kind of secret stored — drives the badge, icon and colour. */
+export type SecretCategory =
+  | 'api-key'
+  | 'password'
+  | 'token'
+  | 'ssh-key'
+  | 'database'
+  | 'card'
+  | 'note'
+  | 'other'
+
+/** A category descriptor for the picker + badge rendering. */
+export interface SecretCategoryDef {
+  id: SecretCategory
+  label: string
+  /** short mono glyph shown on the card badge */
+  glyph: string
+}
+
+export const SECRET_CATEGORIES: SecretCategoryDef[] = [
+  { id: 'api-key', label: 'API Key', glyph: 'API' },
+  { id: 'token', label: 'Access Token', glyph: 'TKN' },
+  { id: 'password', label: 'Password', glyph: 'PWD' },
+  { id: 'ssh-key', label: 'SSH Key', glyph: 'SSH' },
+  { id: 'database', label: 'Database URL', glyph: 'DB' },
+  { id: 'card', label: 'Card / Payment', glyph: 'CRD' },
+  { id: 'note', label: 'Secure Note', glyph: 'NTE' },
+  { id: 'other', label: 'Other', glyph: 'SEC' }
+]
+
+/**
+ * A stored secret as it travels to the renderer for LISTING — note the
+ * absence of `value`. The plaintext secret never leaves the main process
+ * unless explicitly requested via reveal(), keeping ciphertext off the UI
+ * layer until the user asks to see or copy it.
+ */
+export interface SecretMeta {
+  id: number
+  label: string
+  category: SecretCategory
+  /** optional service/provider grouping, e.g. "OpenAI", "AWS" */
+  service: string
+  /** freeform notes (not the secret) */
+  notes: string
+  /** masked hint, e.g. "sk-…4f2a" — safe to show without revealing */
+  preview: string
+  /** whether the stored ciphertext could be decrypted with this profile */
+  locked: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+/** The fields the user supplies when creating or editing a secret. */
+export interface SecretInput {
+  label: string
+  value: string
+  category: SecretCategory
+  service?: string
+  notes?: string
+}
+
 export interface NotificationPayload {
   title: string
   body: string

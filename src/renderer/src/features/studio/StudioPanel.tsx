@@ -16,6 +16,7 @@ function StatusStrip(): React.JSX.Element {
   const root = useStudioStore((s) => s.root)
   const git = useStudioStore((s) => s.git)
   const reveal = useStudioStore((s) => s.reveal)
+  const pickRoot = useStudioStore((s) => s.pickRoot)
   const tabs = useStudioStore((s) => s.tabs)
   const activePath = useStudioStore((s) => s.activePath)
   const active = tabs.find((t) => t.path === activePath)
@@ -33,13 +34,23 @@ function StatusStrip(): React.JSX.Element {
           {git.behind > 0 && <span className="text-dim">↓{git.behind}</span>}
         </span>
       )}
-      <button
-        onClick={() => reveal()}
-        title="Reveal in File Explorer"
-        className="max-w-[420px] truncate font-mono text-[10px] text-dim hover:text-body"
-      >
-        {shortRoot || 'workspace'}
-      </button>
+      <span className="flex items-center">
+        <button
+          onClick={() => void pickRoot()}
+          title="Change project folder — where COSMOS opens files and builds new projects by default"
+          className="flex max-w-[420px] items-center gap-1 truncate font-mono text-[10px] text-dim hover:text-body"
+        >
+          <span className="text-[var(--accent-bright)]">▸</span>
+          <span className="truncate">{shortRoot || 'Pick a project folder…'}</span>
+        </button>
+        <button
+          onClick={() => reveal()}
+          title="Reveal in File Explorer"
+          className="ml-1 px-1 font-mono text-[10px] text-dim hover:text-body"
+        >
+          ⧉
+        </button>
+      </span>
       <span className="ml-auto truncate font-mono text-[10px] text-dim">
         {active ? active.name + (active.dirty ? ' ●' : '') : 'No file open'}
       </span>
@@ -55,7 +66,9 @@ function EditorArea(): React.JSX.Element {
   const closeTab = useStudioStore((s) => s.closeTab)
   const editActive = useStudioStore((s) => s.editActive)
   const saveActive = useStudioStore((s) => s.saveActive)
+  const openPreview = useStudioStore((s) => s.openPreview)
   const activeTab = tabs.find((t) => t.path === activePath)
+  const activeIsHtml = activeTab ? /\.html?$/i.test(activeTab.name) : false
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -84,10 +97,22 @@ function EditorArea(): React.JSX.Element {
             </button>
           </div>
         ))}
+        {activeIsHtml && activeTab && (
+          <button
+            onClick={() => void openPreview(activeTab.path)}
+            title="Play this page in the preview pane"
+            className="ml-auto flex shrink-0 items-center gap-1 rounded px-2 py-1 font-mono text-[10px] uppercase tracking-widest text-[var(--accent-bright)] hover:bg-white/5"
+          >
+            ▶ Preview
+          </button>
+        )}
       </div>
 
-      {/* editor */}
-      <div className="relative min-h-0 flex-1">
+      {/* editor — a faint scrim keeps code legible while the orb glow bleeds through */}
+      <div
+        className="relative min-h-0 flex-1"
+        style={{ background: 'color-mix(in srgb, var(--bg) 52%, transparent)' }}
+      >
         {activeTab ? (
           activeTab.truncated ? (
             <div className="flex h-full items-center justify-center p-6 text-center font-ui text-sm text-dim">
@@ -146,7 +171,15 @@ export function StudioPanel(): React.JSX.Element {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.2 }}
-          style={{ background: 'var(--bg)' }}
+          style={{
+            // Frosted glass over the app: the live orb behind stays visible as a
+            // soft, breathing glow (see it react to voice) while code stays legible.
+            background:
+              'radial-gradient(ellipse 68% 55% at 50% 42%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 60%), color-mix(in srgb, var(--bg) 66%, transparent)',
+            backdropFilter: 'blur(28px) saturate(135%)',
+            WebkitBackdropFilter: 'blur(28px) saturate(135%)',
+            boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05)'
+          }}
         >
           {/* header — draggable window region; buttons opt out of drag */}
           <div
@@ -160,13 +193,23 @@ export function StudioPanel(): React.JSX.Element {
               <span className="neon font-display text-xs font-bold tracking-[0.3em]">
                 COSMOS STUDIO
               </span>
-              <button
-                onClick={() => useStudioStore.getState().reveal()}
-                title="Reveal in File Explorer"
-                className="max-w-[320px] truncate rounded bg-black/30 px-2 py-1 font-mono text-[10px] text-dim hover:text-body"
-              >
-                {shortRoot || 'workspace'}
-              </button>
+              <div className="flex items-center rounded bg-black/30">
+                <button
+                  onClick={() => void pickRoot()}
+                  title="Change project folder — where COSMOS opens files and builds new projects by default"
+                  className="flex max-w-[320px] items-center gap-1.5 truncate rounded-l px-2 py-1 font-mono text-[10px] text-dim hover:text-body"
+                >
+                  <span className="text-[var(--accent-bright)]">▸</span>
+                  <span className="truncate">{shortRoot || 'Pick a project folder…'}</span>
+                </button>
+                <button
+                  onClick={() => useStudioStore.getState().reveal()}
+                  title="Reveal in File Explorer"
+                  className="rounded-r border-l border-white/5 px-1.5 py-1 font-mono text-[10px] text-dim hover:bg-white/10 hover:text-body"
+                >
+                  ⧉
+                </button>
+              </div>
               {git?.isRepo && (
                 <span className="hidden items-center gap-1.5 rounded bg-black/30 px-2 py-1 font-mono text-[10px] md:flex">
                   <span className="text-[var(--accent-bright)]">⎇ {git.branch || 'HEAD'}</span>

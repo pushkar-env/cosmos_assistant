@@ -17,6 +17,7 @@ import { ChatPanel } from '@/features/chat/ChatPanel'
 import { CommandPalette } from '@/features/palette/CommandPalette'
 import { SettingsPanel } from '@/features/settings/SettingsPanel'
 import { VaultPanel } from '@/features/vault/VaultPanel'
+import { SecretsPanel } from '@/features/secrets/SecretsPanel'
 import { DashboardPanel } from '@/features/dashboard/DashboardPanel'
 import { WorkspacePanel } from '@/features/workspace/WorkspacePanel'
 import { StudioPanel } from '@/features/studio/StudioPanel'
@@ -133,6 +134,7 @@ export default function App(): React.JSX.Element {
           <CommandPalette />
           <SettingsPanel />
           <VaultPanel />
+          <SecretsPanel />
           <DashboardPanel />
           <WorkspacePanel />
           <StudioPanel />

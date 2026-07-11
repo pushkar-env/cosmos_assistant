@@ -177,6 +177,14 @@ export function buildActions(): Action[] {
       run: () => useUIStore.getState().setPanel('vault')
     },
     {
+      id: 'open-secrets',
+      title: 'Open Secrets',
+      subtitle: 'Encrypted vault for API keys & passwords',
+      keywords: ['secrets', 'secret', 'api', 'key', 'keys', 'password', 'passwords', 'token', 'credentials', 'vault', 'store', 'ssh', 'encrypt'],
+      section: 'settings',
+      run: () => useUIStore.getState().setPanel('secrets')
+    },
+    {
       id: 'open-dashboard',
       title: 'Open Dashboard',
       keywords: ['dashboard', 'overview', 'stats', 'today', 'home'],

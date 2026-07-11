@@ -31,7 +31,10 @@ const PUSH_TO_TALK: SegmenterOptions = {
 
 const HANDS_FREE: SegmenterOptions = {
   threshold: 0.022,
-  minSpeechMs: 220,
+  // a snappy "Cosmos" can be well under 220ms of sustained energy — requiring
+  // that much made the wake word get dropped as sub-threshold noise, so the
+  // first try "didn't respond". 170ms still rejects transient clicks/taps.
+  minSpeechMs: 170,
   silenceMs: 950,
   idleRecycleMs: 12_000,
   maxSegmentMs: 30_000

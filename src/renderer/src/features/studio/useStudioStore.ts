@@ -73,6 +73,9 @@ interface StudioStore {
   // ── preview ──
   previewUrl: string
   setPreviewUrl: (url: string) => void
+  /** serve a workspace file (or the whole workspace) over http and show it in
+   *  the preview pane — this is what makes a plain HTML game playable in-app */
+  openPreview: (relPath?: string) => Promise<void>
 
   init: () => Promise<void>
   refreshTree: () => Promise<void>
@@ -113,10 +116,14 @@ function loadLayout(): { panels: PanelState; sizes: SizeState; previewUrl: strin
         sizes: SizeState
         previewUrl: string
       }>
+      // our static preview server binds 127.0.0.1 on an ephemeral port, so a
+      // persisted URL from last session is dead — drop it and show the empty
+      // state (the user's own localhost:3000 dev-server URLs are kept)
+      const savedUrl = p.previewUrl ?? 'http://localhost:3000'
       return {
         panels: { ...DEFAULT_PANELS, ...p.panels },
         sizes: { ...DEFAULT_SIZES, ...p.sizes },
-        previewUrl: p.previewUrl ?? 'http://localhost:3000'
+        previewUrl: savedUrl.includes('127.0.0.1') ? '' : savedUrl
       }
     }
   } catch {
@@ -181,6 +188,12 @@ export const useStudioStore = create<StudioStore>((set, get) => ({
 
   setPreviewUrl: (url) => {
     set({ previewUrl: url })
+    saveLayout(get())
+  },
+
+  openPreview: async (relPath) => {
+    const url = await window.cosmos.preview.serve(relPath)
+    set((s) => ({ previewUrl: url, panels: { ...s.panels, preview: true } }))
     saveLayout(get())
   },
 
@@ -346,7 +359,10 @@ export const useStudioStore = create<StudioStore>((set, get) => ({
   },
 
   pickRoot: async () => {
+    const prev = get().root
     const root = await window.cosmos.workspace.pick()
+    // dialog cancelled (or same folder re-picked) → keep open tabs & terminals
+    if (!root || root === prev) return
     set({
       root,
       tabs: [],

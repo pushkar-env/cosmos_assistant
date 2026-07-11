@@ -2,7 +2,15 @@ import { create } from 'zustand'
 import type { WindowMode } from '@shared/ipc'
 
 type Phase = 'boot' | 'main'
-type Panel = 'none' | 'settings' | 'vault' | 'dashboard' | 'workspace' | 'apps' | 'studio'
+type Panel =
+  | 'none'
+  | 'settings'
+  | 'vault'
+  | 'secrets'
+  | 'dashboard'
+  | 'workspace'
+  | 'apps'
+  | 'studio'
 
 interface UIState {
   phase: Phase

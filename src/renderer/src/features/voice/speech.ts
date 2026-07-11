@@ -81,9 +81,16 @@ function punctuationPause(text: string): number {
 
 const LIST_ITEM_RE = /^\s*(?:[-*+•]|\d+[.)])\s/
 
-// Latin forms of the wake word (with a word boundary so "cosmopolitan" is safe).
+// Latin forms of the wake word. Whisper mishears "Cosmos" constantly — cosmus,
+// kozmos, cosmoss, gosmos, "cos mos", "cause mos"… — and a rigid alternation
+// (cosmos|kosmos|…) let every near-miss slip through as "not addressed", so the
+// user had to repeat themselves. Instead we match the STABLE consonant skeleton
+// the way the Devanagari matcher below does: an initial hard-C sound ([ckg]),
+// an s/z, an m, then an optional closing s/z — with the vowels and an optional
+// t/space/hyphen in the middle left loose. Anchored + a trailing word boundary
+// so "customs", "cosmic", "gizmos", "cosmetic" don't false-trigger.
 const WAKE_RE =
-  /^\s*(?:hey|ok|okay|hi|yo|हे|अरे|ओके)?[,\s]*(?:cosmos|kosmos|cosmo|cosmas)\b[\s,!.?।]*/i
+  /^\s*(?:hey|hi|ok|okay|yo|so|um|uh|hello|हे|अरे|ओके)?[,\s]*[ckg]o[sz]t?[-\s]?m[ou][sz]?s?\b[\s,!.?।'’]*/i
 
 // When transcribing Hindi, Whisper writes the spoken English "Cosmos" in
 // Devanagari and the exact vowel signs vary wildly (कॉसमॉस, कोसमोस, कॉस्मॉस,

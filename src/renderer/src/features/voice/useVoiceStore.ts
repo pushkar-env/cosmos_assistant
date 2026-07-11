@@ -36,52 +36,83 @@ interface VoiceStore {
   say: (text: string) => void
 }
 
-const recorder = new MicRecorder()
-const player = new SpeechPlayer()
-
-/** serial TTS pipeline: sentences in, ordered audio out */
-const synthQueue: { text: string; pauseMs: number }[] = []
-let synthesizing = false
-/**
- * Bumped by clearSpeech (barge-in / Stop). A synthesis that was already in
- * flight when speech was cleared must NOT enqueue its audio afterwards — that
- * would restart the player and flip the assistant back to "speaking" (leaving
- * the Stop button stuck). Each pump iteration captures the epoch and discards
- * its result if the epoch moved on.
- */
-let speechEpoch = 0
-
-let lastSynthErrorAt = 0
-
-/**
- * After a bare "Cosmos" (we answer "Yes?"), the actual command is often the
- * NEXT segment because the voice-activity detector cut the pause after the
- * wake word. During this window we accept that next utterance as the command
- * without requiring the wake word again. 0 = no window open.
- */
-let followUpUntil = 0
 const FOLLOW_UP_MS = 12_000
 
+/**
+ * HMR-safe voice pipeline singletons. The assistant-event listener registry
+ * lives on globalThis and SURVIVES a hot reload; if the recorder/player and the
+ * synth state were plain module-level values, a re-eval of this module would
+ * spin up a SECOND SpeechPlayer and subscribe a SECOND assistant listener while
+ * the first stayed alive — so every reply got spoken twice, by two overlapping
+ * voices. Stashing them on globalThis keeps exactly ONE recorder, ONE player and
+ * ONE synth queue for the life of the page, across any number of hot reloads.
+ */
+interface VoiceGlobals {
+  recorder: MicRecorder
+  player: SpeechPlayer
+  /** serial TTS pipeline: sentences in, ordered audio out */
+  synthQueue: { text: string; pauseMs: number }[]
+  synthesizing: boolean
+  /**
+   * Bumped by clearSpeech (barge-in / Stop). A synthesis already in flight when
+   * speech was cleared must NOT enqueue its audio afterwards — that would
+   * restart the player and flip the assistant back to "speaking" (leaving the
+   * Stop button stuck). Each pump iteration captures the epoch and discards its
+   * result if the epoch moved on.
+   */
+  speechEpoch: number
+  lastSynthErrorAt: number
+  /**
+   * After a bare "Cosmos" (we answer "Yes?"), the actual command is often the
+   * NEXT segment because the voice-activity detector cut the pause after the
+   * wake word. During this window we accept that next utterance as the command
+   * without requiring the wake word again. 0 = no window open.
+   */
+  followUpUntil: number
+  /** everything COSMOS says, so mic pickups of its own voice can be recognized */
+  echoTracker: EchoTracker
+  initialized: boolean
+  /** drop the previous assistant-event subscription before re-subscribing */
+  offAssistant?: () => void
+}
+
+const shared: VoiceGlobals = ((
+  globalThis as { __cosmosVoice?: VoiceGlobals }
+).__cosmosVoice ??= {
+  recorder: new MicRecorder(),
+  player: new SpeechPlayer(),
+  synthQueue: [],
+  synthesizing: false,
+  speechEpoch: 0,
+  lastSynthErrorAt: 0,
+  followUpUntil: 0,
+  echoTracker: new EchoTracker(),
+  initialized: false
+})
+
+const recorder = shared.recorder
+const player = shared.player
+
 async function pumpSynthQueue(): Promise<void> {
-  if (synthesizing) return
-  synthesizing = true
-  while (synthQueue.length > 0) {
-    const { text, pauseMs } = synthQueue.shift()!
-    const epoch = speechEpoch
+  if (shared.synthesizing) return
+  shared.synthesizing = true
+  while (shared.synthQueue.length > 0) {
+    const { text, pauseMs } = shared.synthQueue.shift()!
+    const epoch = shared.speechEpoch
     try {
       const { data } = await window.cosmos.voice.synthesize(text)
-      if (epoch !== speechEpoch) break // cleared mid-synth → drop the stray audio
+      if (epoch !== shared.speechEpoch) break // cleared mid-synth → drop the stray audio
       player.enqueue(data, pauseMs)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       console.error('[voice] synthesis failed:', message)
-      synthQueue.length = 0
+      shared.synthQueue.length = 0
       // don't let TTS fail silently — the user needs to know WHY there's
       // no voice (e.g. a Piper path/exe problem). Throttle so one broken
       // response doesn't spam a toast per sentence.
       const now = Date.now()
-      if (now - lastSynthErrorAt > 4000) {
-        lastSynthErrorAt = now
+      if (now - shared.lastSynthErrorAt > 4000) {
+        shared.lastSynthErrorAt = now
         useNotificationStore.getState().push({
           title: 'Voice playback failed',
           body: `${message}. Check Settings → Voice.`,
@@ -90,31 +121,26 @@ async function pumpSynthQueue(): Promise<void> {
       }
     }
   }
-  synthesizing = false
+  shared.synthesizing = false
 }
-
-/** everything COSMOS says, so mic pickups of its own voice can be recognized */
-const echoTracker = new EchoTracker()
 
 function speak(text: string, boundary: ChunkBoundary = 'sentence'): void {
   const speakable = toSpeakable(text)
   if (!speakable) return
-  echoTracker.note(speakable)
+  shared.echoTracker.note(speakable)
   // pacing is judged on the raw text — markdown structure (headings,
   // paragraph breaks) carries pause cues that toSpeakable strips
-  synthQueue.push({ text: speakable, pauseMs: pauseAfterMs(text, boundary) })
+  shared.synthQueue.push({ text: speakable, pauseMs: pauseAfterMs(text, boundary) })
   void pumpSynthQueue()
 }
-
-let initialized = false
 
 export const useVoiceStore = create<VoiceStore>((set, get) => {
   const chunker = new SentenceChunker(speak)
 
   const clearSpeech = (): void => {
-    speechEpoch++ // invalidate any synthesis currently in flight
+    shared.speechEpoch++ // invalidate any synthesis currently in flight
     chunker.reset()
-    synthQueue.length = 0
+    shared.synthQueue.length = 0
     player.stop()
   }
 
@@ -129,7 +155,7 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
       // all of these made hands-free feel randomly deaf, so instead compare the
       // transcript against what was actually spoken and drop only real echoes.
       // Genuine speech passes through → wake-word barge-in works.
-      if (mode === 'handsfree' && duringSpeech && echoTracker.isEcho(text)) return
+      if (mode === 'handsfree' && duringSpeech && shared.echoTracker.isEcho(text)) return
       if (mode === 'ptt') {
         recorder.stop()
         set({ micMode: 'off', micStatus: 'idle' })
@@ -145,9 +171,9 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
       // hands-free: an utterance must address Cosmos — EXCEPT within the
       // follow-up window right after a bare "Cosmos", where the VAD likely
       // split the command into this next segment.
-      const action = resolveHandsFree(text, followUpUntil > Date.now())
+      const action = resolveHandsFree(text, shared.followUpUntil > Date.now())
       if (action.kind === 'ignore') return // not addressed / echo → keep window as-is
-      followUpUntil = 0 // acting on this utterance → close the window
+      shared.followUpUntil = 0 // acting on this utterance → close the window
       set({ lastHeard: text, error: null })
       clearSpeech()
       if (action.kind === 'command') {
@@ -157,7 +183,7 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
         // listen for the command in the next segment without the wake word
         const hindi = useSettingsStore.getState().settings.voice.language === 'hi'
         speak(hindi ? 'जी?' : 'Yes?')
-        followUpUntil = Date.now() + FOLLOW_UP_MS
+        shared.followUpUntil = Date.now() + FOLLOW_UP_MS
       }
     } catch (err) {
       set({
@@ -187,8 +213,8 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
     error: null,
 
     init: () => {
-      if (initialized) return
-      initialized = true
+      if (shared.initialized) return
+      shared.initialized = true
 
       player.configure({
         onStart: () => useAssistantStore.getState().setState('speaking'),
@@ -198,7 +224,10 @@ export const useVoiceStore = create<VoiceStore>((set, get) => {
         }
       })
 
-      subscribeAssistantEvents((e) => {
+      // exactly one assistant-event → speech subscription, ever. Drop a prior
+      // one first so a hot reload can never leave two listeners driving TTS.
+      shared.offAssistant?.()
+      shared.offAssistant = subscribeAssistantEvents((e) => {
         const voiceReplies = useSettingsStore.getState().settings.voice.voiceReplies
         switch (e.type) {
           case 'delta':

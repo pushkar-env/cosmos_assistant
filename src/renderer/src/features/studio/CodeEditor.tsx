@@ -87,10 +87,17 @@ export function CodeEditor({ path, value, readOnly, onChange, onSave }: Props): 
         EditorView.updateListener.of((u) => {
           if (u.docChanged) change.current(u.state.doc.toString())
         }),
+        // Transparent chrome so the studio's frosted glass (and the orb behind
+        // it) shows through the editor; overrides oneDark's opaque surfaces.
         EditorView.theme({
-          '&': { height: '100%', fontSize: '13px' },
+          '&': { height: '100%', fontSize: '13px', backgroundColor: 'transparent' },
           '.cm-scroller': { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' },
-          '.cm-content': { paddingBottom: '40vh' }
+          '.cm-content': { paddingBottom: '40vh' },
+          '.cm-gutters': { backgroundColor: 'transparent', border: 'none' },
+          '.cm-activeLine': {
+            backgroundColor: 'color-mix(in srgb, var(--accent) 7%, transparent)'
+          },
+          '.cm-activeLineGutter': { backgroundColor: 'transparent' }
         })
       ]
     })

@@ -23,6 +23,7 @@ import { SttService } from './services/voice/SttService'
 import { TtsService } from './services/voice/TtsService'
 import { ToolRegistry } from './services/tools/ToolRegistry'
 import { MemoryService } from './services/MemoryService'
+import { SecretsService } from './services/SecretsService'
 import { EmbeddingService } from './services/EmbeddingService'
 import { BrowserService } from './services/BrowserService'
 import { VisionService } from './services/VisionService'
@@ -32,6 +33,7 @@ import { UnrealService } from './services/UnrealService'
 import { PluginService } from './services/PluginService'
 import { MediaService } from './services/MediaService'
 import { WorkspaceService } from './services/WorkspaceService'
+import { PreviewServer } from './services/PreviewServer'
 import { GitService } from './services/GitService'
 import { NotesExportService } from './services/NotesExportService'
 
@@ -76,9 +78,11 @@ const embeddings = new EmbeddingService(settings)
 const notesExport = new NotesExportService(settings)
 const memory = new MemoryService(embeddings)
 memory.attachNotesExport(notesExport) // mirror notes + research reports to .md
+const secrets = new SecretsService() // encrypted API-key / password vault
 const browser = new BrowserService()
 const media = new MediaService(browser, settings)
 const workspace = new WorkspaceService(settings)
+const preview = new PreviewServer(workspace)
 const git = new GitService(settings, workspace)
 const tools = new ToolRegistry({
   stats,
@@ -91,7 +95,8 @@ const tools = new ToolRegistry({
   unreal: new UnrealService(),
   media,
   workspace,
-  git
+  git,
+  secrets
 })
 const ai = new AIService(settings, tools, memory, workspace)
 const stt = new SttService(settings)
@@ -389,8 +394,10 @@ if (!gotLock) {
       stt,
       tts,
       memory,
+      secrets,
       plugins,
       workspace,
+      preview,
       git,
       notesExport,
       window: {
@@ -407,6 +414,7 @@ if (!gotLock) {
     })
     void stats.start(() => mainWindow)
     void memory.init()
+    void secrets.init()
     void plugins.load()
 
     // Piper voices are bundled in resources and resolved live from the
@@ -434,6 +442,7 @@ if (!gotLock) {
     isQuitting = true
     stats.stop()
     workspace.dispose() // kills the persistent terminal + file watcher
+    preview.dispose() // stops the static preview server
     void browser.close() // also closes the media tab
   })
 

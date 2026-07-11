@@ -41,6 +41,10 @@ export const IPC = {
   TERM_INPUT: 'term:input',
   TERM_RESET: 'term:reset',
   TERM_CLOSE: 'term:close',
+  /** start (if needed) the static preview server and get a URL for a file */
+  PREVIEW_SERVE: 'preview:serve',
+  /** open an http(s) URL in the user's default browser */
+  APP_OPEN_EXTERNAL: 'app:open-external',
   // ── github / git ──
   GITHUB_CONNECT: 'github:connect',
   GITHUB_DISCONNECT: 'github:disconnect',
@@ -69,6 +73,12 @@ export const IPC = {
   MEMORY_ADD: 'vault:memory-add',
   MEMORY_DELETE: 'vault:memory-delete',
   AUDIT_LIST: 'vault:audit-list',
+  // ── secrets vault ──
+  SECRETS_LIST: 'secrets:list',
+  SECRETS_REVEAL: 'secrets:reveal',
+  SECRETS_CREATE: 'secrets:create',
+  SECRETS_UPDATE: 'secrets:update',
+  SECRETS_DELETE: 'secrets:delete',
   NOTIFY: 'app:notify',
   NOTES_LIST: 'notes:list',
   NOTES_GET: 'notes:get',

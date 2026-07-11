@@ -9,6 +9,7 @@ import { browserTools } from './browserTools'
 import { creatorTools } from './creatorTools'
 import { codingTools } from './codingTools'
 import { gitTools } from './gitTools'
+import { secretsTools } from './secretsTools'
 import type { SystemStatsService } from '../SystemStatsService'
 import type { CommandService } from '../CommandService'
 import type { MemoryService } from '../MemoryService'
@@ -20,6 +21,7 @@ import type { UnrealService } from '../UnrealService'
 import type { MediaService } from '../MediaService'
 import type { WorkspaceService } from '../WorkspaceService'
 import type { GitService } from '../GitService'
+import type { SecretsService } from '../SecretsService'
 
 export interface RegistryDeps {
   stats: SystemStatsService
@@ -33,6 +35,7 @@ export interface RegistryDeps {
   media: MediaService
   workspace: WorkspaceService
   git: GitService
+  secrets: SecretsService
 }
 
 /** runtime context a tool may need (delegate spawns sub-agents with it) */
@@ -82,8 +85,9 @@ export const LOCAL_CHAT_TOOLS = [
   // files · light building (create/preview a script or page without agent mode)
   'fs_list', 'fs_read', 'fs_write', 'fs_mkdir', 'fs_move', 'fs_delete', 'fs_search',
   'read_file', 'run_command',
-  // quick web lookups · long-term memory
-  'web_search', 'web_fetch', 'memory_save', 'memory_search', 'memory_delete'
+  // quick web lookups · long-term memory · secrets vault
+  'web_search', 'web_fetch', 'memory_save', 'memory_search', 'memory_delete',
+  'secret_copy', 'secret_list'
 ]
 
 /**
@@ -112,7 +116,8 @@ export class ToolRegistry {
       ...browserTools(deps.browser),
       ...creatorTools(deps),
       ...codingTools(deps.workspace),
-      ...gitTools(deps.git)
+      ...gitTools(deps.git),
+      ...secretsTools(deps.secrets)
     ]) {
       this.specs.set(spec.def.name, spec)
     }
