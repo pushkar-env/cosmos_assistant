@@ -11,9 +11,11 @@ import type {
   AssistantMode,
   ChatRequest,
   NotificationPayload,
+  PersonalitySettings,
   ProviderId,
   VoiceLanguageId
 } from '@shared/types'
+import { buildPersonaPrompt } from '@shared/personality'
 import type {
   AgentEvent,
   AgentMessage,
@@ -59,7 +61,7 @@ const AUTO_APPROVE_CODING = new Set([
 ])
 
 const COSMOS_SYSTEM_PROMPT = `You are COSMOS, an advanced desktop AI assistant inspired by Tony Stark's J.A.R.V.I.S., running inside a futuristic HUD on the user's Windows machine.
-Personality: professional, warm, quietly witty. Be concise by default — this is a voice-first interface — but go deep when asked. Never robotic, never sycophantic. Dry humor is welcome when the moment allows it.
+Voice-first interface: default to concise, natural, spoken-style replies — but go deep when the user asks. Never robotic, never sycophantic. Your personality (voice, tone, attitude) is defined in the "YOUR PERSONALITY" section below — embody it consistently in every reply while staying fully capable and accurate.
 Language: reply in the SAME language and script as the user's latest message. If they write in Hindi (Devanagari), respond entirely in natural, fluent Hindi in Devanagari script — never romanized Hindi, never English. Mixed/Hinglish input → mirror their mix. This is a voice interface, so spoken output must be in the right script to be pronounced correctly. Regardless of the conversation language, ALWAYS keep tool names and technical identifiers in English/original form (tool arguments, app names, file paths, URLs, code, model names): understand the request in any language and translate spoken names to their real ones — e.g. "स्पॉटिफ़ाई खोलो" → app_open Spotify, "आवाज़ कम करो" → sound down, "यूट्यूब पर believer चलाओ" → play_youtube "believer". Do the action, then report the outcome in the user's language.
 You have real tools: files (list, read, write, search, move, delete-to-recycle-bin, zip) anywhere on the system, a PowerShell terminal, clipboard, screenshots, app/URL launching, power actions, live system telemetry, PC maintenance (system_cleanup, recycle_bin_empty), hardware/settings control (wifi, bluetooth, sound, brightness), and the web (web_search, web_fetch, and a browser you can navigate, read, and operate).
 You are also a capable software engineer with a project workspace and dedicated coding tools: project_tree (see a project's layout), read_file (read code with line numbers, optionally a range), search_code (grep the project's file contents for a symbol/string/regex), fs_edit (surgical find/replace edits to existing files — prefer this over rewriting), fs_write (new files/full rewrites), and run_command (run shell commands — scaffold, install packages, build, test — in the workspace terminal the user can watch in the COSMOS Studio). When building or fixing software, actually run and verify your work rather than assuming it works.
@@ -200,8 +202,14 @@ export class AIService {
     const hindiMode = /[ऀ-ॿ]/.test(lastUser?.content ?? '')
     const mode: AssistantMode = req.mode ?? 'chat'
     const system =
-      this.buildSystemPrompt(s.userName, provider.supportsTools, hindiMode, mode, workspaceRoot) +
-      recalled
+      this.buildSystemPrompt(
+        s.userName,
+        provider.supportsTools,
+        hindiMode,
+        mode,
+        workspaceRoot,
+        s.personality
+      ) + recalled
     const maxRounds = mode === 'agent' || mode === 'ultra' ? MAX_AGENT_ROUNDS : MAX_TOOL_ROUNDS
     // Local models get a curated toolset in chat mode (see ToolRegistry.defsFor);
     // frontier providers always get the full catalog.
@@ -644,9 +652,14 @@ For a quick current fact, use web_search (one lookup, then answer). Do not launc
     hasTools: boolean,
     hindiMode: boolean,
     mode: AssistantMode,
-    workspaceRoot?: string
+    workspaceRoot?: string,
+    personality?: PersonalitySettings
   ): string {
     const name = userName ? `\nThe user's name is ${userName}.` : ''
+    // the compiled persona: identity paragraph + trait dials + nickname,
+    // emitted in the SAME language as the reply so a Hindi turn gets a natural
+    // Hindi personality (not English text read by a Hindi voice)
+    const persona = buildPersonaPrompt(personality, hindiMode ? 'hi' : 'en')
     const toolNote = hasTools
       ? ''
       : '\nNote: tool access is unavailable with the current AI provider — you can only converse. If asked to act on the system, say so and suggest switching to Claude or GPT.'
@@ -670,6 +683,6 @@ For a quick current fact, use web_search (one lookup, then answer). Do not launc
     const langDirective = hindiMode
       ? `\nThis is a HINDI conversation. Respond ONLY in natural, fluent Hindi (Devanagari script) for EVERY reply — greetings, explanations, and especially summaries of web-search results, news, and tool outputs: translate any English source material into Hindi rather than quoting it. Keep only tool names, code, URLs, file paths, and untranslatable proper nouns in their original form. Never reply in English or romanized Hindi unless the user explicitly asks you to switch to English.`
       : `\nThe user's latest message is in English, so reply in English. Do NOT reply in Hindi or Devanagari script — even if earlier messages in this conversation, tool outputs, or recalled memories are in Hindi. Always match the language of the user's latest message.`
-    return `${COSMOS_SYSTEM_PROMPT}${name}${toolNote}${clock}${langDirective}${this.modeDirective(mode, workspaceRoot)}`
+    return `${COSMOS_SYSTEM_PROMPT}${name}${persona}${toolNote}${clock}${langDirective}${this.modeDirective(mode, workspaceRoot)}`
   }
 }

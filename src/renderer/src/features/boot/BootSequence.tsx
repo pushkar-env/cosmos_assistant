@@ -5,29 +5,19 @@ import { sound } from '@/core/sound/SoundEngine'
 import { useUIStore } from '@/core/stores/useUIStore'
 import { useSettingsStore } from '@/core/stores/useSettingsStore'
 import { useVoiceStore } from '@/features/voice/useVoiceStore'
+import { personaGreeting } from '@shared/personality'
 import { BootParticles } from './BootParticles'
 
 /** Speak the welcome greeting the moment the COSMOS wordmark reveals. */
 function speakWelcome(): void {
   const settings = useSettingsStore.getState().settings
   if (!settings.voice.voiceReplies) return
-  const hour = new Date().getHours()
-  const name = settings.userName ? ` ${settings.userName}` : ''
-
-  if (settings.voice.language === 'hi') {
-    const part =
-      hour < 5 ? 'शुभ रात्रि' : hour < 12 ? 'सुप्रभात' : hour < 18 ? 'नमस्कार' : 'शुभ संध्या'
-    useVoiceStore
-      .getState()
-      .say(`${part}${name}। कॉसमॉस में आपका स्वागत है। सभी सिस्टम ऑनलाइन हैं और मैं आपकी सहायता के लिए तैयार हूँ।`)
-    return
-  }
-
-  const part =
-    hour < 5 ? 'Late night' : hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'
-  useVoiceStore
-    .getState()
-    .say(`Welcome to Cosmos. ${part}${name ? ',' + name : ''}. All systems are online and I'm ready to assist you.`)
+  const greeting = personaGreeting(settings.personality, {
+    name: settings.userName,
+    hour: new Date().getHours(),
+    lang: settings.voice.language === 'hi' ? 'hi' : 'en'
+  })
+  useVoiceStore.getState().say(greeting)
 }
 
 const BOOT_LINES = [

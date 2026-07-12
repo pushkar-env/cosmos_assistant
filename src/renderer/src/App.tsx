@@ -22,11 +22,13 @@ import { DashboardPanel } from '@/features/dashboard/DashboardPanel'
 import { WorkspacePanel } from '@/features/workspace/WorkspacePanel'
 import { StudioPanel } from '@/features/studio/StudioPanel'
 import { AppCenterPanel } from '@/features/appcenter/AppCenterPanel'
+import { PersonalityPanel } from '@/features/personality/PersonalityPanel'
 import { Toasts } from '@/features/notifications/Toasts'
 import { NotificationCenter } from '@/features/notifications/NotificationCenter'
 import { MiniView } from '@/features/compact/MiniView'
 import { OrbWidget } from '@/features/compact/OrbWidget'
 import { useNotificationStore } from '@/core/stores/useNotificationStore'
+import { personaGreeting } from '@shared/personality'
 
 export default function App(): React.JSX.Element {
   const phase = useUIStore((s) => s.phase)
@@ -79,15 +81,20 @@ export default function App(): React.JSX.Element {
   // Welcome greeting once the boot cinematic finishes — toast + spoken.
   useEffect(() => {
     if (phase !== 'main') return
-    const name = useSettingsStore.getState().settings.userName
-    const hour = new Date().getHours()
-    const part = hour < 5 ? 'Late night' : hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'
+    const s = useSettingsStore.getState().settings
+    const hi = s.voice.language === 'hi'
+    // persona- and language-flavoured greeting (time of day + name + persona line)
+    const greeting = personaGreeting(s.personality, {
+      name: s.userName,
+      hour: new Date().getHours(),
+      lang: hi ? 'hi' : 'en'
+    })
     const t = setTimeout(() => {
       // greeting is spoken during the boot wordmark reveal (BootSequence);
-      // here we just surface the on-screen welcome toast
+      // here we surface the matching on-screen welcome toast
       useNotificationStore.getState().push({
-        title: 'Welcome to COSMOS',
-        body: `${part}${name ? `, ${name}` : ''}. All systems online — press Ctrl+Space for commands, or just ask me anything.`,
+        title: hi ? 'कॉसमॉस में आपका स्वागत है' : 'Welcome to COSMOS',
+        body: `${greeting} ${hi ? 'कमांड के लिए Ctrl+Space दबाएँ।' : 'Press Ctrl+Space for commands.'}`,
         kind: 'success'
       })
     }, 900)
@@ -139,6 +146,7 @@ export default function App(): React.JSX.Element {
           <WorkspacePanel />
           <StudioPanel />
           <AppCenterPanel />
+          <PersonalityPanel />
           <NotificationCenter />
           <Toasts />
         </motion.main>

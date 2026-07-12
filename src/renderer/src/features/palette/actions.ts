@@ -169,6 +169,18 @@ export function buildActions(): Action[] {
       run: () => useUIStore.getState().setPanel('settings')
     },
     {
+      id: 'open-personality',
+      title: 'Personality',
+      subtitle: 'Choose how COSMOS talks — persona, tone & traits',
+      keywords: [
+        'personality', 'persona', 'character', 'girlfriend', 'boyfriend', 'assistant',
+        'funny', 'comedian', 'sarcastic', 'sassy', 'flirty', 'bestie', 'mentor', 'zen',
+        'tone', 'mood', 'vibe', 'style', 'roleplay', 'attitude', 'sweetheart'
+      ],
+      section: 'settings',
+      run: () => useUIStore.getState().setPanel('personality')
+    },
+    {
       id: 'open-vault',
       title: 'Open Vault',
       subtitle: 'Memories · permissions · audit log',

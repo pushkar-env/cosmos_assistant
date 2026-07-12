@@ -173,6 +173,25 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* ── Personality trait dials ── the track is painted inline (a gradient that
+   reflects the value); here we style the draggable thumb, which appearance-none
+   otherwise strips. The persona accent is passed via accent-color inline. */
+.persona-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid currentColor;
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+  transition: transform 0.12s ease;
+}
+.persona-range::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .scanline,
   .orb-aura {

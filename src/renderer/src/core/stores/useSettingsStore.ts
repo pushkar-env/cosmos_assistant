@@ -32,13 +32,21 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   update: async (patch) => {
     // optimistic: apply locally, persist through main
+    const cur = get().settings
     const next = {
-      ...get().settings,
+      ...cur,
       ...patch,
-      apiKeys: { ...get().settings.apiKeys, ...patch.apiKeys },
-      providerModels: { ...get().settings.providerModels, ...patch.providerModels },
-      location: { ...get().settings.location, ...patch.location },
-      voice: { ...get().settings.voice, ...patch.voice }
+      apiKeys: { ...cur.apiKeys, ...patch.apiKeys },
+      providerModels: { ...cur.providerModels, ...patch.providerModels },
+      location: { ...cur.location, ...patch.location },
+      voice: { ...cur.voice, ...patch.voice },
+      personality: patch.personality
+        ? {
+            ...cur.personality,
+            ...patch.personality,
+            traits: { ...cur.personality.traits, ...patch.personality.traits }
+          }
+        : cur.personality
     }
     if (patch.theme) applyTheme(patch.theme)
     set({ settings: next })

@@ -11,6 +11,7 @@ type Panel =
   | 'workspace'
   | 'apps'
   | 'studio'
+  | 'personality'
 
 interface UIState {
   phase: Phase

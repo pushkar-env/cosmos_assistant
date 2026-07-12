@@ -1,5 +1,9 @@
 /** Domain types shared between main, preload and renderer. */
 
+import { DEFAULT_PERSONALITY, type PersonalitySettings } from './personality'
+
+export type { PersonalitySettings } from './personality'
+
 export type ProviderId = 'anthropic' | 'openai' | 'gemini' | 'ollama'
 
 export type ThemeId = 'cyber-blue' | 'crimson' | 'nebula-purple' | 'emerald' | 'arctic-white'
@@ -311,6 +315,8 @@ export interface Settings {
   github: GithubSettings
   /** tools granted permanent approval ("Always allow") */
   alwaysAllowTools: string[]
+  /** the assistant's persona — how it talks (preset + trait dials + nickname) */
+  personality: PersonalitySettings
 }
 
 /** A node in the Studio file tree (dirs listed before files). */
@@ -498,7 +504,8 @@ export const DEFAULT_SETTINGS: Settings = {
   notesFolder: '',
   agentAutoApprove: false,
   github: DEFAULT_GITHUB_SETTINGS,
-  alwaysAllowTools: []
+  alwaysAllowTools: [],
+  personality: DEFAULT_PERSONALITY
 }
 
 export interface TranscriptionResult {

@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { ASSISTANT_MODES, DEFAULT_MODELS, type Attachment, type ProviderId } from '@shared/types'
 import { useAssistantStore } from '@/core/stores/useAssistantStore'
 import { useSettingsStore } from '@/core/stores/useSettingsStore'
+import { useUIStore } from '@/core/stores/useUIStore'
 import { useVoiceStore } from '@/features/voice/useVoiceStore'
 import { useNotificationStore } from '@/core/stores/useNotificationStore'
 import { MicButton } from '@/features/voice/MicButton'
@@ -14,6 +15,7 @@ import { processFiles } from './attachments'
 import { Glass } from '@/shared/ui/Glass'
 import { StatusDot } from '@/shared/ui/StatusDot'
 import { Markdown } from '@/shared/ui/Markdown'
+import { localize, resolvePreset } from '@shared/personality'
 
 const PROVIDERS: { id: ProviderId; label: string }[] = [
   { id: 'anthropic', label: 'Claude' },
@@ -187,17 +189,34 @@ export function ChatPanel(): React.JSX.Element {
           onScroll={onScroll}
           className="smooth-scroll flex-1 space-y-4 overflow-y-auto overflow-x-hidden px-4 py-4 select-text"
         >
-          {messages.length === 0 && (
-            <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
-              <p className="neon font-display text-sm uppercase tracking-[0.3em]">
-                Welcome to COSMOS
-              </p>
-              <p className="max-w-[240px] font-ui text-sm text-dim">
-                I'm online and ready. Ask me anything, tell me to open an app or play a song, or
-                press <span className="neon">Ctrl+Space</span> for the command palette.
-              </p>
-            </div>
-          )}
+          {messages.length === 0 &&
+            (() => {
+              const persona = resolvePreset(settings.personality.presetId)
+              const plang = settings.voice.language === 'hi' ? 'hi' : 'en'
+              return (
+                <div className="flex h-full flex-col items-center justify-center gap-2.5 text-center">
+                  <span className="text-2xl leading-none">{persona.emoji}</span>
+                  <p
+                    className="font-display text-sm uppercase tracking-[0.3em]"
+                    style={{ color: persona.color }}
+                  >
+                    {persona.label}
+                  </p>
+                  <p className="max-w-[260px] font-body text-sm italic text-body">
+                    “{localize(persona.sample, plang)}”
+                  </p>
+                  <p className="max-w-[240px] font-ui text-xs text-dim">
+                    Ask me anything, or press <span className="neon">Ctrl+Space</span> for commands ·{' '}
+                    <button
+                      onClick={() => useUIStore.getState().setPanel('personality')}
+                      className="underline decoration-dotted underline-offset-2 transition-colors hover:text-body"
+                    >
+                      change personality
+                    </button>
+                  </p>
+                </div>
+              )
+            })()}
           <AnimatePresence initial={false}>
             {messages
               .filter(

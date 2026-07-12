@@ -15,6 +15,7 @@ import {
   type TtsProviderId,
   type VoiceLanguageId
 } from '@shared/types'
+import { resolvePreset } from '@shared/personality'
 import { THEMES } from '@/core/theme/themes'
 import { useSettingsStore } from '@/core/stores/useSettingsStore'
 import { useUIStore } from '@/core/stores/useUIStore'
@@ -515,6 +516,32 @@ export function SettingsPanel(): React.JSX.Element {
         keywords: 'name user identity call me',
         render: () =>
           textInput(settings.userName, (v) => void update({ userName: v }), 'How COSMOS addresses you')
+      },
+      {
+        id: 'personality',
+        label: 'Personality',
+        keywords:
+          'personality persona character girlfriend boyfriend assistant funny sarcastic sassy flirty bestie mentor zen tone mood vibe style attitude sweetheart roleplay voice',
+        render: () => {
+          const preset = resolvePreset(settings.personality.presetId)
+          return (
+            <div className="flex items-center gap-2">
+              <span
+                className="flex w-40 items-center gap-2 truncate rounded-lg border px-3 py-2 font-ui text-sm text-body"
+                style={{ borderColor: `${preset.color}55`, background: `${preset.color}12` }}
+              >
+                <span>{preset.emoji}</span>
+                <span className="truncate">{preset.label}</span>
+              </span>
+              <button
+                onClick={() => setPanel('personality')}
+                className="shrink-0 rounded-lg border border-[var(--accent-dim)] px-3 py-2 font-ui text-[10px] font-bold uppercase tracking-widest text-[var(--accent-bright)] transition-colors hover:bg-white/5"
+              >
+                Customize
+              </button>
+            </div>
+          )
+        }
       },
       {
         id: 'media-player',

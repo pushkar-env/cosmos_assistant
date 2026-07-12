@@ -2,6 +2,7 @@ import { app } from 'electron'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import { join, dirname } from 'path'
 import { BUNDLED_VOICES, DEFAULT_SETTINGS, voiceLanguageOf, type Settings } from '@shared/types'
+import { normalizePersonality } from '@shared/personality'
 import { decryptOrNull, encryptText, isEncrypted } from './secureText'
 
 type SecretKey = 'anthropic' | 'openai' | 'gemini' | 'elevenLabsKey' | 'groqKey' | 'githubToken'
@@ -73,6 +74,16 @@ export class SettingsService {
     if (patch.voice?.groqApiKey !== undefined) this.locked.delete('groqKey')
     if (patch.github?.token !== undefined) this.locked.delete('githubToken')
 
+    // personality has a nested traits map — deep-merge so a partial patch
+    // (e.g. just one slider or the nickname) never drops the other fields
+    const nextPersonality = patch.personality
+      ? {
+          ...current.personality,
+          ...patch.personality,
+          traits: { ...current.personality.traits, ...patch.personality.traits }
+        }
+      : current.personality
+
     this.cache = {
       ...current,
       ...patch,
@@ -80,7 +91,8 @@ export class SettingsService {
       providerModels: { ...current.providerModels, ...patch.providerModels },
       location: { ...current.location, ...patch.location },
       voice: nextVoice,
-      github: nextGithub
+      github: nextGithub,
+      personality: nextPersonality
     }
     this.persist()
     return this.cache
@@ -169,7 +181,10 @@ export class SettingsService {
       location: { ...DEFAULT_SETTINGS.location, ...raw.location },
       voice: { ...DEFAULT_SETTINGS.voice, ...raw.voice },
       github: { ...DEFAULT_SETTINGS.github, ...raw.github },
-      alwaysAllowTools: raw.alwaysAllowTools ?? []
+      alwaysAllowTools: raw.alwaysAllowTools ?? [],
+      // fills in every field/trait, so existing users (no `personality` yet)
+      // and forward-compat gaps both resolve to a valid persona
+      personality: normalizePersonality(raw.personality)
     }
     // migrate: remember the active model for its provider if not already
     if (raw.model && !raw.providerModels?.[merged.provider]) {
