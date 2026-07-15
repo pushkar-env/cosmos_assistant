@@ -90,6 +90,15 @@ export const IPC = {
   PLUGINS_GET: 'plugins:get',
   APPS_LIST: 'apps:list',
   APPS_LAUNCH: 'apps:launch',
+  // ── system cleaner ──
+  CLEANER_SCAN: 'cleaner:scan',
+  CLEANER_CLEAN: 'cleaner:clean',
+  CLEANER_LARGE_FILES: 'cleaner:large-files',
+  CLEANER_DISK_USAGE: 'cleaner:disk-usage',
+  CLEANER_PROGRAMS: 'cleaner:programs',
+  CLEANER_UNINSTALL: 'cleaner:uninstall',
+  CLEANER_DELETE: 'cleaner:delete',
+  CLEANER_REVEAL: 'cleaner:reveal',
   WINDOW_SET_MODE: 'window:set-mode',
   WINDOW_MODE_CHANGED: 'window:mode-changed',
   /** renderer drives the floating orb's position (manual drag, orb mode only) */

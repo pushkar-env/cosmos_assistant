@@ -24,10 +24,43 @@ import { useVoiceStore } from '@/features/voice/useVoiceStore'
 import { sound } from '@/core/sound/SoundEngine'
 import { Glass } from '@/shared/ui/Glass'
 
+/** the settings categories shown in the sidebar, in display order */
+type GroupId = 'intelligence' | 'voice' | 'workspace' | 'personal'
+
+const GROUPS: { id: GroupId; label: string; icon: string; desc: string }[] = [
+  {
+    id: 'intelligence',
+    label: 'Intelligence',
+    icon: '◈',
+    desc: 'Model provider, API keys & local runtime'
+  },
+  {
+    id: 'voice',
+    label: 'Voice & Speech',
+    icon: '◉',
+    desc: 'How COSMOS listens to and speaks with you'
+  },
+  {
+    id: 'workspace',
+    label: 'Workspace',
+    icon: '▨',
+    desc: 'Agent projects, notes & connected accounts'
+  },
+  {
+    id: 'personal',
+    label: 'Personalization',
+    icon: '✦',
+    desc: 'Your identity, persona & the interface'
+  }
+]
+
 interface SettingRow {
   id: string
   label: string
+  group: GroupId
   keywords: string
+  /** optional one-line helper shown under the label */
+  hint?: string
   /** hide the row when false (engine-specific rows) */
   when?: boolean
   render: () => React.JSX.Element
@@ -38,6 +71,7 @@ export function SettingsPanel(): React.JSX.Element {
   const setPanel = useUIStore((s) => s.setPanel)
   const { settings, update } = useSettingsStore()
   const [search, setSearch] = useState('')
+  const [activeGroup, setActiveGroup] = useState<GroupId>('intelligence')
   const [availableVoiceIds, setAvailableVoiceIds] = useState<string[]>([])
   const [elevenVoices, setElevenVoices] = useState<ElevenVoice[]>([])
   const [ollamaModels, setOllamaModels] = useState<string[]>([])
@@ -209,6 +243,8 @@ export function SettingsPanel(): React.JSX.Element {
       {
         id: 'provider',
         label: 'AI Provider',
+        group: 'intelligence',
+        hint: 'The brain COSMOS thinks with',
         keywords: 'ai provider model claude gpt gemini ollama llm',
         render: () => (
           <select
@@ -231,6 +267,8 @@ export function SettingsPanel(): React.JSX.Element {
       {
         id: 'model',
         label: 'Model',
+        group: 'intelligence',
+        hint: 'Saved separately for each provider',
         keywords: 'model name version claude gpt gemini ollama llm dropdown custom',
         // dropdown of popular models (installed models for Ollama), plus a
         // "custom" escape hatch to type any model id. Saved per provider.
@@ -275,8 +313,280 @@ export function SettingsPanel(): React.JSX.Element {
         }
       },
       {
+        id: 'key-anthropic',
+        label: 'Anthropic API Key',
+        group: 'intelligence',
+        keywords: 'api key anthropic claude secret',
+        render: () =>
+          textInput(
+            settings.apiKeys.anthropic,
+            (v) => void update({ apiKeys: { ...settings.apiKeys, anthropic: v } }),
+            'sk-ant-…',
+            true
+          )
+      },
+      {
+        id: 'key-openai',
+        label: 'OpenAI API Key',
+        group: 'intelligence',
+        keywords: 'api key openai gpt secret',
+        render: () =>
+          textInput(
+            settings.apiKeys.openai,
+            (v) => void update({ apiKeys: { ...settings.apiKeys, openai: v } }),
+            'sk-…',
+            true
+          )
+      },
+      {
+        id: 'key-gemini',
+        label: 'Gemini API Key',
+        group: 'intelligence',
+        keywords: 'api key gemini google secret',
+        render: () =>
+          textInput(
+            settings.apiKeys.gemini,
+            (v) => void update({ apiKeys: { ...settings.apiKeys, gemini: v } }),
+            'AIza…',
+            true
+          )
+      },
+      {
+        id: 'ollama-url',
+        label: 'Ollama URL',
+        group: 'intelligence',
+        when: settings.provider === 'ollama',
+        keywords: 'ollama local url endpoint',
+        render: () =>
+          textInput(settings.ollamaUrl, (v) => void update({ ollamaUrl: v }), 'http://localhost:11434')
+      },
+      {
+        id: 'ollama-ctx',
+        label: 'Ollama Context',
+        group: 'intelligence',
+        hint: 'Larger contexts need more VRAM',
+        when: settings.provider === 'ollama',
+        keywords: 'ollama context window num_ctx tokens agentic tools memory size',
+        render: () => (
+          <select
+            value={String(settings.ollamaNumCtx)}
+            onChange={(e) => void update({ ollamaNumCtx: Number(e.target.value) })}
+            className="w-64 rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-ui text-sm text-body focus:border-[var(--accent)] focus:outline-none"
+          >
+            <option value="4096">4096 — light (less VRAM)</option>
+            <option value="8192">8192 — recommended for tools</option>
+            <option value="16384">16384 — long tasks (more VRAM)</option>
+            <option value="32768">32768 — max (needs lots of VRAM)</option>
+          </select>
+        )
+      },
+      {
+        id: 'voice-replies',
+        label: 'Voice Replies',
+        group: 'voice',
+        hint: 'Speak responses aloud',
+        keywords: 'voice speak tts replies speech talk audio',
+        render: () =>
+          toggle(settings.voice.voiceReplies, (v) =>
+            void update({ voice: { ...settings.voice, voiceReplies: v } })
+          )
+      },
+      {
+        id: 'hands-free',
+        label: 'Hands-Free ("Cosmos…")',
+        group: 'voice',
+        hint: 'Always-on wake word listening',
+        keywords: 'voice wake word cosmos hands free always listening mic',
+        render: () =>
+          toggle(settings.voice.handsFree, (v) => void useVoiceStore.getState().setHandsFree(v))
+      },
+      {
+        id: 'voice-language',
+        label: 'Conversation Language',
+        group: 'voice',
+        hint: 'Sets both speech input and replies',
+        keywords: 'voice language english hindi हिंदी conversation speech stt reply unified',
+        render: () => (
+          <select
+            value={lang}
+            onChange={(e) => selectLanguage(e.target.value as VoiceLanguageId)}
+            className="w-64 rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-ui text-sm text-body focus:border-[var(--accent)] focus:outline-none"
+          >
+            {VOICE_LANGUAGES.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.label}
+              </option>
+            ))}
+          </select>
+        )
+      },
+      {
+        id: 'stt-provider',
+        label: 'Speech-to-Text Engine',
+        group: 'voice',
+        keywords:
+          'speech to text stt transcription mic whisper openai groq elevenlabs scribe free source voice input dictation',
+        render: () => (
+          <select
+            value={settings.voice.sttProvider}
+            onChange={(e) =>
+              void update({
+                voice: { ...settings.voice, sttProvider: e.target.value as SttProviderId }
+              })
+            }
+            className="w-64 rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-ui text-sm text-body focus:border-[var(--accent)] focus:outline-none"
+          >
+            {STT_PROVIDERS.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+        )
+      },
+      {
+        id: 'groq-key',
+        label: 'Groq API Key',
+        group: 'voice',
+        keywords: 'groq api key whisper stt speech free source secret',
+        when: settings.voice.sttProvider === 'groq',
+        render: () => (
+          <div className="flex flex-col gap-1.5">
+            {textInput(
+              settings.voice.groqApiKey,
+              (v) => void update({ voice: { ...settings.voice, groqApiKey: v } }),
+              'gsk_…',
+              true
+            )}
+            <button
+              onClick={() =>
+                void window.cosmos.commands.run('open-url', 'https://console.groq.com/keys')
+              }
+              className="self-start font-ui text-[10px] text-dim underline-offset-2 hover:text-body hover:underline"
+            >
+              Get a free Groq API key →
+            </button>
+          </div>
+        )
+      },
+      {
+        id: 'tts-provider',
+        label: 'Voice Engine',
+        group: 'voice',
+        keywords: 'voice tts engine elevenlabs piper windows sapi speech synthesis',
+        render: () => (
+          <select
+            value={settings.voice.ttsProvider}
+            onChange={(e) =>
+              void update({
+                voice: { ...settings.voice, ttsProvider: e.target.value as TtsProviderId }
+              })
+            }
+            className="w-64 rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-ui text-sm text-body focus:border-[var(--accent)] focus:outline-none"
+          >
+            <option value="windows">Windows — built-in (offline)</option>
+            <option value="elevenlabs">ElevenLabs — premium multilingual (API key)</option>
+            <option value="piper">Piper — neural (offline, bundled)</option>
+          </select>
+        )
+      },
+      {
+        id: 'elevenlabs-key',
+        label: 'ElevenLabs API Key',
+        group: 'voice',
+        keywords: 'elevenlabs api key voice tts stt scribe speech secret',
+        // needed for ElevenLabs TTS and/or ElevenLabs speech-to-text
+        when:
+          settings.voice.ttsProvider === 'elevenlabs' ||
+          settings.voice.sttProvider === 'elevenlabs',
+        render: () =>
+          textInput(
+            settings.voice.elevenLabsKey,
+            (v) => void update({ voice: { ...settings.voice, elevenLabsKey: v } }),
+            'xi-… or sk-…',
+            true
+          )
+      },
+      {
+        id: 'elevenlabs-voice',
+        label: 'ElevenLabs Voice',
+        group: 'voice',
+        keywords: 'elevenlabs voice id tts janet multilingual dropdown account',
+        when: settings.voice.ttsProvider === 'elevenlabs',
+        // a dropdown of the account's voices when we could fetch them; a plain
+        // id field otherwise (no/invalid key, offline) so it's never a dead end
+        render: () =>
+          elevenVoices.length > 0 ? (
+            <select
+              value={
+                elevenVoices.some((v) => v.id === settings.voice.elevenLabsVoiceId)
+                  ? settings.voice.elevenLabsVoiceId
+                  : ''
+              }
+              onChange={(e) => setElevenVoiceId(e.target.value)}
+              className="w-64 rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-ui text-sm text-body focus:border-[var(--accent)] focus:outline-none"
+            >
+              {!elevenVoices.some((v) => v.id === settings.voice.elevenLabsVoiceId) && (
+                <option value="">Select a voice…</option>
+              )}
+              {elevenVoices.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.name}
+                  {v.accent ? ` · ${v.accent}` : ''}
+                </option>
+              ))}
+            </select>
+          ) : (
+            textInput(settings.voice.elevenLabsVoiceId, setElevenVoiceId, 'voice id (add key to list)')
+          )
+      },
+      {
+        id: 'elevenlabs-model',
+        label: 'ElevenLabs Model',
+        group: 'voice',
+        keywords: 'elevenlabs model turbo flash multilingual v2 quality latency credits',
+        when: settings.voice.ttsProvider === 'elevenlabs',
+        render: () => (
+          <select
+            value={settings.voice.elevenLabsModel}
+            onChange={(e) => setElevenModel(e.target.value)}
+            className="w-64 rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-ui text-sm text-body focus:border-[var(--accent)] focus:outline-none"
+          >
+            {ELEVEN_MODELS.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+        )
+      },
+      {
+        id: 'piper-voice',
+        label: 'Piper Voice',
+        group: 'voice',
+        keywords: 'piper voice select male female hindi english neural offline bundled hfc pratham priyamvada',
+        when: settings.voice.ttsProvider === 'piper',
+        render: () => (
+          <select
+            value={currentVoice?.id ?? ''}
+            onChange={(e) => selectVoice(e.target.value)}
+            className="w-64 rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-ui text-sm text-body focus:border-[var(--accent)] focus:outline-none"
+          >
+            {voices
+              .filter((v) => v.language === lang)
+              .map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.label}
+                </option>
+              ))}
+          </select>
+        )
+      },
+      {
         id: 'workspace',
         label: 'Agent Workspace',
+        group: 'workspace',
+        hint: 'Where the Studio builds projects',
         keywords: 'workspace project folder studio agent code files directory build',
         render: () => (
           <div className="flex items-center gap-2">
@@ -304,6 +614,8 @@ export function SettingsPanel(): React.JSX.Element {
       {
         id: 'notes-folder',
         label: 'Notes Folder',
+        group: 'workspace',
+        hint: 'Where research & reports are saved',
         keywords: 'notes folder research reports markdown md save location export documents',
         render: () => (
           <div className="flex items-center gap-2">
@@ -331,6 +643,7 @@ export function SettingsPanel(): React.JSX.Element {
       {
         id: 'agent-autorun',
         label: 'Autonomous Builder',
+        group: 'workspace',
         keywords: 'autonomous builder auto run approve agent terminal commands install packages build trust yolo',
         render: () => (
           <div className="flex items-center gap-3">
@@ -344,6 +657,8 @@ export function SettingsPanel(): React.JSX.Element {
       {
         id: 'github',
         label: 'GitHub Account',
+        group: 'workspace',
+        hint: 'Commit, push & clone from the agent',
         keywords: 'github git connect account commit push pull clone token pat repository version control source',
         render: () =>
           ghIdentity ? (
@@ -407,112 +722,10 @@ export function SettingsPanel(): React.JSX.Element {
           )
       },
       {
-        id: 'key-anthropic',
-        label: 'Anthropic API Key',
-        keywords: 'api key anthropic claude secret',
-        render: () =>
-          textInput(
-            settings.apiKeys.anthropic,
-            (v) => void update({ apiKeys: { ...settings.apiKeys, anthropic: v } }),
-            'sk-ant-…',
-            true
-          )
-      },
-      {
-        id: 'key-openai',
-        label: 'OpenAI API Key',
-        keywords: 'api key openai gpt secret',
-        render: () =>
-          textInput(
-            settings.apiKeys.openai,
-            (v) => void update({ apiKeys: { ...settings.apiKeys, openai: v } }),
-            'sk-…',
-            true
-          )
-      },
-      {
-        id: 'key-gemini',
-        label: 'Gemini API Key',
-        keywords: 'api key gemini google secret',
-        render: () =>
-          textInput(
-            settings.apiKeys.gemini,
-            (v) => void update({ apiKeys: { ...settings.apiKeys, gemini: v } }),
-            'AIza…',
-            true
-          )
-      },
-      {
-        id: 'ollama-url',
-        label: 'Ollama URL',
-        keywords: 'ollama local url endpoint',
-        render: () =>
-          textInput(settings.ollamaUrl, (v) => void update({ ollamaUrl: v }), 'http://localhost:11434')
-      },
-      {
-        id: 'ollama-ctx',
-        label: 'Ollama Context (tokens)',
-        keywords: 'ollama context window num_ctx tokens agentic tools memory size',
-        render: () => (
-          <select
-            value={String(settings.ollamaNumCtx)}
-            onChange={(e) => void update({ ollamaNumCtx: Number(e.target.value) })}
-            className="w-64 rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-ui text-sm text-body focus:border-[var(--accent)] focus:outline-none"
-          >
-            <option value="4096">4096 — light (less VRAM)</option>
-            <option value="8192">8192 — recommended for tools</option>
-            <option value="16384">16384 — long tasks (more VRAM)</option>
-            <option value="32768">32768 — max (needs lots of VRAM)</option>
-          </select>
-        )
-      },
-      {
-        id: 'theme',
-        label: 'Theme',
-        keywords: 'theme appearance color blue red purple emerald white',
-        render: () => (
-          <div className="flex gap-2">
-            {(Object.keys(THEMES) as ThemeId[]).map((id) => (
-              <button
-                key={id}
-                title={THEMES[id].label}
-                onClick={() => void update({ theme: id })}
-                className="h-8 w-8 rounded-full border-2 transition-transform hover:scale-110"
-                style={{
-                  background: THEMES[id].tokens.accent,
-                  borderColor:
-                    settings.theme === id ? 'var(--text)' : 'transparent',
-                  boxShadow: settings.theme === id ? `0 0 12px ${THEMES[id].tokens.glow}` : 'none'
-                }}
-              />
-            ))}
-          </div>
-        )
-      },
-      {
-        id: 'sound',
-        label: 'Interface Sounds',
-        keywords: 'sound audio mute volume effects',
-        render: () => (
-          <button
-            onClick={() => {
-              const next = !settings.soundEnabled
-              sound.enabled = next
-              void update({ soundEnabled: next })
-            }}
-            className={`rounded-lg border px-4 py-2 font-ui text-xs font-bold uppercase tracking-widest transition-colors ${
-              settings.soundEnabled
-                ? 'border-[var(--accent-dim)] text-[var(--accent-bright)]'
-                : 'border-white/10 text-dim'
-            }`}
-          >
-            {settings.soundEnabled ? 'Enabled' : 'Muted'}
-          </button>
-        )
-      },
-      {
         id: 'name',
         label: 'Your Name',
+        group: 'personal',
+        hint: 'How COSMOS addresses you',
         keywords: 'name user identity call me',
         render: () =>
           textInput(settings.userName, (v) => void update({ userName: v }), 'How COSMOS addresses you')
@@ -520,6 +733,8 @@ export function SettingsPanel(): React.JSX.Element {
       {
         id: 'personality',
         label: 'Personality',
+        group: 'personal',
+        hint: 'Persona, tone & trait dials',
         keywords:
           'personality persona character girlfriend boyfriend assistant funny sarcastic sassy flirty bestie mentor zen tone mood vibe style attitude sweetheart roleplay voice',
         render: () => {
@@ -544,8 +759,58 @@ export function SettingsPanel(): React.JSX.Element {
         }
       },
       {
+        id: 'theme',
+        label: 'Theme',
+        group: 'personal',
+        hint: 'Accent color across the interface',
+        keywords: 'theme appearance color blue red purple emerald white',
+        render: () => (
+          <div className="flex gap-2">
+            {(Object.keys(THEMES) as ThemeId[]).map((id) => (
+              <button
+                key={id}
+                title={THEMES[id].label}
+                onClick={() => void update({ theme: id })}
+                className="h-8 w-8 rounded-full border-2 transition-transform hover:scale-110"
+                style={{
+                  background: THEMES[id].tokens.accent,
+                  borderColor:
+                    settings.theme === id ? 'var(--text)' : 'transparent',
+                  boxShadow: settings.theme === id ? `0 0 12px ${THEMES[id].tokens.glow}` : 'none'
+                }}
+              />
+            ))}
+          </div>
+        )
+      },
+      {
+        id: 'sound',
+        label: 'Interface Sounds',
+        group: 'personal',
+        hint: 'UI clicks, chimes & feedback',
+        keywords: 'sound audio mute volume effects',
+        render: () => (
+          <button
+            onClick={() => {
+              const next = !settings.soundEnabled
+              sound.enabled = next
+              void update({ soundEnabled: next })
+            }}
+            className={`rounded-lg border px-4 py-2 font-ui text-xs font-bold uppercase tracking-widest transition-colors ${
+              settings.soundEnabled
+                ? 'border-[var(--accent-dim)] text-[var(--accent-bright)]'
+                : 'border-white/10 text-dim'
+            }`}
+          >
+            {settings.soundEnabled ? 'Enabled' : 'Muted'}
+          </button>
+        )
+      },
+      {
         id: 'media-player',
         label: 'Media Playback',
+        group: 'personal',
+        hint: 'How music & video open',
         keywords: 'media music video youtube play browser default dedicated autoplay',
         render: () => (
           <select
@@ -557,195 +822,6 @@ export function SettingsPanel(): React.JSX.Element {
             <option value="default">Default browser — natural look</option>
           </select>
         )
-      },
-      {
-        id: 'voice-replies',
-        label: 'Voice Replies',
-        keywords: 'voice speak tts replies speech talk audio',
-        render: () =>
-          toggle(settings.voice.voiceReplies, (v) =>
-            void update({ voice: { ...settings.voice, voiceReplies: v } })
-          )
-      },
-      {
-        id: 'hands-free',
-        label: 'Hands-Free ("Cosmos…")',
-        keywords: 'voice wake word cosmos hands free always listening mic',
-        render: () =>
-          toggle(settings.voice.handsFree, (v) => void useVoiceStore.getState().setHandsFree(v))
-      },
-      {
-        id: 'voice-language',
-        label: 'Conversation Language',
-        keywords: 'voice language english hindi हिंदी conversation speech stt reply unified',
-        render: () => (
-          <select
-            value={lang}
-            onChange={(e) => selectLanguage(e.target.value as VoiceLanguageId)}
-            className="w-64 rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-ui text-sm text-body focus:border-[var(--accent)] focus:outline-none"
-          >
-            {VOICE_LANGUAGES.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.label}
-              </option>
-            ))}
-          </select>
-        )
-      },
-      {
-        id: 'stt-provider',
-        label: 'Speech-to-Text Engine',
-        keywords:
-          'speech to text stt transcription mic whisper openai groq elevenlabs scribe free source voice input dictation',
-        render: () => (
-          <select
-            value={settings.voice.sttProvider}
-            onChange={(e) =>
-              void update({
-                voice: { ...settings.voice, sttProvider: e.target.value as SttProviderId }
-              })
-            }
-            className="w-64 rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-ui text-sm text-body focus:border-[var(--accent)] focus:outline-none"
-          >
-            {STT_PROVIDERS.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.label}
-              </option>
-            ))}
-          </select>
-        )
-      },
-      {
-        id: 'groq-key',
-        label: 'Groq API Key',
-        keywords: 'groq api key whisper stt speech free source secret',
-        when: settings.voice.sttProvider === 'groq',
-        render: () => (
-          <div className="flex flex-col gap-1.5">
-            {textInput(
-              settings.voice.groqApiKey,
-              (v) => void update({ voice: { ...settings.voice, groqApiKey: v } }),
-              'gsk_…',
-              true
-            )}
-            <button
-              onClick={() =>
-                void window.cosmos.commands.run('open-url', 'https://console.groq.com/keys')
-              }
-              className="self-start font-ui text-[10px] text-dim underline-offset-2 hover:text-body hover:underline"
-            >
-              Get a free Groq API key →
-            </button>
-          </div>
-        )
-      },
-      {
-        id: 'tts-provider',
-        label: 'Voice Engine',
-        keywords: 'voice tts engine elevenlabs piper windows sapi speech synthesis',
-        render: () => (
-          <select
-            value={settings.voice.ttsProvider}
-            onChange={(e) =>
-              void update({
-                voice: { ...settings.voice, ttsProvider: e.target.value as TtsProviderId }
-              })
-            }
-            className="w-64 rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-ui text-sm text-body focus:border-[var(--accent)] focus:outline-none"
-          >
-            <option value="windows">Windows — built-in (offline)</option>
-            <option value="elevenlabs">ElevenLabs — premium multilingual (API key)</option>
-            <option value="piper">Piper — neural (offline, bundled)</option>
-          </select>
-        )
-      },
-      {
-        id: 'elevenlabs-key',
-        label: 'ElevenLabs API Key',
-        keywords: 'elevenlabs api key voice tts stt scribe speech secret',
-        // needed for ElevenLabs TTS and/or ElevenLabs speech-to-text
-        when:
-          settings.voice.ttsProvider === 'elevenlabs' ||
-          settings.voice.sttProvider === 'elevenlabs',
-        render: () =>
-          textInput(
-            settings.voice.elevenLabsKey,
-            (v) => void update({ voice: { ...settings.voice, elevenLabsKey: v } }),
-            'xi-… or sk-…',
-            true
-          )
-      },
-      {
-        id: 'elevenlabs-voice',
-        label: 'ElevenLabs Voice',
-        keywords: 'elevenlabs voice id tts janet multilingual dropdown account',
-        when: settings.voice.ttsProvider === 'elevenlabs',
-        // a dropdown of the account's voices when we could fetch them; a plain
-        // id field otherwise (no/invalid key, offline) so it's never a dead end
-        render: () =>
-          elevenVoices.length > 0 ? (
-            <select
-              value={
-                elevenVoices.some((v) => v.id === settings.voice.elevenLabsVoiceId)
-                  ? settings.voice.elevenLabsVoiceId
-                  : ''
-              }
-              onChange={(e) => setElevenVoiceId(e.target.value)}
-              className="w-64 rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-ui text-sm text-body focus:border-[var(--accent)] focus:outline-none"
-            >
-              {!elevenVoices.some((v) => v.id === settings.voice.elevenLabsVoiceId) && (
-                <option value="">Select a voice…</option>
-              )}
-              {elevenVoices.map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.name}
-                  {v.accent ? ` · ${v.accent}` : ''}
-                </option>
-              ))}
-            </select>
-          ) : (
-            textInput(settings.voice.elevenLabsVoiceId, setElevenVoiceId, 'voice id (add key to list)')
-          )
-      },
-      {
-        id: 'elevenlabs-model',
-        label: 'ElevenLabs Model',
-        keywords: 'elevenlabs model turbo flash multilingual v2 quality latency credits',
-        when: settings.voice.ttsProvider === 'elevenlabs',
-        render: () => (
-          <select
-            value={settings.voice.elevenLabsModel}
-            onChange={(e) => setElevenModel(e.target.value)}
-            className="w-64 rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-ui text-sm text-body focus:border-[var(--accent)] focus:outline-none"
-          >
-            {ELEVEN_MODELS.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label}
-              </option>
-            ))}
-          </select>
-        )
-      },
-      {
-        id: 'piper-voice',
-        label: 'Piper Voice',
-        keywords: 'piper voice select male female hindi english neural offline bundled hfc pratham priyamvada',
-        when: settings.voice.ttsProvider === 'piper',
-        render: () => (
-          <select
-            value={currentVoice?.id ?? ''}
-            onChange={(e) => selectVoice(e.target.value)}
-            className="w-64 rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-ui text-sm text-body focus:border-[var(--accent)] focus:outline-none"
-          >
-            {voices
-              .filter((v) => v.language === lang)
-              .map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.label}
-                </option>
-              ))}
-          </select>
-        )
       }
     ]
     // ollamaModels + customModel + elevenVoices drive their dropdowns; without
@@ -753,11 +829,38 @@ export function SettingsPanel(): React.JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings, update, availableVoiceIds, elevenVoices, ollamaModels, customModel, workspaceRoot, notesFolder, ghIdentity, ghToken, ghBusy, ghError])
 
-  const filtered = rows.filter(
+  const query = search.trim().toLowerCase()
+  const searching = query.length > 0
+
+  // rows visible after the engine-specific `when` gate and the text search
+  const visibleRows = rows.filter(
     (r) =>
       r.when !== false &&
-      (!search.trim() ||
-        `${r.label} ${r.keywords}`.toLowerCase().includes(search.trim().toLowerCase()))
+      (!searching || `${r.label} ${r.keywords}`.toLowerCase().includes(query))
+  )
+
+  // when searching we surface every matching group; otherwise just the one
+  // the user selected in the sidebar
+  const shownGroups = searching
+    ? GROUPS.filter((g) => visibleRows.some((r) => r.group === g.id))
+    : GROUPS.filter((g) => g.id === activeGroup)
+
+  // a live count per group for the sidebar (respects `when` gating)
+  const countFor = (id: GroupId): number => rows.filter((r) => r.group === id && r.when !== false).length
+
+  const renderRow = (row: SettingRow): React.JSX.Element => (
+    <div
+      key={row.id}
+      className="flex items-center justify-between gap-4 border-b border-white/5 px-4 py-3.5 last:border-0"
+    >
+      <div className="min-w-0">
+        <span className="font-ui text-sm font-semibold text-body">{row.label}</span>
+        {row.hint && (
+          <p className="mt-0.5 font-ui text-[11px] leading-tight text-dim">{row.hint}</p>
+        )}
+      </div>
+      <div className="shrink-0">{row.render()}</div>
+    </div>
   )
 
   return (
@@ -778,11 +881,17 @@ export function SettingsPanel(): React.JSX.Element {
             transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
             onClick={(e) => e.stopPropagation()}
           >
-            <Glass brackets className="flex h-[560px] w-[640px] flex-col overflow-hidden">
+            <Glass brackets className="flex h-[600px] w-[820px] flex-col overflow-hidden">
+              {/* header */}
               <div className="flex items-center justify-between border-b border-white/5 px-6 py-4">
-                <h2 className="font-display text-sm font-bold uppercase tracking-[0.3em] text-body">
-                  System Settings
-                </h2>
+                <div>
+                  <h2 className="font-display text-sm font-bold uppercase tracking-[0.3em] text-body">
+                    System Settings
+                  </h2>
+                  <p className="mt-1 font-ui text-[11px] text-dim">
+                    Configure COSMOS — every change saves instantly
+                  </p>
+                </div>
                 <button
                   onClick={() => setPanel('none')}
                   className="rounded-md px-2 py-1 font-mono text-xs text-dim transition-colors hover:bg-white/5 hover:text-body"
@@ -790,27 +899,85 @@ export function SettingsPanel(): React.JSX.Element {
                   ESC
                 </button>
               </div>
-              <div className="border-b border-white/5 px-6 py-3">
-                <input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search settings…"
-                  className="w-full bg-transparent font-ui text-sm text-body placeholder:text-dim focus:outline-none"
-                />
-              </div>
-              <div className="smooth-scroll flex-1 overflow-y-auto px-6 py-2">
-                {filtered.map((row) => (
-                  <div
-                    key={row.id}
-                    className="flex items-center justify-between border-b border-white/5 py-4 last:border-0"
-                  >
-                    <span className="font-ui text-sm font-semibold text-body">{row.label}</span>
-                    {row.render()}
+
+              {/* body: sidebar + content */}
+              <div className="flex min-h-0 flex-1">
+                {/* sidebar nav */}
+                <nav className="flex w-56 shrink-0 flex-col gap-1 border-r border-white/5 p-3">
+                  {GROUPS.map((g) => {
+                    const active = !searching && g.id === activeGroup
+                    return (
+                      <button
+                        key={g.id}
+                        onClick={() => {
+                          setSearch('')
+                          setActiveGroup(g.id)
+                        }}
+                        className={`group flex items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors ${
+                          active
+                            ? 'border-[var(--accent-dim)] bg-[var(--accent)]/10'
+                            : 'border-transparent hover:bg-white/5'
+                        }`}
+                      >
+                        <span
+                          className={`text-base leading-none transition-colors ${
+                            active ? 'text-[var(--accent-bright)]' : 'text-dim group-hover:text-body'
+                          }`}
+                        >
+                          {g.icon}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span
+                            className={`block truncate font-ui text-xs font-bold uppercase tracking-widest ${
+                              active ? 'text-[var(--accent-bright)]' : 'text-body'
+                            }`}
+                          >
+                            {g.label}
+                          </span>
+                        </span>
+                        <span className="font-mono text-[10px] text-dim">{countFor(g.id)}</span>
+                      </button>
+                    )
+                  })}
+
+                  <div className="mt-auto px-1 pt-3">
+                    <input
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      placeholder="Search settings…"
+                      className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-ui text-xs text-body placeholder:text-dim focus:border-[var(--accent)] focus:outline-none"
+                    />
                   </div>
-                ))}
-                {filtered.length === 0 && (
-                  <p className="py-8 text-center font-ui text-sm text-dim">No settings match</p>
-                )}
+                </nav>
+
+                {/* content */}
+                <div className="smooth-scroll min-w-0 flex-1 overflow-y-auto px-6 py-5">
+                  {shownGroups.map((g) => {
+                    const groupRows = visibleRows.filter((r) => r.group === g.id)
+                    if (groupRows.length === 0) return null
+                    return (
+                      <section key={g.id} className="mb-6 last:mb-0">
+                        <div className="mb-3 flex items-baseline gap-3">
+                          <span className="text-base text-[var(--accent-bright)]">{g.icon}</span>
+                          <div>
+                            <h3 className="font-display text-xs font-bold uppercase tracking-[0.25em] text-body">
+                              {g.label}
+                            </h3>
+                            <p className="mt-0.5 font-ui text-[11px] text-dim">{g.desc}</p>
+                          </div>
+                        </div>
+                        <div className="rounded-2xl border border-white/5 bg-white/[0.02]">
+                          {groupRows.map(renderRow)}
+                        </div>
+                      </section>
+                    )
+                  })}
+                  {visibleRows.length === 0 && (
+                    <p className="py-16 text-center font-ui text-sm text-dim">
+                      No settings match “{search.trim()}”
+                    </p>
+                  )}
+                </div>
               </div>
             </Glass>
           </motion.div>

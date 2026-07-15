@@ -545,3 +545,84 @@ export interface InstalledApp {
   /** PNG data URL extracted from the shortcut, when resolvable */
   icon?: string
 }
+
+// ── System Cleaner ───────────────────────────────────────────────
+// A CCleaner/CleanMaster-grade maintenance surface. Everything here is
+// backed by CleanerService (main) and mirrored to the agent as tools, so
+// the panel and the assistant drive one safe engine.
+
+/** A category of removable junk located by a cleaner scan (never deleted yet). */
+export interface JunkCategory {
+  /** stable id used when requesting a clean (e.g. "temp-user") */
+  id: string
+  label: string
+  /** one-line description of what this clears */
+  hint: string
+  /** reclaimable bytes found in this category */
+  bytes: number
+  /** number of files/items */
+  count: number
+  /** ticked by default — every scanned category is a known-safe cache */
+  recommended: boolean
+}
+
+/** The outcome of a read-only cleaner scan. */
+export interface CleanScanResult {
+  categories: JunkCategory[]
+  totalBytes: number
+  /** ISO timestamp the scan completed */
+  scannedAt: string
+}
+
+/** The outcome of running a clean over selected categories. */
+export interface CleanResult {
+  freedBytes: number
+  items: { id: string; label: string; freedBytes: number }[]
+  /** number of Recycle Bin items removed, when the bin was included (else -1) */
+  recycleBinItems: number
+}
+
+/** A large (and possibly stale) file surfaced for the user's review. */
+export interface LargeFile {
+  path: string
+  name: string
+  bytes: number
+  /** last-modified ISO */
+  modified: string
+  /** last-accessed ISO */
+  accessed: string
+  /** lowercase extension without the dot, e.g. "mp4" */
+  ext: string
+  /** whole days since the file was last accessed */
+  idleDays: number
+}
+
+/** Per-drive disk usage, for the cleaner's capacity gauges. */
+export interface DriveUsage {
+  /** e.g. "C:" */
+  drive: string
+  label: string
+  freeBytes: number
+  totalBytes: number
+}
+
+/** An installed program read from the Windows uninstall registry. */
+export interface InstalledProgram {
+  /** stable key (the registry sub-key name) used to target an uninstall */
+  id: string
+  name: string
+  publisher: string
+  version: string
+  /** estimated install size in bytes (0 when Windows doesn't record it) */
+  bytes: number
+  /** ISO install date, when known */
+  installedOn: string
+  /** whether a usable uninstall command exists */
+  uninstallable: boolean
+}
+
+/** Result of a destructive cleaner action (uninstall / delete). */
+export interface CleanerActionResult {
+  ok: boolean
+  message: string
+}

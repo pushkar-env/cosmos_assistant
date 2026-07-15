@@ -64,6 +64,13 @@ export function StatusBar(): React.JSX.Element {
           ⌨
         </button>
         <button
+          onClick={() => setPanel('cleaner')}
+          className="rounded-md px-2.5 py-1 font-mono text-xs text-dim transition-colors hover:bg-white/5 hover:text-body"
+          title="System Cleaner — scan, optimize & free space"
+        >
+          ✦
+        </button>
+        <button
           onClick={() => toggleCenter()}
           className="relative rounded-md px-2.5 py-1 font-mono text-xs text-dim transition-colors hover:bg-white/5 hover:text-body"
           title="Notifications"

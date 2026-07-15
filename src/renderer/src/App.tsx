@@ -23,6 +23,7 @@ import { WorkspacePanel } from '@/features/workspace/WorkspacePanel'
 import { StudioPanel } from '@/features/studio/StudioPanel'
 import { AppCenterPanel } from '@/features/appcenter/AppCenterPanel'
 import { PersonalityPanel } from '@/features/personality/PersonalityPanel'
+import { CleanerPanel } from '@/features/cleaner/CleanerPanel'
 import { Toasts } from '@/features/notifications/Toasts'
 import { NotificationCenter } from '@/features/notifications/NotificationCenter'
 import { MiniView } from '@/features/compact/MiniView'
@@ -147,6 +148,7 @@ export default function App(): React.JSX.Element {
           <StudioPanel />
           <AppCenterPanel />
           <PersonalityPanel />
+          <CleanerPanel />
           <NotificationCenter />
           <Toasts />
         </motion.main>

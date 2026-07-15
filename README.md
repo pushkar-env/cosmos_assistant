@@ -288,6 +288,7 @@ src/
 
 | Doc | What's inside |
 |:--|:--|
+| [**Developer Guide**](docs/developer-guide/README.md) | **New here? Start here.** Code-grounded, module-by-module walkthrough of every process, service, tool, store, and subsystem — with how-to recipes for extending COSMOS |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Process model, folder structure, IPC contracts, provider abstraction |
 | [DESIGN_SYSTEM.md](docs/DESIGN_SYSTEM.md) | Design tokens, glass recipe, motion language, orb states, sound design |
 | [ROADMAP.md](docs/ROADMAP.md) | All 7 shipped phases + the post-roadmap backlog |

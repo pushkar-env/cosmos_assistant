@@ -27,6 +27,7 @@ import type { WorkspaceService } from './services/WorkspaceService'
 import type { PreviewServer } from './services/PreviewServer'
 import type { GitService } from './services/GitService'
 import type { NotesExportService } from './services/NotesExportService'
+import type { CleanerService } from './services/CleanerService'
 
 interface WindowController {
   setMode: (mode: WindowMode) => void
@@ -51,6 +52,7 @@ interface Services {
   preview: PreviewServer
   git: GitService
   notesExport: NotesExportService
+  cleaner: CleanerService
   window: WindowController
 }
 
@@ -230,6 +232,22 @@ export function registerIpc(getWindow: () => BrowserWindow | null, services: Ser
   ipcMain.handle(IPC.APPS_LAUNCH, (_e, app: InstalledApp) =>
     services.commands.launcher.launchEntry(app)
   )
+
+  // ── system cleaner ──
+  ipcMain.handle(IPC.CLEANER_SCAN, () => services.cleaner.scan())
+  ipcMain.handle(IPC.CLEANER_CLEAN, (_e, categoryIds: string[]) =>
+    services.cleaner.clean(categoryIds)
+  )
+  ipcMain.handle(IPC.CLEANER_LARGE_FILES, (_e, minSizeMB?: number, maxResults?: number) =>
+    services.cleaner.findLargeFiles(minSizeMB, maxResults)
+  )
+  ipcMain.handle(IPC.CLEANER_DISK_USAGE, () => services.cleaner.diskUsage())
+  ipcMain.handle(IPC.CLEANER_PROGRAMS, () => services.cleaner.listPrograms())
+  ipcMain.handle(IPC.CLEANER_UNINSTALL, (_e, id: string) => services.cleaner.uninstall(id))
+  ipcMain.handle(IPC.CLEANER_DELETE, (_e, paths: string[], permanent?: boolean) =>
+    services.cleaner.deletePaths(paths, permanent)
+  )
+  ipcMain.handle(IPC.CLEANER_REVEAL, (_e, target: string) => services.cleaner.reveal(target))
 
   ipcMain.handle(IPC.WINDOW_SET_MODE, (_e, mode: WindowMode) => services.window.setMode(mode))
 

@@ -10,6 +10,7 @@ import { creatorTools } from './creatorTools'
 import { codingTools } from './codingTools'
 import { gitTools } from './gitTools'
 import { secretsTools } from './secretsTools'
+import { cleanerTools } from './cleanerTools'
 import type { SystemStatsService } from '../SystemStatsService'
 import type { CommandService } from '../CommandService'
 import type { MemoryService } from '../MemoryService'
@@ -22,6 +23,7 @@ import type { MediaService } from '../MediaService'
 import type { WorkspaceService } from '../WorkspaceService'
 import type { GitService } from '../GitService'
 import type { SecretsService } from '../SecretsService'
+import type { CleanerService } from '../CleanerService'
 
 export interface RegistryDeps {
   stats: SystemStatsService
@@ -36,6 +38,7 @@ export interface RegistryDeps {
   workspace: WorkspaceService
   git: GitService
   secrets: SecretsService
+  cleaner: CleanerService
 }
 
 /** runtime context a tool may need (delegate spawns sub-agents with it) */
@@ -82,6 +85,8 @@ export const LOCAL_CHAT_TOOLS = [
   'sound', 'brightness', 'wifi', 'bluetooth', 'power', 'system_stats', 'get_time',
   'system_cleanup', 'recycle_bin_empty', 'screenshot', 'clipboard_read', 'clipboard_write',
   'terminal_run',
+  // system cleaner: scan/optimize, storage, and app removal (read-only ones + uninstall)
+  'cleaner_scan', 'find_large_files', 'disk_usage', 'list_programs', 'uninstall_app',
   // files · light building (create/preview a script or page without agent mode)
   'fs_list', 'fs_read', 'fs_write', 'fs_mkdir', 'fs_move', 'fs_delete', 'fs_search',
   'read_file', 'run_command',
@@ -117,7 +122,8 @@ export class ToolRegistry {
       ...creatorTools(deps),
       ...codingTools(deps.workspace),
       ...gitTools(deps.git),
-      ...secretsTools(deps.secrets)
+      ...secretsTools(deps.secrets),
+      ...cleanerTools(deps.cleaner)
     ]) {
       this.specs.set(spec.def.name, spec)
     }

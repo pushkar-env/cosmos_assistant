@@ -12,13 +12,19 @@ import type {
   AuditEntry,
   ChatMessage,
   ChatRequest,
+  CleanResult,
+  CleanScanResult,
+  CleanerActionResult,
   CommandResult,
   ConversationMeta,
+  DriveUsage,
   ElevenVoice,
   FileNode,
   GitStatus,
   GithubIdentity,
   InstalledApp,
+  InstalledProgram,
+  LargeFile,
   MemoryCategory,
   MemoryItem,
   Note,
@@ -142,6 +148,23 @@ export const cosmosApi = {
       ipcRenderer.invoke(IPC.APPS_LIST, refresh),
     launch: (app: InstalledApp): Promise<CommandResult> =>
       ipcRenderer.invoke(IPC.APPS_LAUNCH, app)
+  },
+  cleaner: {
+    scan: (): Promise<CleanScanResult> => ipcRenderer.invoke(IPC.CLEANER_SCAN),
+    clean: (categoryIds: string[]): Promise<CleanResult> =>
+      ipcRenderer.invoke(IPC.CLEANER_CLEAN, categoryIds),
+    largeFiles: (minSizeMB?: number, maxResults?: number): Promise<LargeFile[]> =>
+      ipcRenderer.invoke(IPC.CLEANER_LARGE_FILES, minSizeMB, maxResults),
+    diskUsage: (): Promise<DriveUsage[]> => ipcRenderer.invoke(IPC.CLEANER_DISK_USAGE),
+    programs: (): Promise<InstalledProgram[]> => ipcRenderer.invoke(IPC.CLEANER_PROGRAMS),
+    uninstall: (id: string): Promise<CleanerActionResult> =>
+      ipcRenderer.invoke(IPC.CLEANER_UNINSTALL, id),
+    delete: (
+      paths: string[],
+      permanent?: boolean
+    ): Promise<{ path: string; ok: boolean; message: string }[]> =>
+      ipcRenderer.invoke(IPC.CLEANER_DELETE, paths, permanent),
+    reveal: (target: string): Promise<void> => ipcRenderer.invoke(IPC.CLEANER_REVEAL, target)
   },
   workspace: {
     getRoot: (): Promise<string> => ipcRenderer.invoke(IPC.WORKSPACE_GET),

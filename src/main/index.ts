@@ -36,6 +36,7 @@ import { WorkspaceService } from './services/WorkspaceService'
 import { PreviewServer } from './services/PreviewServer'
 import { GitService } from './services/GitService'
 import { NotesExportService } from './services/NotesExportService'
+import { CleanerService } from './services/CleanerService'
 
 // Pin a stable identity BEFORE any service reads app.getPath('userData').
 // This guarantees `npm run dev` and the installed .exe share one profile
@@ -84,6 +85,7 @@ const media = new MediaService(browser, settings)
 const workspace = new WorkspaceService(settings)
 const preview = new PreviewServer(workspace)
 const git = new GitService(settings, workspace)
+const cleaner = new CleanerService()
 const tools = new ToolRegistry({
   stats,
   commands,
@@ -96,7 +98,8 @@ const tools = new ToolRegistry({
   media,
   workspace,
   git,
-  secrets
+  secrets,
+  cleaner
 })
 const ai = new AIService(settings, tools, memory, workspace)
 const stt = new SttService(settings)
@@ -400,6 +403,7 @@ if (!gotLock) {
       preview,
       git,
       notesExport,
+      cleaner,
       window: {
         setMode: setWindowMode,
         show: showMainWindow,

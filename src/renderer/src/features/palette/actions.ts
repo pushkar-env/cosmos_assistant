@@ -197,6 +197,19 @@ export function buildActions(): Action[] {
       run: () => useUIStore.getState().setPanel('secrets')
     },
     {
+      id: 'open-cleaner',
+      title: 'Open System Cleaner',
+      subtitle: 'Scan, optimize, free space & uninstall apps',
+      keywords: [
+        'cleaner', 'clean', 'cleanup', 'optimize', 'optimise', 'speed up', 'boost',
+        'junk', 'temp', 'cache', 'free space', 'storage', 'disk', 'large files',
+        'uninstall', 'remove app', 'ccleaner', 'clean master', 'saaf', 'साफ', 'क्लीन',
+        'स्टोरेज', 'ऑप्टिमाइज़'
+      ],
+      section: 'system',
+      run: () => useUIStore.getState().setPanel('cleaner')
+    },
+    {
       id: 'open-dashboard',
       title: 'Open Dashboard',
       keywords: ['dashboard', 'overview', 'stats', 'today', 'home'],
