@@ -8,8 +8,6 @@ A cinematic, voice-first AI operating layer for Windows — a living, shader-dri
 AI core, a holographic HUD, real system control, and a team of AI agents at your command.
 
 <br />
-
-![Status](https://img.shields.io/badge/roadmap-7%2F7_phases_complete-2dd4a7?style=for-the-badge)
 ![Platform](https://img.shields.io/badge/platform-Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-a78bfa?style=for-the-badge)
 
@@ -291,7 +289,6 @@ src/
 | [**Developer Guide**](docs/developer-guide/README.md) | **New here? Start here.** Code-grounded, module-by-module walkthrough of every process, service, tool, store, and subsystem — with how-to recipes for extending COSMOS |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Process model, folder structure, IPC contracts, provider abstraction |
 | [DESIGN_SYSTEM.md](docs/DESIGN_SYSTEM.md) | Design tokens, glass recipe, motion language, orb states, sound design |
-| [ROADMAP.md](docs/ROADMAP.md) | All 7 shipped phases + the post-roadmap backlog |
 | [PLUGINS.md](docs/PLUGINS.md) | Plugin format & examples |
 
 ---
