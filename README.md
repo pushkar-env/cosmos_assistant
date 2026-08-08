@@ -10,6 +10,7 @@ AI core, a holographic HUD, real system control, and a team of AI agents at your
 <br />
 
 ![Platform](https://img.shields.io/badge/platform-Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)
+[![YouTube](https://img.shields.io/badge/YouTube-FF0000?style=for-the-badge&logo=youtube&logoColor=white)](https://youtu.be/zqLrKv6ejxQ)
 ![License](https://img.shields.io/badge/license-MIT-a78bfa?style=for-the-badge)
 
 ![Electron](https://img.shields.io/badge/Electron-2B2E3A?style=flat&logo=electron&logoColor=9FEAF9)
