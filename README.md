@@ -8,6 +8,7 @@ A cinematic, voice-first AI operating layer for Windows — a living, shader-dri
 AI core, a holographic HUD, real system control, and a team of AI agents at your command.
 
 <br />
+
 ![Platform](https://img.shields.io/badge/platform-Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-a78bfa?style=for-the-badge)
 
