@@ -1,12 +1,13 @@
-import { useMemo, useRef } from 'react'
-import { Canvas, useFrame } from '@react-three/fiber'
+import { useEffect, useMemo, useRef } from 'react'
+import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 import { useAssistantStore } from '@/core/stores/useAssistantStore'
 import { useSettingsStore } from '@/core/stores/useSettingsStore'
+import { useUIStore } from '@/core/stores/useUIStore'
 import { useVoiceStore } from '@/features/voice/useVoiceStore'
 import { voiceSignal } from '@/core/voice/voiceSignal'
 import { THEMES } from '@/core/theme/themes'
-import { LERP_RATE, ORB_STATES, type OrbParams } from './orbConfig'
+import { LERP_RATE, ORB_FPS, ORB_STATES, type OrbParams } from './orbConfig'
 import {
   CORE_FRAGMENT,
   CORE_VERTEX,
@@ -322,10 +323,53 @@ function OrbRig(): React.JSX.Element {
   )
 }
 
-/** The AI Core canvas — mounted once, always animating. */
+/**
+ * Drives the scene at a fixed rate instead of once per vsync (see ORB_FPS), and
+ * parks it entirely when `fps` is null. The canvas runs `frameloop="never"` and
+ * every frame comes from here.
+ */
+function FrameDriver({ fps }: { fps: number | null }): null {
+  const advance = useThree((s) => s.advance)
+  /** seconds of *driven* time — survives a pause, so returning from the tray
+   *  resumes the animation where it left off instead of teleporting it */
+  const clock = useRef(0)
+
+  useEffect(() => {
+    if (fps == null) return
+    let raf = 0
+    let prev = performance.now()
+    let acc = 0
+    const step = 1000 / fps
+
+    const loop = (now: number): void => {
+      raf = requestAnimationFrame(loop)
+      const dt = now - prev
+      prev = now
+      clock.current += dt / 1000
+      acc += dt
+      if (acc < step) return
+      // carry at most one frame of debt, so a stall can't burst-render
+      acc = Math.min(acc - step, step)
+      // r3f advances its clock in SECONDS under frameloop="never"
+      advance(clock.current)
+    }
+
+    raf = requestAnimationFrame(loop)
+    return () => cancelAnimationFrame(raf)
+  }, [advance, fps])
+
+  return null
+}
+
+/** The AI Core canvas — mounted once, animating whenever it can be seen. */
 export function OrbScene(): React.JSX.Element {
+  // Hidden to tray / minimised, the scene renders for nobody. Chromium will not
+  // throttle it for us (backgroundThrottling is off so voice survives the tray),
+  // so park the render loop explicitly and resume it untouched on the way back.
+  const visible = useUIStore((s) => s.windowVisible)
   return (
     <Canvas
+      frameloop="never"
       camera={{ position: [0, 0, 6], fov: 42 }}
       dpr={[1, 1.75]}
       gl={{ antialias: true, alpha: true, powerPreference: 'high-performance' }}
@@ -337,6 +381,7 @@ export function OrbScene(): React.JSX.Element {
         pointerSignal.inside = false
       }}
     >
+      <FrameDriver fps={visible ? ORB_FPS : null} />
       <OrbRig />
     </Canvas>
   )

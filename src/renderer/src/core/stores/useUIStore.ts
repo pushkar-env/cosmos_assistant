@@ -19,6 +19,8 @@ interface UIState {
   paletteOpen: boolean
   activePanel: Panel
   mode: WindowMode
+  /** false while the window is hidden to tray or minimised — visual loops park */
+  windowVisible: boolean
   init: () => void
   finishBoot: () => void
   togglePalette: (open?: boolean) => void
@@ -36,12 +38,18 @@ export const useUIStore = create<UIState>((set, get) => ({
   paletteOpen: false,
   activePanel: 'none',
   mode: 'full',
+  windowVisible: true,
 
   init: () => {
     if (initialized) return
     initialized = true
     // main can change the mode too (tray, shortcuts) — mirror it
     window.cosmos.app.onModeChanged((mode) => set({ mode }))
+    // Chromium will not throttle us (backgroundThrottling is off, so voice
+    // survives the tray), so main tells us when nobody can see the window and
+    // the animation loops should stand down.
+    window.cosmos.app.onWindowHidden(() => set({ windowVisible: false }))
+    window.cosmos.app.onWindowShown(() => set({ windowVisible: true }))
   },
 
   finishBoot: () => set({ phase: 'main' }),

@@ -192,6 +192,15 @@ body {
   transform: scale(1.15);
 }
 
+/* Hidden to tray / minimised: hold the ambient loops where they are. Chromium
+   does not throttle this window for us (backgroundThrottling is off so the
+   voice pipeline survives the tray), so an un-paused conic-gradient blur would
+   keep repainting for an audience of nobody. */
+.app-hidden .scanline,
+.app-hidden .orb-aura {
+  animation-play-state: paused;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .scanline,
   .orb-aura {

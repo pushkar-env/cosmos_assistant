@@ -74,3 +74,14 @@ export const ORB_STATES: Record<AssistantState, OrbParams> = {
 // plain crossfade so the orb settles cleanly the moment a reply finishes
 // (no lingering high-energy state), while still easing rather than snapping.
 export const LERP_RATE = 2.5
+
+/*
+ * Render rate for the core. On a 144/240Hz display an uncapped rAF loop draws
+ * the orb two to four times more often than 60Hz for no visible gain — nothing
+ * in the scene moves fast enough to resolve it, and the fbm shaders are not
+ * cheap. Every phase in the rig is integrated against the real frame delta, so
+ * pacing the loop changes the cost and nothing else: same motion, same speed.
+ * On a 60Hz display this is a no-op. The rest of the UI still composites at the
+ * panel's native refresh rate — this bounds the WebGL scene only.
+ */
+export const ORB_FPS = 60

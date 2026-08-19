@@ -34,6 +34,7 @@ import { personaGreeting } from '@shared/personality'
 export default function App(): React.JSX.Element {
   const phase = useUIStore((s) => s.phase)
   const mode = useUIStore((s) => s.mode)
+  const windowVisible = useUIStore((s) => s.windowVisible)
   const togglePalette = useUIStore((s) => s.togglePalette)
 
   useEffect(() => {
@@ -106,7 +107,12 @@ export default function App(): React.JSX.Element {
   const rootBg = mode === 'orb' ? 'transparent' : 'var(--bg)'
 
   return (
-    <div className="relative h-full w-full overflow-hidden" style={{ background: rootBg }}>
+    <div
+      // `app-hidden` freezes the ambient CSS animations while the window is in
+      // the tray — Chromium keeps them running otherwise (see useUIStore.init)
+      className={`relative h-full w-full overflow-hidden${windowVisible ? '' : ' app-hidden'}`}
+      style={{ background: rootBg }}
+    >
       <AnimatePresence>{phase === 'boot' && <BootSequence key="boot" />}</AnimatePresence>
 
       {phase === 'main' && mode === 'orb' && <OrbWidget />}

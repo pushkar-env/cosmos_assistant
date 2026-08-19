@@ -222,6 +222,8 @@ export const cosmosApi = {
       subscribe(IPC.WINDOW_MODE_CHANGED, cb),
     // window returned from minimize / hidden (for re-arming hands-free)
     onWindowShown: (cb: () => void): Unsubscribe => subscribe(IPC.WINDOW_SHOWN, cb),
+    // window went to the tray / was minimised (for parking the render loops)
+    onWindowHidden: (cb: () => void): Unsubscribe => subscribe(IPC.WINDOW_HIDDEN, cb),
     quit: (): Promise<void> => ipcRenderer.invoke(IPC.APP_QUIT),
     // tray asked the renderer to toggle hands-free
     onHandsFreeToggle: (cb: () => void): Unsubscribe => subscribe(IPC.HANDSFREE_TOGGLE, cb),

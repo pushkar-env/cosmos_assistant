@@ -12,6 +12,8 @@ export const IPC = {
   PALETTE_TOGGLE: 'app:palette-toggle',
   /** window came back from minimize/hidden → renderer re-arms the mic */
   WINDOW_SHOWN: 'app:window-shown',
+  /** window went to the tray / was minimised → renderer parks its render loops */
+  WINDOW_HIDDEN: 'app:window-hidden',
   /** workspace files changed on disk (watcher) → renderer refreshes the tree */
   FILES_CHANGED: 'files:changed',
   /** a streamed chunk from the integrated terminal */

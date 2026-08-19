@@ -156,9 +156,22 @@ function createWindow(): void {
   // suspended audio capture never recovers without a manual mic toggle.
   const notifyShown = (): void => {
     if (!mainWindow?.isDestroyed()) mainWindow?.webContents.send(IPC.WINDOW_SHOWN)
+    stats.resume()
   }
   mainWindow.on('restore', notifyShown)
   mainWindow.on('show', notifyShown)
+
+  // The mirror of the above. backgroundThrottling is off so Chromium keeps
+  // running rAF and CSS animations at full rate for a window nobody can see —
+  // the orb would happily render 60fps from the tray. Tell the renderer to park
+  // its visual loops, and stop polling hardware telemetry for a hidden HUD.
+  // Audio/voice is untouched: it does not depend on either signal.
+  const notifyHidden = (): void => {
+    if (!mainWindow?.isDestroyed()) mainWindow?.webContents.send(IPC.WINDOW_HIDDEN)
+    stats.pause()
+  }
+  mainWindow.on('hide', notifyHidden)
+  mainWindow.on('minimize', notifyHidden)
 
   // external links open in the OS browser, never inside the shell
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
