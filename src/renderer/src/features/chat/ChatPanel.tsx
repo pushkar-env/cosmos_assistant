@@ -317,6 +317,14 @@ export function ChatPanel(): React.JSX.Element {
               }`}
             >
               {voiceError ?? 'Hands-free active — say "Cosmos…"'}
+              {voiceError?.startsWith('Microphone access is blocked.') && (
+                <button
+                  className="ml-2 underline hover:text-white"
+                  onClick={() => void window.cosmos.voice.openMicrophoneSettings().catch(() => {})}
+                >
+                  Open microphone settings
+                </button>
+              )}
             </p>
           )}
           {attachments.length > 0 && (

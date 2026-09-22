@@ -264,6 +264,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null, services: Ser
     services.stt.transcribe(audio, mime)
   )
 
+  ipcMain.handle(IPC.MICROPHONE_SETTINGS, async (event) => {
+    const win = getWindow()
+    if (!win || event.sender !== win.webContents || event.senderFrame !== win.webContents.mainFrame) return
+    if (process.platform === 'win32') await shell.openExternal('ms-settings:privacy-microphone')
+  })
+
   ipcMain.handle(IPC.TTS_SYNTHESIZE, (_e, text: string) => services.tts.synthesize(text))
 
   ipcMain.handle(IPC.VOICE_LIST_AVAILABLE, () => services.tts.availableVoiceIds())

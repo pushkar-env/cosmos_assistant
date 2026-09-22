@@ -58,6 +58,7 @@ export const IPC = {
   COMMAND_RUN: 'command:run',
   WINDOW_CONTROL: 'window:control',
   STT_TRANSCRIBE: 'voice:transcribe',
+  MICROPHONE_SETTINGS: 'voice:microphone-settings',
   TTS_SYNTHESIZE: 'voice:synthesize',
   VOICE_LIST_AVAILABLE: 'voice:list-available',
   ELEVEN_LIST_VOICES: 'voice:eleven-list-voices',

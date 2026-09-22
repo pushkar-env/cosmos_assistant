@@ -122,6 +122,7 @@ export const cosmosApi = {
       ipcRenderer.invoke(IPC.COMMAND_RUN, id, arg)
   },
   voice: {
+    openMicrophoneSettings: (): Promise<void> => ipcRenderer.invoke(IPC.MICROPHONE_SETTINGS),
     transcribe: (audio: ArrayBuffer, mime: string): Promise<TranscriptionResult> =>
       ipcRenderer.invoke(IPC.STT_TRANSCRIBE, audio, mime),
     synthesize: (text: string): Promise<SynthesisResult> =>

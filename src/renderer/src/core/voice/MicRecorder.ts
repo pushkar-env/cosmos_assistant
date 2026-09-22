@@ -1,4 +1,5 @@
 import { voiceSignal, spectralPitch } from './voiceSignal'
+import { microphoneError } from './microphoneError'
 
 export interface SegmentHandlers {
   /** a complete speech segment was captured. `duringSpeech` is true when the
@@ -88,8 +89,9 @@ export class MicRecorder {
       this.stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
       })
-    } catch {
-      handlers.onError(new Error('Microphone access denied or no microphone found'))
+    } catch (cause) {
+      console.error('[voice] Microphone capture failed:', cause)
+      handlers.onError(microphoneError(cause))
       return
     }
 

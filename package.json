@@ -1,7 +1,7 @@
 {
   "name": "cosmos",
   "productName": "COSMOS",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A cinematic, voice-first desktop AI assistant.",
   "main": "./out/main/index.js",
   "author": "Cosmos AI",
@@ -16,7 +16,7 @@
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "setup:piper": "node scripts/fetch-piper.mjs",
     "predist": "node scripts/fetch-piper.mjs",
-    "dist": "electron-vite build && electron-builder --win"
+    "dist": "electron-vite build && node scripts/build-windows.cjs"
   },
   "dependencies": {
     "@codemirror/commands": "^6.10.4",
