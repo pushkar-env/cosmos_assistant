@@ -225,6 +225,9 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
  */
 export type MediaPlayerMode = 'dedicated' | 'default'
 
+/** what sits at the heart of the main view: Nova (the 3D anime avatar) or the shader orb */
+export type CoreVisual = 'avatar' | 'orb'
+
 /** A connected GitHub account. The token is stored encrypted at rest. */
 export interface GithubSettings {
   /** Personal Access Token — encrypted on disk (safeStorage) */
@@ -286,6 +289,8 @@ export interface Settings {
   ollamaNumCtx: number
   theme: ThemeId
   soundEnabled: boolean
+  /** the centrepiece of the main view — the avatar or the classic orb */
+  coreVisual: CoreVisual
   userName: string
   location: { lat: number | null; lon: number | null; label: string }
   voice: VoiceSettings
@@ -495,6 +500,7 @@ export const DEFAULT_SETTINGS: Settings = {
   ollamaNumCtx: 8192,
   theme: 'cyber-blue',
   soundEnabled: true,
+  coreVisual: 'avatar',
   userName: '',
   location: { lat: null, lon: null, label: '' },
   voice: DEFAULT_VOICE_SETTINGS,

@@ -49,6 +49,9 @@ try {
 } catch {
   /* appData unavailable this early on some platforms; default is fine */
 }
+// unpackaged runs only: point at a throwaway profile (automated UI checks,
+// experiments) without touching the real settings, keys or history
+if (!app.isPackaged && process.env.COSMOS_USER_DATA) app.setPath('userData', process.env.COSMOS_USER_DATA)
 
 // dev only: expose CDP so tooling can inspect the running renderer
 if (!app.isPackaged) app.commandLine.appendSwitch('remote-debugging-port', '9223')

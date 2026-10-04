@@ -10,7 +10,7 @@ import { useAgentStore } from '@/features/agents/useAgentStore'
 import { AgentRing } from '@/features/agents/AgentRing'
 import { sound } from '@/core/sound/SoundEngine'
 import { BootSequence } from '@/features/boot/BootSequence'
-import { OrbScene } from '@/features/orb/OrbScene'
+import { CoreStage } from '@/features/avatar/CoreStage'
 import { HudLayer } from '@/features/hud/HudLayer'
 import { StatusBar } from '@/features/hud/StatusBar'
 import { ChatPanel } from '@/features/chat/ChatPanel'
@@ -136,9 +136,9 @@ export default function App(): React.JSX.Element {
           />
           <div className="orb-aura pointer-events-none absolute left-1/2 top-1/2 h-[520px] w-[520px] -translate-x-1/2 -translate-y-1/2 rounded-full" />
 
-          {/* the AI core */}
+          {/* the AI core — Nova (avatar) or the orb, per Settings */}
           <div className="absolute inset-0">
-            <OrbScene />
+            <CoreStage />
           </div>
 
           <StatusBar />

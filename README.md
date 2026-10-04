@@ -32,9 +32,11 @@ AI core, a holographic HUD, real system control, and a team of AI agents at your
 ## ✨ What is COSMOS?
 
 COSMOS is **not a chatbot in a window**. It's a full AI experience: launch it and a
-cinematic boot sequence reveals a **living AI core** — a custom GLSL orb wrapped in
-2,400 orbiting particles that reacts to your voice, your cursor, and its own thoughts.
-Around it float live holograms of your system, and behind it is a genuine assistant
+cinematic boot sequence reveals **Nova** — a 3D anime avatar who answers you with real
+facial expressions, lip-sync to her own voice, gestures, and eyes that follow your
+cursor (or, if you prefer, the classic **living AI core**: a custom GLSL orb wrapped in
+2,400 orbiting particles that reacts to your voice, your cursor, and its own thoughts).
+Around her float live holograms of your system, and behind it is a genuine assistant
 that can **see your screen, control your PC, browse the web, remember you, and command
 a team of specialist agents**.
 

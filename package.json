@@ -1,7 +1,7 @@
 {
   "name": "cosmos",
   "productName": "COSMOS",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "A cinematic, voice-first desktop AI assistant.",
   "main": "./out/main/index.js",
   "author": "Cosmos AI",

@@ -1,7 +1,10 @@
 import { motion, AnimatePresence } from 'framer-motion'
+import { useSettingsStore } from '@/core/stores/useSettingsStore'
 import { useAgentStore } from './useAgentStore'
 
 const RADIUS = 250
+/** around Nova the chips orbit her body — wider and lower, clear of her face */
+const AVATAR_ORBIT = { rx: 330, ry: 170, dy: 80, start: 0 }
 
 const ROLE_ICONS: Record<string, string> = {
   planner: '◆',
@@ -17,14 +20,16 @@ const ROLE_ICONS: Record<string, string> = {
  */
 export function AgentRing(): React.JSX.Element {
   const agents = useAgentStore((s) => s.agents)
+  const avatar = useSettingsStore((s) => s.settings.coreVisual === 'avatar')
+  const orbit = avatar ? AVATAR_ORBIT : { rx: RADIUS, ry: RADIUS * 0.7, dy: 0, start: -Math.PI / 2 }
 
   return (
     <div className="pointer-events-none absolute left-1/2 top-1/2 z-10">
       <AnimatePresence>
         {agents.map((agent, i) => {
-          const angle = -Math.PI / 2 + (i * 2 * Math.PI) / Math.max(agents.length, 3)
-          const x = Math.cos(angle) * RADIUS
-          const y = Math.sin(angle) * RADIUS * 0.7
+          const angle = orbit.start + (i * 2 * Math.PI) / Math.max(agents.length, 3)
+          const x = Math.cos(angle) * orbit.rx
+          const y = Math.sin(angle) * orbit.ry + orbit.dy
           const working = agent.status === 'started'
           return (
             <motion.div

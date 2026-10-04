@@ -43,3 +43,7 @@ scratch-*
 # `npm run setup:piper`, which also runs automatically before `npm run dist`
 # (predist hook). See scripts/fetch-piper.mjs.
 resources/piper/
+
+# python bytecode (tools/avatar runs inside Blender)
+__pycache__/
+*.pyc

@@ -107,6 +107,13 @@ async function pumpSynthQueue(): Promise<void> {
       const message = err instanceof Error ? err.message : String(err)
       console.error('[voice] synthesis failed:', message)
       shared.synthQueue.length = 0
+      // say() flips to 'speaking' before any audio exists; if nothing ever
+      // plays, the player never drains to reset it — settle the state here
+      // (as onDrained would) or the UI and avatar stay "talking" forever
+      if (!player.active) {
+        const assistant = useAssistantStore.getState()
+        if (assistant.state === 'speaking') assistant.setState(assistant.activeRequestId ? 'thinking' : 'idle')
+      }
       // don't let TTS fail silently — the user needs to know WHY there's
       // no voice (e.g. a Piper path/exe problem). Throttle so one broken
       // response doesn't spam a toast per sentence.

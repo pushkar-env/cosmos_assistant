@@ -20,7 +20,8 @@ structure:
    - `boot` → `BootSequence`.
    - `main` + `orb` → `OrbWidget` (the floating orb, transparent window).
    - `main` + `compact` → `MiniView`.
-   - `main` + `full` → the full HUD: ambient aura, `OrbScene`, then every panel
+   - `main` + `full` → the full HUD: ambient aura, `CoreStage` (Nova the avatar,
+     or the orb — `Settings.coreVisual`), then every panel
      component (`StatusBar`, `AgentRing`, `HudLayer`, `ChatPanel`,
      `CommandPalette`, and all the `*Panel`s), plus `NotificationCenter` and
      `Toasts`.
@@ -111,7 +112,8 @@ trade-off for never desyncing live chat/voice.
 
 ## The AI core orb — `features/orb`
 
-A React Three Fiber scene, the only WebGL surface in the app.
+A React Three Fiber scene — the classic centrepiece, and the fallback whenever
+the avatar is switched off or can't load.
 
 - [`OrbScene.tsx`](../../src/renderer/src/features/orb/OrbScene.tsx) — the R3F
   canvas (capped DPR, `frameloop="always"`).
@@ -126,6 +128,47 @@ speaking → idle`) from `useAssistantStore.state` and drives shader uniforms
 envelope** — the mic while listening, TTS while speaking — bridged through
 `core/voice/voiceSignal.ts`. Every visual system keys off the same state, so
 adding a new voice/agent surface means driving the store, not touching the shader.
+
+---
+
+## Nova, the 3D avatar — `features/avatar`
+
+The default centrepiece: an anime girl who reacts to the conversation. The model
+(`assets/avatar/nova.glb`) is generated from code in Blender by
+[`tools/avatar`](../../tools/avatar/README.md); this folder brings her to life.
+
+- [`CoreStage.tsx`](../../src/renderer/src/features/avatar/CoreStage.tsx) — picks
+  Nova or the orb from `Settings.coreVisual`; any load/render failure falls back to
+  the orb.
+- [`AvatarScene.tsx`](../../src/renderer/src/features/avatar/AvatarScene.tsx) — the
+  R3F canvas (60 fps cap via the shared `FrameDriver`, parked while hidden), the
+  camera rig (head-to-hips, easing in while she speaks), the holographic halo and
+  motes, theme colours, click hit-testing (headpats), and the wiring from the chat:
+  your message → `readUserMessage`, her streamed reply → `readReplySentence` per
+  sentence.
+- [`AvatarController.ts`](../../src/renderer/src/features/avatar/AvatarController.ts) —
+  the per-frame "nervous system", in order: body clips (a base loop per assistant
+  state — Idle/Listen/Think/Talk — crossfaded by hand, one-shot gestures on top),
+  gaze (eyes track the cursor with saccades, head follows), face (emotion preset +
+  blinking + lip-sync blended into the blendshapes), then spring-bone hair.
+- [`toonMaterials.ts`](../../src/renderer/src/features/avatar/toonMaterials.ts) —
+  cel-shading `ShaderMaterial`s on three's skinning/morph chunks: spherical face
+  normals, theme-tinted rim, angel-ring hair highlight, voice-reactive glow trims,
+  the procedural eye (iris drawn from the *morphed* position so lids cover it),
+  mouth and blush shaders, and inverted-hull outlines.
+- [`lipsync.ts`](../../src/renderer/src/features/avatar/lipsync.ts) — vowel shapes
+  (A/I/U/E/O) from the TTS loudness + four formant bands that `SpeechPlayer`
+  writes to `voiceSignal.bands`; a synthetic chatter when replies are text-only.
+- [`emotion.ts`](../../src/renderer/src/features/avatar/emotion.ts) — a lexicon
+  reader: sentences → emotion + intensity + optional gesture (greeting → wave,
+  compliment → shy, thanks → bow, …). No model call, no latency.
+- [`springBones.ts`](../../src/renderer/src/features/avatar/springBones.ts) —
+  verlet spring joints with body colliders for the hair chains.
+
+Materials are matched to the GLB **by material name**, blendshapes and bones **by
+name** — see the contract in [`tools/avatar/README.md`](../../tools/avatar/README.md).
+For tuning without the whole app, serve `src/renderer` with plain Vite and open
+`/avatar-lab.html` (dev only; drives states, feelings, gestures and a fake voice).
 
 ---
 

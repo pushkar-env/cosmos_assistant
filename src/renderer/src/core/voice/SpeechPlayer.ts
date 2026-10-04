@@ -1,4 +1,4 @@
-import { voiceSignal, spectralPitch } from './voiceSignal'
+import { voiceSignal, spectralPitch, speechBands } from './voiceSignal'
 
 interface PlayerEvents {
   onStart: () => void
@@ -157,8 +157,10 @@ export class SpeechPlayer {
       if (rms > 0.006 && this.ctx) {
         this.analyser.getByteFrequencyData(freq)
         voiceSignal.pitch = spectralPitch(freq, this.ctx.sampleRate, this.analyser.fftSize)
+        speechBands(freq, this.ctx.sampleRate, this.analyser.fftSize, voiceSignal.bands)
       } else {
         voiceSignal.pitch = 0
+        voiceSignal.bands.fill(0)
       }
       this.raf = requestAnimationFrame(tick)
     }
@@ -170,6 +172,7 @@ export class SpeechPlayer {
     voiceSignal.speaking = false
     voiceSignal.level = 0
     voiceSignal.pitch = 0
+    voiceSignal.bands.fill(0)
     cancelAnimationFrame(this.raf)
   }
 }
