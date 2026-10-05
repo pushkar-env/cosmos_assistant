@@ -45,7 +45,7 @@ HAND_CONTACT = ("Kimono", "Obi")
 FINGER_SPREAD = 0.0
 
 MERGES = {
-    "Body": ["Body", "Hand_L", "Hand_R"],
+    "Body": ["Body", "Hand_L", "Hand_R", "Foot_L", "Foot_R"],
     "Hair": ["HairCap", "HairStrands"],
     "Lashes": ["Lash_L", "Lash_R"],
     "LashesLower": ["LashLower_L", "LashLower_R"],

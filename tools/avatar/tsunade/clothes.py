@@ -399,11 +399,16 @@ def build_sandals(m):
         x = JOINTS[("left" if side > 0 else "right") + "Foot"].x + side * 0.003
         mb = MeshBuilder()
         # sole following the arched underside of the foot, out past the toes
+        # to a rounded toe that sweeps toward the big toe (y, z bottom,
+        # half-width, shift toward the big toe)
+        secs = [(y, zb, hw, 0.0) for y, zb, _zt, hw in _FOOT if y >= -0.080]
+        secs += [(-0.092, 0.0095, 0.0345, 0.0), (-0.104, 0.0090, 0.0355, 0.001), (-0.117, 0.0085, 0.0340, 0.003),
+                 (-0.129, 0.0082, 0.0310, 0.006), (-0.139, 0.0082, 0.0262, 0.0085), (-0.146, 0.0082, 0.0195, 0.010),
+                 (-0.150, 0.0082, 0.0110, 0.011), (-0.1515, 0.0082, 0.0040, 0.011)]
         rings = []
-        secs = list(_FOOT) + [(-0.130, 0.008, 0.02, 0.036), (-0.156, 0.008, 0.02, 0.028)]
-        for y, zb, _zt, hw in secs:
-            c = Vector((x, y, zb - 0.005))
-            rings.append(superellipse_ring(c, Vector((1, 0, 0)), Vector((0, 0, 1)), hw + 0.005, 0.0045, 3.0, 20))
+        for y, zb, hw, shift in secs:
+            c = Vector((x - side * shift, y, zb - 0.005))
+            rings.append(superellipse_ring(c, Vector((1, 0, 0)), Vector((0, 0, 1)), hw + 0.005, 0.0045, 3.0, 24))
         mb.add(loft(rings))
         # heel block
         hrings = []
@@ -415,11 +420,15 @@ def build_sandals(m):
         ar = [superellipse_ring(Vector((ankle.x, ankle.y + 0.004, z)), Vector((1, 0, 0)), Vector((0, 1, 0)), 0.033, 0.035, 2.0, 24)
               for z in (0.118, 0.130)]
         mb.add(loft(ar, cap_start=False, cap_end=False))
-        # toe strap over the ball of the foot
+        # toe strap across the base of the toes, snug over the foot
+        fzb = pchip([(y, zb) for y, zb, _zt, _hw in reversed(_FOOT)])
+        fzt = pchip([(y, zt) for y, _zb, zt, _hw in reversed(_FOOT)])
+        fhw = pchip([(y, hw) for y, _zb, _zt, hw in reversed(_FOOT)])
         tr = []
-        for y in (-0.090, -0.104):
-            zb, zt, hw = 0.010, 0.040, 0.040
-            tr.append(superellipse_ring(Vector((x, y, (zb + zt) * 0.5)), Vector((1, 0, 0)), Vector((0, 0, 1)), hw + 0.003, (zt - zb) * 0.5 + 0.003, 2.8, 24))
+        for y in (-0.074, -0.088):
+            zb, zt, hw = fzb(y), fzt(y), fhw(y)
+            tr.append(superellipse_ring(Vector((x, y, (zb + zt) * 0.5)), Vector((1, 0, 0)), Vector((0, 0, 1)),
+                                        hw + 0.0035, (zt - zb) * 0.5 + 0.0025, 2.8, 32))
         mb.add(loft(tr, cap_start=False, cap_end=False))
         out.append(mb.build("Sandal_" + sfx, m["sandal"]))
     return out

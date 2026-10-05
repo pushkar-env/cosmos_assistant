@@ -194,17 +194,6 @@ def finger_chain(side, name):
     return pts
 
 
-def _nail(tip, along, back, r, length):
-    """A small domed nail lying on the back of a fingertip / toe."""
-    side = along.cross(back).normalized()
-    c0 = tip - along * (length + r * 0.35) + back * r * 0.72
-    rings = []
-    for t, w in ((0.0, 0.55), (0.25, 0.95), (0.7, 1.0), (1.0, 0.75)):
-        c = c0 + along * (length * t)
-        rings.append(superellipse_ring(c, side, back, r * 0.72 * w, 0.0011, 2.2, 10))
-    return loft(rings)
-
-
 # ── the hand ──
 # along the hand from the wrist: (u, half-width, back-of-hand height, palm depth)
 _PALM = [
@@ -329,11 +318,13 @@ def _frame_at(frames, a):
     return frames[0]
 
 
-def _nail_shell(frames, flat, back_on, over, span_deg=58.0, rows=10, cols=9, n=2.1):
+def _nail_shell(frames, flat, back_on, over, span_deg=58.0, rows=10, cols=9, n=2.1, shape=None):
     """An almond nail: a thin plate on the back of the fingertip that follows
     the finger's own cross-section (so it never sinks into the skin), from its
     cuticle ``back_on`` m behind the last joint to a free edge ``over`` m past
-    the tip, drooping a hair as it leaves the finger."""
+    the tip, drooping a hair as it leaves the finger. ``shape``: the nail's
+    width along its length (default: almond)."""
+    shape = shape or _NAIL_SPAN
     R_end = frames[-1][4]
     a0, a1 = -back_on, R_end * 0.95 + over
     e = 2.0 / n
@@ -344,7 +335,7 @@ def _nail_shell(frames, flat, back_on, over, span_deg=58.0, rows=10, cols=9, n=2
             s = i / (rows - 1)
             c, tan, dors, acr, R = _frame_at(frames, lerp(a0, a1, s))
             c = c - dors * (0.0011 * s ** 2.2)
-            span = math.radians(span_deg) * _NAIL_SPAN(s)
+            span = math.radians(span_deg) * shape(s)
             row = []
             for j in range(cols):
                 q = span * lerp(-1.0, 1.0, j / (cols - 1))
@@ -375,7 +366,7 @@ WRIST_TAKEOVER = 0.032  # the hand's loft takes over from the forearm this far a
 
 def build_arm(mb, hb, nails, side):
     """Forearm, palm, fingers and thumb into the hand builder ``hb``: they are
-    fused into one surface later (see _fuse_hand), so the only join with the
+    fused into one surface later (see _fuse), so the only join with the
     body is up inside the sleeve."""
     sfx = "L" if side > 0 else "R"
     # forearm skin from just above the elbow (the sleeve hides the rest) to
@@ -425,35 +416,75 @@ def leg_path(side):
     return polyline([top, hip, knee, ankle], 10)
 
 
-# (y, z bottom, z top, half-width): an arched foot, heel raised on the sandal
+# (y, z bottom, z top, half-width): an arched foot, heel raised on the sandal,
+# widest across the ball and sloping down into the toes, low enough at the
+# front that the toes' knuckles show (no flat front)
 _FOOT = [
     (0.048, 0.074, 0.110, 0.017), (0.032, 0.066, 0.128, 0.023), (0.006, 0.058, 0.124, 0.025),
-    (-0.030, 0.040, 0.094, 0.027), (-0.064, 0.020, 0.060, 0.031), (-0.088, 0.011, 0.042, 0.034),
-    (-0.104, 0.009, 0.031, 0.033),
+    (-0.030, 0.040, 0.094, 0.027), (-0.064, 0.020, 0.060, 0.031), (-0.080, 0.0125, 0.0455, 0.0335),
+    (-0.092, 0.0095, 0.0325, 0.033), (-0.100, 0.0092, 0.0245, 0.0305), (-0.105, 0.0105, 0.0185, 0.025),
 ]
-# toes: (across from the foot centre toward the big-toe side, length, radius)
-_TOES = [(0.018, 0.044, 0.0082), (0.0055, 0.040, 0.0059), (-0.0055, 0.036, 0.0055),
-         (-0.0155, 0.032, 0.0051), (-0.0245, 0.027, 0.0047)]
+SOLE_TOP = 0.0080  # where the toes' pads rest on the sandal
+
+# toes: (across from the foot centre toward the big-toe side, joint with the
+# foot (MTP) y, length, half-width, fanned outward by (deg)). The joints run
+# on a slant (the little toe's sits furthest back) and the lengths step down
+# from the big toe; gaps of ~1.6 mm keep the toes separate when fused.
+_TOES = [
+    (0.0225, -0.094, 0.044, 0.0088, -2.0),
+    (0.0060, -0.096, 0.037, 0.0055, 1.0),
+    (-0.0063, -0.093, 0.032, 0.0052, 3.0),
+    (-0.0180, -0.088, 0.028, 0.0049, 6.0),
+    (-0.0290, -0.081, 0.023, 0.0045, 10.0),
+]
+# toenails are widest at the free edge (not almond like the fingernails)
+_TOENAIL_SPAN = pchip([(0.0, 0.70), (0.2, 0.93), (0.6, 1.0), (1.0, 0.94)])
 
 
-def build_foot(mb, nails, side):
+def _toe_points(side, x0, across, mtp_y, length, r, splay, big, flat, pad, end_k):
+    """Joint (MTP) → middle joints → tip, seen from the side: the toe leaves
+    the ball of the foot a little raised, rises over its first knuckle, and
+    curves down so the pad of its tip rests on the sole."""
+    a = math.radians(splay)
+    along = Vector((side * math.sin(a), -math.cos(a), 0.0))
+    root = Vector((x0 - side * across, mtp_y, 0.0))
+    z_mtp = SOLE_TOP + r * 1.05 * flat + 0.003
+    z_end = SOLE_TOP + r * (end_k * flat + pad)
+    if big:  # two bones: straighter, the tip resting flat
+        fr, zs = (0.0, 0.50, 0.74, 0.90), (z_mtp, z_mtp - 0.0008, lerp(z_mtp, z_end, 0.75), z_end)
+    else:
+        fr, zs = (0.0, 0.46, 0.70, 0.88), (z_mtp, z_mtp + 0.0012, lerp(z_mtp, z_end, 0.55), z_end)
+    return [root + along * (length * f) + Vector((0.0, 0.0, z)) for f, z in zip(fr, zs)]
+
+
+def build_foot(fb, nails, side):
+    """The foot and toes into ``fb`` (fused into one surface later, see
+    ``_fuse``), toenails into ``nails``."""
     sfx = "L" if side > 0 else "R"
+    tag = "foot_" + sfx
     x = JOINTS[("left" if side > 0 else "right") + "Foot"].x + side * 0.003
     rings = []
     for y, zb, zt, hw in _FOOT:
         c = Vector((x, y, (zb + zt) * 0.5))
-        rings.append(superellipse_ring(c, Vector((1, 0, 0)), Vector((0, 0, 1)), hw, (zt - zb) * 0.5, 2.8, 24))
-    mb.add(loft(rings), "foot_" + sfx)
-    for across, length, r in _TOES:
-        tx = x - side * across  # the big toe sits on the inner side
-        root = Vector((tx, -0.098, 0.018))
-        end = Vector((tx - side * across * 0.15, -0.098 - length, 0.0135))
-        path = polyline([root, end], 5)
-        prof = pchip([(0.0, r), (0.6, r * 0.95), (1.0, r * 0.82)])
-        tip = end + (end - root).normalized() * r * 0.7
-        mb.add(tube(path, prof, lambda t, p=prof: p(t) * 0.85, Vector((0, 0, 1)), segs=10, cap_start=True, tip=tip), "foot_" + sfx)
-        along = (end - root).normalized()
-        nails.add(_nail(tip, along, Vector((0, 0, 1)), r * 0.85, 0.0065 if r > 0.008 else 0.0042), "foot_" + sfx)
+        rings.append(superellipse_ring(c, Vector((1, 0, 0)), Vector((0, 0, 1)), hw, (zt - zb) * 0.5, 2.8, 32))
+    fb.add(loft(rings), tag)
+    up = Vector((0.0, 0.0, 1.0))
+    for i, (across, mtp_y, length, r, splay) in enumerate(_TOES):
+        big = i == 0
+        flat, pad, end_k = (0.78, 0.12, 0.90) if big else (0.82, 0.12, 0.86)
+        pts = _toe_points(side, x, across, mtp_y, length, r, splay, big, flat, pad, end_k)
+        # (inside the foot, joint, first bone, knuckle, middle, last joint,
+        # tip pad, end) — fuller at the knuckles, a soft round tip
+        prof = (1.10, 1.04, 0.95, 1.0, 0.97, 0.99, 0.99, 0.90) if big else (1.12, 1.05, 0.92, 0.98, 0.90, 0.92, 0.95, 0.86)
+        mesh, frames = _digit(pts, r, up, 0.014, prof, flat=flat, segs=16, pad=pad)
+        fb.add(mesh, tag)
+        R_end = frames[-1][4]
+        if big:
+            nails.add(_nail_shell(frames, flat, 0.0075, -R_end * 0.40, span_deg=56.0, shape=_TOENAIL_SPAN), tag)
+        else:
+            # (smaller toes, proportionally smaller nails)
+            nails.add(_nail_shell(frames, flat, 0.0012 + 0.016 * (r - 0.0040) + 0.008 * r, -R_end * 0.45,
+                                  span_deg=44.0 + 2000.0 * (r - 0.0045), rows=8, cols=7, shape=_TOENAIL_SPAN), tag)
 
 
 def build_leg(mb, side):
@@ -521,16 +552,15 @@ def build_skin_lines(body_ob):
     return [ob, shade]
 
 
-def _fuse_hand(ob, side, voxel=0.0005, smooth=8, keep=0.014, pin_wrist=False):
-    """Turn a hand built from overlapping parts (palm loft, finger and thumb
-    tubes) into ONE organic surface, the way a sculpted hand is: voxel-remesh
-    their union (real webbing between the fingers, knuckles that flow into the
-    back of the hand, a thumb that grows out of its pad), relax the voxel
-    steps and decimate to a light mesh (``pin_wrist``: when the forearm is a
-    separate tube, pin the hand's wrist end onto its cross-section). Each new
-    vertex takes the part tag of the nearest original surface, so the rig
-    weights it per part (and the spec smooths those weights across the
-    joins)."""
+def _fuse(ob, voxel=0.0005, smooth=8, keep=0.014):
+    """Turn a hand or foot built from overlapping parts (palm loft or foot
+    loft, finger/toe tubes) into ONE organic surface, the way a sculpted one
+    is: voxel-remesh their union (real webbing between the digits, knuckles
+    that flow into the back of the hand or foot, a thumb that grows out of its
+    pad, no seam at the wrist), relax the voxel steps and decimate to a light
+    mesh. Each new vertex takes the part tag of the nearest original surface,
+    so the rig weights it per part (and the spec can smooth those weights
+    across the joins)."""
     from mathutils.bvhtree import BVHTree
 
     me = ob.data
@@ -561,28 +591,6 @@ def _fuse_hand(ob, side, voxel=0.0005, smooth=8, keep=0.014, pin_wrist=False):
     ob.data = new
     new.name = old.name
     bpy.data.meshes.remove(old)
-
-    # pin the wrist end onto the forearm's elliptical cross-section, easing
-    # into the hand
-    d, thumb, palm_n = palm_frame(side)
-    across = thumb * side
-    wrist = JOINTS[("left" if side > 0 else "right") + "Hand"]
-    inv = ob.matrix_world.inverted()
-    for v in new.vertices:
-        p = ob.matrix_world @ v.co
-        rel = p - wrist
-        u = rel.dot(d)
-        pin = smoothstep(-0.018, -WRIST_TAKEOVER + 0.002, u) if pin_wrist else 0.0
-        if pin <= 0.0:
-            continue
-        ft = _forearm_t(u)
-        x, y = rel.dot(across), rel.dot(palm_n)
-        r = math.sqrt((x / _ARM_RY(ft)) ** 2 + (y / _ARM_R(ft)) ** 2) or 1.0
-        # inside the forearm where it still covers the hand, a hair outside
-        # it over the forearm's open edge (so no outline catches that edge)
-        k = lerp(0.997, 1.004, smoothstep(-WRIST_TAKEOVER - 0.003, -WRIST_TAKEOVER + 0.001, u)) / r
-        on = wrist + d * u + across * (x * k) + palm_n * (y * k)
-        v.co = inv @ p.lerp(on, pin)
     new.validate()
     new.polygons.foreach_set("use_smooth", [True] * len(new.polygons))
     new.update()
@@ -598,10 +606,10 @@ def _fuse_hand(ob, side, voxel=0.0005, smooth=8, keep=0.014, pin_wrist=False):
 
 
 def _seat_nails(nail_ob, surfaces):
-    """Fusing a hand moves its surface by a fraction of a millimetre; move
-    each fingernail vertex by however much the skin under it moved, so the
-    nails sit on the fused fingertips exactly as they sat on the parts (the
-    toenails, far from any hand, stay put)."""
+    """Fusing a hand or foot moves its surface by a fraction of a millimetre;
+    move each nail vertex by however much the skin under it moved, so the
+    nails sit on the fused fingertips and toes exactly as they sat on the
+    parts."""
     me = nail_ob.data
     mw = nail_ob.matrix_world
     inv = mw.inverted()
@@ -618,27 +626,33 @@ def _seat_nails(nail_ob, surfaces):
     me.update()
 
 
+FOOT_KEEP = 0.012  # share of the fused foot's voxel faces kept
+
+
 def build_body():
     mb = MeshBuilder()
     nails = MeshBuilder()
-    hands = []
+    parts = []  # (object name, builder, fusion settings)
     build_torso(mb)
     for side in (1, -1):
-        hb = MeshBuilder()
+        sfx = "L" if side > 0 else "R"
+        hb, fb = MeshBuilder(), MeshBuilder()
         build_arm(mb, hb, nails, side)
-        hands.append((side, hb))
         build_leg(mb, side)
-        build_foot(mb, nails, side)
+        build_foot(fb, nails, side)
+        parts.append(("Hand_" + sfx, hb, {}))
+        # toes are small: a finer voxel, a lighter relax
+        parts.append(("Foot_" + sfx, fb, {"voxel": 0.00045, "smooth": 6, "keep": FOOT_KEEP}))
     skin = material("Skin", srgb(SKIN), roughness=0.55)
     body = mb.build("Body", skin)
-    hand_obs, surfaces = [], []
-    for side, hb in hands:
-        ob = hb.build("Hand_" + ("L" if side > 0 else "R"), skin)
+    fused, surfaces = [], []
+    for name, builder, opts in parts:
+        ob = builder.build(name, skin)
         before = bvh_of(ob)
-        _fuse_hand(ob, side)
+        _fuse(ob, **opts)
         surfaces.append((before, bvh_of(ob)))
-        hand_obs.append(ob)
+        fused.append(ob)
     nail_ob = nails.build("Nails", material("Nail", srgb("#c8283c"), roughness=0.3))
     _seat_nails(nail_ob, surfaces)
     lines = build_skin_lines(body)
-    return [body.name, nail_ob.name] + [o.name for o in hand_obs] + [o.name for o in lines]
+    return [body.name, nail_ob.name] + [o.name for o in fused] + [o.name for o in lines]

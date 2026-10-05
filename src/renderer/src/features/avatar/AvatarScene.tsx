@@ -32,7 +32,7 @@ export const avatarBridge = {
   /** dev/testing aid: orbit the camera around her (radians, 0 = front) */
   orbit: 0,
   /** dev/testing aid: a close-up instead of the full-body framing */
-  focus: null as { x?: number; y: number; dist: number } | null
+  focus: null as { x?: number; y: number; z?: number; dist: number } | null
 }
 
 if (import.meta.env.DEV) (window as unknown as { __nova: typeof avatarBridge }).__nova = avatarBridge
@@ -203,8 +203,8 @@ function CameraRig({ cfg }: { cfg: AvatarConfig }): null {
     goalPos.set(px * 0.08 + Math.sin(t * 0.13) * 0.03, lookY + 0.12 + Math.sin(t * 0.21) * 0.015, dist)
     const f = avatarBridge.focus
     if (f) {
-      goalLook.set(f.x ?? 0, f.y, 0)
-      goalPos.set(f.x ?? 0, f.y, f.dist)
+      goalLook.set(f.x ?? 0, f.y, f.z ?? 0)
+      goalPos.set(f.x ?? 0, f.y, (f.z ?? 0) + f.dist)
     }
     const k = f ? 1 : Math.min(1, delta * 1.6)
     pos.current.lerp(goalPos, k)
