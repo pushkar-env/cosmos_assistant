@@ -10,6 +10,7 @@ import {
   mouthMaterial,
   outlineMaterial,
   shared,
+  softMaterial,
   toonMaterial
 } from './toonMaterials'
 
@@ -128,6 +129,9 @@ export function prepareAvatar(gltf: GLTF, cfg: AvatarConfig): AvatarRig {
       case 'flat':
         mat = flatMaterial(spec.color, spec.opacity ?? 1, spec.overHair)
         break
+      case 'soft':
+        mat = softMaterial(spec.color, spec.opacity ?? 1, spec.feather ?? [0.3, 0.3, 0.3, 0.3])
+        break
       case 'eyeL':
         mat = found.eyeL = eyeMaterial(new THREE.Vector2(...cfg.eyes.centerL), 0.3, irisR.clone(), iris)
         break
@@ -149,6 +153,8 @@ export function prepareAvatar(gltf: GLTF, cfg: AvatarConfig): AvatarRig {
     created.push(mat)
     mesh.frustumCulled = false // skinned bounds don't follow gestures
     if (spec.kind === 'flat' && spec.overHair) mesh.renderOrder = 2
+    // soft shading lies under the see-through ink lines (crease, lower lash)
+    if (spec.kind === 'soft') mesh.renderOrder = -0.5
     if (spec.kind === 'blush') mesh.renderOrder = 3
     if (mesh.morphTargetDictionary && Object.keys(mesh.morphTargetDictionary).length) morphMeshes.push(mesh)
 

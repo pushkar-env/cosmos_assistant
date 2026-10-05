@@ -62,6 +62,8 @@ MERGES = {
     "Lashes": ["Lash_L", "Lash_R"],
     "LashesLower": ["LashLower_L", "LashLower_R"],
     "Creases": ["Crease_L", "Crease_R"],
+    "LidShades": ["LidShade_L", "LidShade_R"],
+    "Caruncles": ["Caruncle_L", "Caruncle_R"],
     "Brows": ["Brow_L", "Brow_R"],
     "Coat": ["Coat", "CoatSleeve_L", "CoatSleeve_R"],
     "Pants": ["Pants_L", "Pants_R"],
@@ -123,7 +125,7 @@ def chains():
 
 # skin and every layer over the chest share the same breast weights (computed
 # at the proxy point on the body), so they sway together
-_BUST_OBJECTS = {"Body", "SkinLines", "SkinShade", "Kimono", "KimonoPiping", "BustShadow", "BustFold", "Coat", "CoatTrim"}
+_BUST_OBJECTS = {"Body", "SkinLines", "SkinShade", "CollarShade", "NeckShade", "Kimono", "KimonoPiping", "BustShadow", "BustFold", "Coat", "CoatTrim"}
 
 
 def adjust_weights(name, q, weights):

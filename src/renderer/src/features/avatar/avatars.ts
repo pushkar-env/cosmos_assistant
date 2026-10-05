@@ -43,6 +43,9 @@ export type MaterialSpec =
       fringeFade?: boolean
     }
   | { kind: 'flat'; color: string; opacity?: number; overHair?: boolean }
+  /** painted shading with soft edges: it fades in over `feather` of its UV
+   *  square from each edge (uv.x 0, uv.x 1, uv.y 0, uv.y 1) */
+  | { kind: 'soft'; color: string; opacity?: number; feather?: [number, number, number, number] }
   | { kind: 'eyeL' | 'eyeR' | 'mouth' | 'blush' | 'glow' }
 
 export interface SpringChainSpec {
@@ -115,14 +118,14 @@ export interface AvatarConfig {
   pressHolds?: string[]
 }
 
-const SKIN_FACE = (color: string, shade: string, outline: string): MaterialSpec => ({
+const SKIN_FACE = (color: string, shade: string, outline: string, width = 0.55): MaterialSpec => ({
   kind: 'toon',
   color,
   shade,
   sphere: 0.85,
   rim: 0.22,
   step: 0.42,
-  outline: [outline, 0.55]
+  outline: [outline, width]
 })
 
 const LIBRARY: Record<AvatarId, Omit<AvatarConfig, 'url'> & { url: string | undefined }> = {
@@ -200,13 +203,18 @@ const LIBRARY: Record<AvatarId, Omit<AvatarConfig, 'url'> & { url: string | unde
     materials: {
       // the palette is sampled from the reference: warm peach skin, pale
       // beige-blonde hair, muted forest green, slate navy
-      Skin: SKIN_FACE('#f8dfd1', '#e0a993', '#9c6656'),
+      // the face, with the bolder ink jawline of the reference
+      Skin: SKIN_FACE('#f8dfd1', '#e0a993', '#8a5444', 0.75),
       // a higher shading step than the face: the cleavage and the curves of
       // the chest pick up a soft shadow instead of reading flat
       'Skin:Body': { kind: 'toon', color: '#f8dfd1', shade: '#d9a08a', rim: 0.22, step: 0.56, outline: ['#9c6656', 0.7] },
       SkinLine: { kind: 'flat', color: '#c98c7c' },
       // the soft shade down the cleavage and under the kimono's edges
       SkinShade: { kind: 'flat', color: '#ecc2b1' },
+      // the head's cel shadow on the neck (matches the body's shade colour)
+      NeckShade: { kind: 'flat', color: '#dba38c' },
+      // a soft shade under each collarbone
+      CollarShade: { kind: 'soft', color: '#e2ab97', opacity: 0.55, feather: [0.35, 0.35, 0.5, 0.5] },
       Hair: { kind: 'hair', color: '#f0d8ae', shade: '#a9865c', outline: ['#6a5034', 0.85], tipMix: 0, fringeFade: false },
       Eye_L: { kind: 'eyeL' },
       Eye_R: { kind: 'eyeR' },
@@ -214,12 +222,25 @@ const LIBRARY: Record<AvatarId, Omit<AvatarConfig, 'url'> & { url: string | unde
       Blush: { kind: 'blush' },
       Lash: { kind: 'flat', color: '#1f130d' },
       LashLower: { kind: 'flat', color: '#6b4630', opacity: 0.85 },
-      Crease: { kind: 'flat', color: '#b98270', opacity: 0.6 },
+      // the double-eyelid fold, the lid's shadow deepening into the socket by
+      // the nose (uv.x inner → outer, uv.y lid → up), the pink inner corner
+      Crease: { kind: 'flat', color: '#9c6a58', opacity: 0.8 },
+      LidShade: { kind: 'soft', color: '#d29886', opacity: 0.55, feather: [0.3, 0.2, 0.02, 0.75] },
+      Caruncle: { kind: 'flat', color: '#e9a6a3' },
       Brow: { kind: 'flat', color: '#9a7558', overHair: true },
-      Lips: { kind: 'flat', color: '#d98f8c' },
+      // full lips: the lower lip, the upper lip's soft bow over the line, a
+      // gloss, and the soft shadow under the lower lip
+      Lips: { kind: 'flat', color: '#d9918c' },
+      LipUpper: { kind: 'soft', color: '#cf8985', opacity: 0.85, feather: [0.22, 0.22, 0.02, 0.55] },
+      LipLight: { kind: 'soft', color: '#f8d8d1', opacity: 0.7, feather: [0.45, 0.45, 0.45, 0.45] },
+      LipShade: { kind: 'soft', color: '#c98d80', opacity: 0.45, feather: [0.35, 0.35, 0.75, 0.1] },
       Mark: { kind: 'flat', color: '#5f6cb4' },
-      NoseShadow: { kind: 'flat', color: '#d39784' },
-      NoseLight: { kind: 'flat', color: '#fff4ec' },
+      // the nose: a soft shadow down the bridge (fading in from the brows,
+      // uv.x top → tip), its underside, nostrils and a highlight on the tip
+      NoseShadow: { kind: 'soft', color: '#cf9583', opacity: 0.95, feather: [0.5, 0.1, 0.35, 0.35] },
+      NoseUnder: { kind: 'soft', color: '#d9a291', opacity: 0.6, feather: [0.5, 0.5, 0.5, 0.5] },
+      Nostril: { kind: 'soft', color: '#ad7868', opacity: 0.9, feather: [0.4, 0.4, 0.4, 0.4] },
+      NoseLight: { kind: 'soft', color: '#fff6ef', opacity: 0.8, feather: [0.5, 0.5, 0.5, 0.5] },
       Nail: { kind: 'flat', color: '#d02a40' },
       // shaded on the underside and outer flanks of the bust (light comes from
       // above-right), which is what makes the figure read from the front

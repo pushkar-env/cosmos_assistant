@@ -164,7 +164,10 @@ The default centrepiece: an anime girl who reacts to the conversation. The model
   cel-shading `ShaderMaterial`s on three's skinning/morph chunks: spherical face
   normals, theme-tinted rim, angel-ring hair highlight, voice-reactive glow trims,
   the procedural eye (iris drawn from the *morphed* position so lids cover it),
-  mouth and blush shaders, and inverted-hull outlines. The hair's height bands
+  mouth and blush shaders, soft-edged painted shading (`soft`: lid shadow,
+  nose shading, lip gloss, feathered over each decal's UVs) and inverted-hull
+  outlines. glTF stores UV v flipped, so the eye, mouth and soft shaders read
+  `1 − uv.y`. The hair's height bands
   (skull shading, angel ring, fringe line fade) are tuned on Nova's head and
   shift with each model's own head height (`uHeadShift`, set on load).
 - [`lipsync.ts`](../../src/renderer/src/features/avatar/lipsync.ts) — vowel shapes

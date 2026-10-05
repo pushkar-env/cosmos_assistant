@@ -87,6 +87,34 @@ still for a quick look.
 - **Tsunade's hands** are sculpted, not lofted. The forearm, palm, fingers and thumb are built as overlapping parts, then voxel-remeshed into one surface (real finger webs, a thumb growing from its pad, no wrist seam). The result is smoothed, decimated, and re-tagged per part for weighting; see `_fuse_hand` in `tsunade/body.py`. Her almond nails follow each fingertip's own cross-section, and `_seat_nails` re-seats them on the fused surface. The fingers rest fanned a little wider than a relaxed hand so they stay separate surfaces when fused. Her negative `FINGER_SPREAD` draws them back together in every pose.
 - `build_cap(..., snap_edge=True)` lays the hair cap's cut edge on the hairline curve instead of letting it step along the head mesh's rows.
 
+### Tsunade's face and neck
+
+Proportions were measured on the reference with a pixel grid, scaled by the distance between her pupils.
+
+- **Head:** the nose tip sits a little over half way from the eye line to the chin, with the mouth close under it. The head's rings are spaced twice as finely over the face as round the back (`_azimuth`), at about 2 mm, so the long nose bridge and the lip relief (`_lips`: upper lip, fuller lower lip, the dip under it) show in profile. The face itself shades through sphere normals, so the features are painted.
+- **Eyes:** cat eyes. The inner corners dip toward the nose, the upper lid climbs steeply and then runs nearly flat to a high, blunt outer corner, and a shallow lower lid sweeps up to meet it.
+- **Detailed lids:**
+  - a bold lash line that runs on level past the corner, with three flicks;
+  - the double-eyelid crease;
+  - a soft lid shadow deepening into the socket beside the nose (`LidShade`);
+  - the pink inner corner (`Caruncle`);
+  - a lower lash line that firms up over the outer third.
+
+  Every piece carries the eye shape keys, so it closes with the lids.
+- **Brows:** they climb steeply from a blunt inner end by the nose, then run out flat above the outer corner.
+- **Nose:** a long soft shadow down the shaded side of the bridge that fades in under the brows and curls under the tip, plus the underside, two nostrils and a highlight on the tip.
+- **Mouth:** wide, about 0.55× the distance between her pupils. The lips are layered:
+  - the lower lip (`Lips`);
+  - the upper lip with its cupid's bow (`LipUpper`);
+  - a gloss (`LipLight`);
+  - the soft shadow on the chin under the lower lip (`LipShade`).
+
+  All of them carry every mouth shape key.
+- **Neck:** `neck_relief` sculpts the two neck muscles (each with a shallow hollow in front), the notch between the collarbones, the collarbones and the hollows above them. It lives inside `torso_point`, so the kimono and coat collars follow it and never get pushed through. The torso rows tighten to 2.5 mm over the neck. Drawn on the skin:
+  - the muscles' front edges, the notch and the collarbones (`SkinLines`);
+  - a soft shade under each collarbone (`CollarShade`);
+  - the cel shadow the jaw casts on the neck (`NeckShade`). Its edge runs down her right side to the collar and, on her left, along the front of the lit muscle.
+
 ## Contract with the app
 
 `src/renderer/src/features/avatar` looks things up **by name**. Keep these
@@ -95,6 +123,7 @@ names when changing a character.
 - **Materials:** every material name must have an entry in that avatar's
   `materials` map in `avatars.ts`. Every avatar needs `Eye_L`, `Eye_R`, `Mouth`
   and `Blush`.
+- **UVs:** the shaders read `uv.y` the way the generator writes it: the eye from the lower lid (0) to the upper lid (1), the mouth from bottom to top. glTF stores V flipped, so they use `1 − uv.y`. `soft` decals (painted shading with feathered edges) fade over their UV square: `feather` gives the fade per edge, `[x0, x1, y0, y1]`.
 - **Blendshapes:**
   - Eyes and lashes (per side `_L` / `_R`): `E_Blink`, `E_Happy`, `E_Wide`, `E_Relax`, `E_Sad`, `E_Angry`.
   - Brows (per side): `B_Up`, `B_Angry`, `B_Sad`.

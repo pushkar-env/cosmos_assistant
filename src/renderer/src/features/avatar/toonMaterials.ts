@@ -211,6 +211,44 @@ export function flatMaterial(color: string, opacity = 1, overHair = false): THRE
   return m
 }
 
+/* ── soft painted shading (lid shadow, nose shading, lip gloss) ────── */
+
+const SOFT_FRAG = /* glsl */ `
+  uniform vec3 uColor;
+  uniform float uOpacity;
+  uniform vec4 uFeather; // uv.x 0 / 1 edge, uv.y 0 / 1 edge (as generated)
+  varying vec2 vUv2;
+  void main() {
+    vec4 f = max(uFeather, vec4(1e-4));
+    vec2 uv = vec2(vUv2.x, 1.0 - vUv2.y); // glTF stores v flipped
+    float a = uOpacity
+      * smoothstep(0.0, f.x, uv.x) * smoothstep(0.0, f.y, 1.0 - uv.x)
+      * smoothstep(0.0, f.z, uv.y) * smoothstep(0.0, f.w, 1.0 - uv.y);
+    gl_FragColor = vec4(uColor, a);
+    #include <colorspace_fragment>
+  }
+`
+
+/** an unlit decal whose edges fade out over its UV square (each feather is
+ *  the share of the square, from that edge, over which it fades in) */
+export function softMaterial(
+  color: string,
+  opacity: number,
+  feather: [number, number, number, number]
+): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    vertexShader: TOON_VERT,
+    fragmentShader: SOFT_FRAG,
+    uniforms: {
+      uColor: { value: new THREE.Color(color) },
+      uOpacity: { value: opacity },
+      uFeather: { value: new THREE.Vector4(...feather) }
+    },
+    transparent: true,
+    depthWrite: false
+  })
+}
+
 /* ── glowing trims ─────────────────────────────────────────────────── */
 
 const GLOW_FRAG = /* glsl */ `
@@ -273,8 +311,11 @@ const EYE_FRAG = /* glsl */ `
     vec2 q = vObjPos.xy;
     vec2 p = (q - (uCenter + uGaze)) / uIrisR;
     float d = length(p);
-    float lid = smoothstep(0.52, 1.0, vUv2.y);       // under the upper lid
-    float lower = smoothstep(0.18, 0.0, vUv2.y);     // along the lower lid
+    // the generator's uv.y runs lower lid 0 → upper lid 1; glTF stores v
+    // flipped, so it arrives as 1 − that
+    float vy = 1.0 - vUv2.y;
+    float lid = smoothstep(0.52, 1.0, vy);       // under the upper lid
+    float lower = smoothstep(0.18, 0.0, vy);     // along the lower lid
 
     vec3 sclera = vec3(0.975, 0.98, 1.0);
     sclera = mix(sclera, vec3(0.72, 0.76, 0.90), lid * 0.85);
@@ -355,12 +396,14 @@ const MOUTH_FRAG = /* glsl */ `
   void main() {
     vec3 line = vec3(0.47, 0.20, 0.24);
     vec3 deep = vec3(0.20, 0.04, 0.08);
-    vec3 inner = mix(deep, vec3(0.42, 0.10, 0.15), smoothstep(0.0, 0.7, vUv2.y));
+    // uv.y: bottom 0 → top 1 as generated (glTF stores v flipped)
+    float vy = 1.0 - vUv2.y;
+    vec3 inner = mix(deep, vec3(0.42, 0.10, 0.15), smoothstep(0.0, 0.7, vy));
     // tongue rests low and centred
-    float t = length(vec2((vUv2.x - 0.5) * 1.5, (vUv2.y + 0.05) * 1.7));
+    float t = length(vec2((vUv2.x - 0.5) * 1.5, (vy + 0.05) * 1.7));
     inner = mix(inner, vec3(0.93, 0.47, 0.52), (1.0 - smoothstep(0.42, 0.55, t)) * 0.9);
     // upper teeth: a soft white band under the top lip
-    float teeth = smoothstep(0.74, 0.86, vUv2.y) * smoothstep(0.10, 0.24, vUv2.x) * smoothstep(0.90, 0.76, vUv2.x);
+    float teeth = smoothstep(0.74, 0.86, vy) * smoothstep(0.10, 0.24, vUv2.x) * smoothstep(0.90, 0.76, vUv2.x);
     inner = mix(inner, vec3(1.0, 0.985, 0.98), teeth * uTeeth);
     vec3 col = mix(line, inner, smoothstep(0.02, 0.25, uOpen));
     gl_FragColor = vec4(col, 1.0);

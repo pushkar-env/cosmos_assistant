@@ -2,9 +2,11 @@
 
 Only skin that can be seen is built: neck and the V of the chest, forearms
 below the haori sleeves, hands, calves below the capri pants, and feet in
-heeled sandals (arched, toes on the sole). Nails are painted red. A few ink
-lines drawn on the skin (cleavage, collarbones) carry the anatomy the toon
-shading alone would flatten.
+heeled sandals (arched, toes on the sole). Nails are painted red. The neck is
+sculpted (the two neck muscles, the notch between the collarbones, the
+collarbones themselves), and a few ink lines and shades drawn on the skin
+(cleavage, collarbones, the muscles' front edges, the jaw's shadow on the
+neck) carry the anatomy the toon shading alone would flatten.
 
 Joint positions live in ``JOINTS`` so the rig builds bones exactly where the
 geometry bends.
@@ -92,6 +94,42 @@ def bust_bulge(x, z):
     return BUST_DEPTH * total
 
 
+# the sternocleidomastoid's ridge: its geometric azimuth (degrees from the
+# front) over height — beside the notch at the base, round to behind the ear
+_SCM_AZ = pchip([(1.366, 8.0), (1.385, 16.0), (1.400, 28.0), (1.420, 48.0), (1.440, 68.0), (1.460, 86.0), (1.490, 98.0)])
+# the collarbone's crest over |x|: out from the notch, rising toward the shoulder
+_CLAV_Z = pchip([(0.0, 1.3600), (0.014, 1.3605), (0.030, 1.3625), (0.045, 1.3655), (0.060, 1.3690),
+                 (0.090, 1.3730), (0.140, 1.3760)])
+
+
+def neck_relief(x, y, z):
+    """Outward push (m) of the skin over the neck's muscles and the
+    collarbones (x, y relative to the ring's centre): the two
+    sternocleidomastoids running from behind the ears down to the notch, with
+    a shallow hollow in front of each; the notch between their heads; the
+    collarbones and the hollows above them. Garments built from
+    ``torso_point`` follow it, so it never pushes through the collar."""
+    if z < 1.345 or z > 1.49:
+        return 0.0
+    r = math.hypot(x, y)
+    phi = math.degrees(math.atan2(abs(x), -y))  # 0 front, 90 side, 180 back
+    out = 0.0
+    env = smoothstep(1.366, 1.392, z) * (1.0 - smoothstep(1.452, 1.482, z))
+    if env > 0.0:
+        d = math.radians(phi - _SCM_AZ(z)) * r  # along the skin; + toward the back
+        out += 0.0016 * math.exp(-((d / 0.0052) ** 2)) * env
+        out -= 0.0005 * math.exp(-(((d + 0.0090) / 0.0045) ** 2)) * env
+    front = smoothstep(90.0, 30.0, phi)
+    if front > 0.0:
+        out -= 0.0020 * math.exp(-((x / 0.0075) ** 2) - ((z - 1.3745) / 0.0065) ** 2) * front
+        ax = abs(x)
+        zc = _CLAV_Z(min(ax, 0.14))
+        k = smoothstep(0.009, 0.020, ax) * (1.0 - smoothstep(0.10, 0.14, ax)) * front
+        out += 0.0012 * math.exp(-(((z - zc) / 0.0035) ** 2)) * k
+        out -= 0.0007 * math.exp(-(((z - zc - 0.0105) / 0.0050) ** 2)) * k * smoothstep(0.022, 0.034, ax)
+    return out
+
+
 def torso_point(z, th, inflate=0.0, n=None):
     """Point on the torso surface at height z, azimuth th (0 = front)."""
     hw, f, b = TORSO_HW(z) + inflate, TORSO_F(z) + inflate, TORSO_B(z) + inflate
@@ -103,6 +141,11 @@ def torso_point(z, th, inflate=0.0, n=None):
     s, c = math.sin(th), math.cos(th)
     x = hw * math.copysign(abs(s) ** (2.0 / n), s)
     y = yc - d * math.copysign(abs(c) ** (2.0 / n), c)
+    rel = neck_relief(x, y - yc, z)
+    if rel:
+        ln = math.hypot(x, y - yc)
+        x += x / ln * rel
+        y += (y - yc) / ln * rel
     if c > 0:
         y -= bust_bulge(x, z) * c**0.6
         # the valley between them
@@ -115,11 +158,13 @@ def torso_ring(z, inflate=0.0, segs=56):
     return [torso_point(z, 2 * math.pi * k / segs, inflate) for k in range(segs)]
 
 
-def build_torso(mb, z0=1.14, z1=1.49, rows=34):
+def build_torso(mb, z0=1.14, z1=1.49):
     """The neck and the V of the chest — everything below sits under the
-    kimono and obi."""
-    zs = [lerp(z0, z1, i / rows) for i in range(rows + 1)]
-    mb.add(loft([torso_ring(z) for z in zs]), "torso")
+    kimono and obi. Rows tighten to 2.5 mm over the neck and collarbones so
+    the muscle relief is resolved."""
+    zs = [z0 + 0.01 * i for i in range(int(round((1.33 - z0) / 0.01)))]
+    zs += [lerp(1.33, z1, i / 64) for i in range(65)]
+    mb.add(loft([torso_ring(z, segs=96) for z in zs]), "torso")
 
 
 # ── arms & hands ────────────────────────────────────────────────────────
@@ -513,9 +558,16 @@ def _stroke(bvh, pts, widths, lift=0.0006):
     return open_loft([a_row, b_row])
 
 
+def _scm_front_x(z):
+    """Front-view x of the front edge of the (left) neck muscle at height z."""
+    r = TORSO_HW(z)
+    return r * math.sin(math.radians(_SCM_AZ(z)) - 0.0050 / r)
+
+
 def build_skin_lines(body_ob):
     """The cleavage (a line up from the V, opening into the inner curves of
-    the breasts) and the collarbones."""
+    the breasts), the collarbones, the notch between them and the front
+    edges of the neck muscles rising from it (as drawn in the reference)."""
     bvh = bvh_of(body_ob)
     mb = MeshBuilder()
     mb.add(_stroke(bvh, [(0.0, 1.166), (0.0004, 1.186), (0.0, 1.206), (-0.0006, 1.222)], [0.0004, 0.0016, 0.0013, 0.0003]), "torso")
@@ -526,8 +578,15 @@ def build_skin_lines(body_ob):
             r = math.radians(a)
             arc.append((side * (BUST_X + 0.074 * math.cos(r)), BUST_Z - 0.004 + 0.070 * math.sin(r)))
         mb.add(_stroke(bvh, arc, [0.0003, 0.0011, 0.0011, 0.0008, 0.0002]), "torso")
-        mb.add(_stroke(bvh, [(side * 0.019, 1.357), (side * 0.031, 1.360), (side * 0.044, 1.364), (side * 0.057, 1.368)],
-                       [0.0002, 0.0011, 0.0009, 0.0001]), "torso")
+        # the collarbone: along the shadowed underside of its crest
+        mb.add(_stroke(bvh, [(side * x, _CLAV_Z(x) - 0.0024) for x in (0.012, 0.022, 0.034, 0.046, 0.058)],
+                       [0.0002, 0.0010, 0.0010, 0.0007, 0.0001]), "torso")
+        # the neck muscle's front edge, firm at the notch, fading up the neck
+        zs = (1.3775, 1.388, 1.400, 1.412, 1.424)
+        mb.add(_stroke(bvh, [(side * _scm_front_x(z), z) for z in zs], [0.0002, 0.0009, 0.0008, 0.0005, 0.0001]), "torso")
+    # the notch between the collarbones
+    mb.add(_stroke(bvh, [(-0.0052, 1.3792), (-0.0024, 1.3754), (0.0, 1.3744), (0.0024, 1.3754), (0.0052, 1.3792)],
+                   [0.0001, 0.0007, 0.0008, 0.0007, 0.0001]), "torso")
     ob = mb.build("SkinLines", material("SkinLine", srgb("#c4887a"), roughness=0.6))
     # the strips must face the camera (out of the skin) for the app's culling
     if ob.data.polygons and ob.data.polygons[0].normal.y > 0:
@@ -549,7 +608,45 @@ def build_skin_lines(body_ob):
     shade = sh.build("SkinShade", material("SkinShade", srgb("#e9bba9"), roughness=0.6))
     if shade.data.polygons and shade.data.polygons[0].normal.y > 0:
         shade.data.flip_normals()
-    return [ob, shade]
+
+    # a soft shade under each collarbone (the app feathers it by its UVs;
+    # both run left → right so their UVs agree)
+    cs = MeshBuilder()
+    for side in (1, -1):
+        xs = [side * x for x in (0.013, 0.024, 0.036, 0.048, 0.060)]
+        pts = [(x, _CLAV_Z(abs(x)) - 0.0058) for x in sorted(xs)]
+        cs.add(_stroke(bvh, pts, [0.0040, 0.0070, 0.0070, 0.0060, 0.0040], 0.0003), "torso")
+    collar = cs.build("CollarShade", material("CollarShade", srgb("#e6b19e"), roughness=0.6))
+    if collar.data.polygons and collar.data.polygons[0].normal.y > 0:
+        collar.data.flip_normals()
+    return [ob, shade, collar, build_neck_shade()]
+
+
+# lower edge of the jaw's shadow on the neck over the azimuth (degrees, her
+# right −, her left +): the key light comes from her left, so the shadow
+# reaches down her right side to the collar and, on her left, stops along the
+# front edge of the lit neck muscle (as in the reference)
+_NECK_SHADE_Z = pchip([(-125.0, 1.370), (-45.0, 1.372), (-20.0, 1.381), (0.0, 1.392), (20.0, 1.405),
+                       (40.0, 1.421), (60.0, 1.438), (80.0, 1.450), (125.0, 1.456)])
+
+
+def build_neck_shade(cols=72, rows=28, top=1.487):
+    """The cel shadow the head casts on the neck, laid on the skin (it rides
+    the neck like the skin under it; its top is hidden under the jaw)."""
+    grid = []
+    for r in range(rows + 1):
+        row = []
+        for c in range(cols + 1):
+            az = lerp(-125.0, 125.0, c / cols)
+            z = lerp(_NECK_SHADE_Z(az), top, (r / rows) ** 1.4)
+            row.append(torso_point(z, math.radians(az), 0.00035))
+        grid.append(row)
+    mb = MeshBuilder()
+    mb.add(open_loft(grid), "torso")
+    ob = mb.build("NeckShade", material("NeckShade", srgb("#dba38c"), roughness=0.6))
+    if ob.data.polygons and ob.data.polygons[cols // 2].normal.y > 0:
+        ob.data.flip_normals()
+    return ob
 
 
 def _fuse(ob, voxel=0.0005, smooth=8, keep=0.014):

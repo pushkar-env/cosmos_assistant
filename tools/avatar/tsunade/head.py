@@ -15,11 +15,13 @@ HEAD_C = Vector((0.0, 0.0, 1.535))
 
 # head-local landmark heights (metres relative to HEAD_C)
 TOP_Z = 0.112
-CHIN_Z = -0.118  # a short, softly pointed chin under a small mouth
+CHIN_Z = -0.118  # a short, softly pointed chin under a wide, full mouth
 EYE_Z = -0.019
 EYE_X = 0.0355
-NOSE_Z = -0.058
-MOUTH_Z = -0.0785  # close under the nose, as in the reference
+# measured on the reference (eye line → chin): the nose tip sits a little over
+# half way down, the mouth close under it — a mature face, not a child's
+NOSE_Z = -0.0645
+MOUTH_Z = -0.0810
 MARK_Z = 0.027  # the diamond seal on her forehead
 
 SKIN = "#f6dccd"
@@ -83,18 +85,39 @@ def head_point(x, y, z):
     X, Z = p.x, p.z
     if p.y < 0:
         front = smoothstep(0.0, -0.05, p.y)
-        # tiny pointed nose: soft on top, crisp underneath
+        # small pointed nose: a long soft bridge, crisp underneath
         dz = Z - NOSE_Z
-        sz = 0.014 if dz > 0 else 0.0042
+        sz = 0.017 if dz > 0 else 0.0042
         p.y -= 0.0060 * math.exp(-((X / 0.0047) ** 2) - (dz / sz) ** 2) * front
         # gentle cheekbones
         for sx in (-1, 1):
             g = math.exp(-(((X - sx * 0.052) / 0.02) ** 2) - ((Z + 0.045) / 0.018) ** 2)
             p.y -= 0.0012 * g * front
+        p.y -= _lips(X, Z) * front
     return p
 
 
-def build_head(rings=72, segs=80):
+def _lips(x, z):
+    """Forward relief (m) of the mouth: a full lower lip, a thinner upper lip
+    rounding over the cupid's bow, and the dip under the lower lip. Only the
+    profile shows it (the face shades through sphere normals); the painted
+    lips lie on top."""
+    dz = z - MOUTH_Z
+    upper = 0.0010 * math.exp(-((x / 0.0125) ** 4) - ((dz - 0.0030) / 0.0034) ** 2)
+    lower = 0.0015 * math.exp(-((x / 0.0105) ** 4) - ((dz + 0.0038) / 0.0036) ** 2)
+    dip = 0.0006 * math.exp(-((x / 0.0120) ** 2) - ((dz + 0.0105) / 0.0030) ** 2)
+    return upper + lower - dip
+
+
+def _azimuth(s, k=0.5):
+    """Head ring azimuth for s in [0, 1): back → front (0) → back, with the
+    vertices k× as far apart over the face as round the back of the head (the
+    lips and nose need ~2 mm; the back is under the hair)."""
+    t = 2.0 * s - 1.0
+    return math.pi * t * (k + (1.0 - k) * t * t)
+
+
+def build_head(rings=120, segs=128):
     verts = []
     faces = []
     # top pole
@@ -102,7 +125,7 @@ def build_head(rings=72, segs=80):
     for i in range(1, rings):
         phi = math.pi * i / rings
         for j in range(segs):
-            th = 2 * math.pi * j / segs
+            th = _azimuth(j / segs)
             x = math.sin(phi) * math.sin(th)
             y = -math.sin(phi) * math.cos(th)
             z = math.cos(phi)
