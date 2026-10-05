@@ -368,6 +368,13 @@ export class AvatarController {
     this.updateFace(dt)
 
     this.rig.root.updateWorldMatrix(true, true)
+    // the cloth pressed under the resting hand stays under it
+    const press = this.rig.config.handPress
+    const holds = this.rig.config.pressHolds
+    if (press && holds) {
+      const w = this.weights.get(press) ?? 0
+      for (const name of holds) this.springs.hold(name, w)
+    }
     // a faint, shifting breeze so hair and cloth never look frozen
     const t = this.time
     this.springs.external.set(
@@ -550,12 +557,14 @@ export class AvatarController {
   }
 
   /** the press under the resting hand: full while it rests where it was
-   *  posed, gone once it has moved a few centimetres off */
+   *  posed, gone once it is well clear. The cloth springs back out as the
+   *  press lets go, so it lets go slower than a hand lifting off (the clips
+   *  lift it ~8 cm before it goes anywhere): the cloth never catches it up */
   private updatePress(): void {
     if (!this.pressRest) return
     const now = this.handOnHips(_vPress)
     const d = now ? now.distanceTo(this.pressRest) : 1
-    this.pressGoal = 1 - THREE.MathUtils.smoothstep(d, 0.015, 0.06)
+    this.pressGoal = 1 - THREE.MathUtils.smoothstep(d, 0.02, 0.08)
   }
 
   /** 0 = left, 1 = right, -1 = neither: the hand her base pose rests on her */

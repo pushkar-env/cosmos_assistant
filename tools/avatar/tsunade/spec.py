@@ -36,6 +36,9 @@ POINTS = {
 # hand on the hip, pressing the coat panel to it (as in the reference): fingers
 # angled in and down, palm on the cloth
 HIP_HAND = ((-0.80, -0.14, -0.58), (-0.40, 0.92, 0.0))
+# its fingers: the thumb lifted a touch, so it lies on the (pressed) coat by
+# the obi instead of being settled down past the coat's front edge
+HIP_FINGERS = {"curl": 11, "thumb": -4, "spread": 4}
 # her hand style, layered on every pose: each finger curls a little more
 # than the one before it (index → little) and they fan slightly
 FINGER_CASCADE = 10.0
@@ -43,6 +46,15 @@ FINGER_CASCADE = 10.0
 # in, curled down onto them when hovering (see kit.anims.settle_hands)
 HAND_CONTACT = ("Kimono", "Obi")
 FINGER_SPREAD = 0.0
+# contact: her (fused) hand meshes, their sleeves, and what no hand may cut
+# through — clips that bring her hands together, onto her clothes or up past
+# her head are solved against these (see kit.anims.PoseKit.clear)
+HAND_MESHES = {"left": "Hand_L", "right": "Hand_R"}
+SLEEVES = {"left": "CoatSleeve_L", "right": "CoatSleeve_R"}
+HAND_SOLIDS = (
+    "Kimono", "KimonoPiping", "BustShadow", "BustFold", "Obi", "ObiCord", "Coat", "CoatTrim",
+    "CoatSleeve_L", "CoatSleeve_R", "Pants_L", "Pants_R", "Body", "Head", "HairCap",
+)
 
 MERGES = {
     "Body": ["Body", "Hand_L", "Hand_R", "Foot_L", "Foot_R"],

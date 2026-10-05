@@ -322,14 +322,42 @@ def coat_point(z, az, extra=0.0):
     return p
 
 
+def graded(a, b, base, spans):
+    """Samples from a to b about ``base`` apart, closer inside each
+    ``(lo, hi, step)`` span (easing between the two spacings)."""
+
+    def step_at(x):
+        s = base
+        for lo, hi, st in spans:
+            w = smoothstep(lo - 2 * base, lo, x) * (1 - smoothstep(hi, hi + 2 * base, x))
+            s = min(s, base + (st - base) * w)
+        return s
+
+    xs = [a]
+    while xs[-1] < b:
+        xs.append(xs[-1] + step_at(xs[-1]))
+    k = (b - a) / (xs[-1] - a)
+    return [a + (x - a) * k for x in xs]
+
+
+# Where her left hand rests on the haori (her hip, from the front edge round
+# toward her side), the coat is meshed ~4x finer: the HipPress morph lays it
+# flat under the hand vertex by vertex, and at the base spacing (~2 cm) its
+# faces bridged the gaps between the fingers and cut through them.
+COAT_ROWS = graded(COAT_HEM, COAT_TOP, 0.022, [(0.87, 1.13, 0.006)])
+# columns run from the left front edge (0) round the back to the right (1)
+COAT_COLS = graded(0.0, 1.0, 1 / 64, [(0.0, 0.17, 1 / 220)])
+# across the trim band, edge → inner side
+TRIM_COLS = (0.0, 0.33, 0.67, 1.0)
+
+
 def build_coat(m):
     out = []
     mb = MeshBuilder()
     rows = []
-    zs = [lerp(COAT_HEM, COAT_TOP, i / 44) for i in range(45)]
-    for z in zs:
+    for z in COAT_ROWS:
         e = coat_edge(z)
-        rows.append([coat_point(z, lerp(e, 360 - e, k / 64)) for k in range(65)])
+        rows.append([coat_point(z, lerp(e, 360 - e, u)) for u in COAT_COLS])
     mb.add(open_loft(rows))
     coat = mb.build("Coat", m["coat"])
     out.append(coat)
@@ -337,14 +365,15 @@ def build_coat(m):
     # dark trim: down each front edge and round the back of the neck
     trim = MeshBuilder()
     for side in (1, -1):
-        a, b = [], []
-        for z in [lerp(COAT_HEM - 0.002, COAT_TOP, i / 44) for i in range(45)]:
+        cols = [[] for _ in TRIM_COLS]
+        for z in [COAT_HEM - 0.002] + COAT_ROWS[1:]:
             e = coat_edge(z)
             r = max(_HW(z) if z < 1.2 else TORSO_HW(min(z, 1.38)) + 0.02, 0.05)
             w = D(0.036 / r)
-            a.append(coat_point(z, side * e, 0.0042))
-            b.append(coat_point(z, side * (e + w), 0.0042))
-        trim.add(open_loft([b, a]) if side > 0 else open_loft([a, b]))
+            for col, t in zip(cols, TRIM_COLS):
+                col.append(coat_point(z, side * (e + w * t), 0.0042))
+        # (rows ordered inner side → edge on the left, edge → inner on the right)
+        trim.add(open_loft(cols[::-1]) if side > 0 else open_loft(cols))
     # round the back of the neck the trim lies flat along the coat's top edge
     rows = []
     for z in (COAT_TOP - 0.034, COAT_TOP + 0.001):
@@ -438,14 +467,15 @@ def build_sandals(m):
 
 
 def add_hand_press(arm_ob, hand="Hand_L", clip="Idle", frame=0, names=("Coat", "CoatTrim"),
-                   under=("Kimono", "Obi"), gap=0.0015, floor=0.0015, soft=0.045):
+                   under=("Kimono", "Obi"), gap=0.003, floor=0.0015, soft=0.045, margin=0.002):
     """A shape key, "HipPress", that lays the haori flat under the hand
     resting on her hip — the hand presses the panel to her, as in the
     reference, instead of the cloth cutting through it. Worked out in the
     posed clip (where the hand rests): every coat point the hand covers (a
-    ray out from inside her body meets the hand) is pulled in to just under
-    the hand, never into the tunic beneath; the dent eases out into the cloth
-    round it. Displacements are carried back to the rest pose through each
+    ray out from inside her body meets the hand) is pulled in to ``gap``
+    under the hand, never into the tunic beneath; the dent eases out into the
+    cloth round it, and any face still within ``margin`` of the hand has its
+    corners sunk further. Displacements are carried back to the rest pose through each
     vertex's skinning, so the key is a plain morph the app can fade in and
     out with the hand (see ``handPress`` in avatars.ts)."""
     from mathutils.bvhtree import BVHTree
@@ -458,6 +488,20 @@ def add_hand_press(arm_ob, hand="Hand_L", clip="Idle", frame=0, names=("Coat", "
     bpy.context.view_layer.update()
     dg = bpy.context.evaluated_depsgraph_get()
     hand_bvh = BVHTree.FromObject(bpy.data.objects[hand], dg)
+    # the arm below its sleeve (the hand mesh runs up to the shoulder, which
+    # sits inside the coat by design) — what the cloth must not cut — grown
+    # by ``margin``, so the cloth keeps clear of it as the clips sway
+    side = "left" if hand.endswith("_L") else "right"
+    hob = bpy.data.objects[hand]
+    ev = hob.evaluated_get(dg)
+    me = ev.to_mesh()
+    hv = [hob.matrix_world @ (v.co + v.normal * margin) for v in me.vertices]
+    hp = [tuple(p.vertices) for p in me.polygons]
+    ev.to_mesh_clear()
+    lower = arm_ob.pose.bones[side + "LowerArm"]
+    elbow, axis = lower.head, (lower.tail - lower.head).normalized()
+    reach = anims._sleeve_reach(arm_ob, side)
+    hand_free = BVHTree.FromPolygons(hv, [p for p in hp if (hv[p[0]] - elbow).dot(axis) > reach])
     unders = [BVHTree.FromObject(bpy.data.objects[n], dg) for n in under if n in bpy.data.objects]
     pose_mats = {pb.name: pb.matrix @ arm_ob.data.bones[pb.name].matrix_local.inverted() for pb in arm_ob.pose.bones}
     report = {}
@@ -512,6 +556,24 @@ def add_hand_press(arm_ob, hand="Hand_L", clip="Idle", frame=0, names=("Coat", "
                 if fl is not None:
                     pull = max(pull, min(0.0, fl + floor - p.dot(radial[i])))
                 disp[i] = pull
+        # the hand is only sampled at the cloth's vertices, so a face bridging
+        # a pressed vertex and a free one beside a finger can still cut it:
+        # sink the corners of every face that cuts the hand a little further
+        # (never into the tunic) until none does
+        faces = [tuple(p.vertices) for p in ob.data.polygons]
+        cutting = 0
+        for _ in range(12):
+            now = [p + radial[i] * disp.get(i, 0.0) for i, p in enumerate(posed)]
+            cut = BVHTree.FromPolygons(now, faces).overlap(hand_free)
+            cutting = len(cut)
+            if not cut:
+                break
+            for i in {i for f, _h in cut for i in faces[f]}:
+                d = disp.get(i, 0.0) - 0.0015
+                fl = floor_at(i)
+                if fl is not None:
+                    d = max(d, min(disp.get(i, 0.0), fl + floor - posed[i].dot(radial[i])))
+                disp[i] = d
         # posed displacement → rest pose, through each vertex's blended skinning
         gnames = {g.index: g.name for g in ob.vertex_groups}
         inv_obj = ob.matrix_world.inverted().to_3x3()
@@ -530,7 +592,7 @@ def add_hand_press(arm_ob, hand="Hand_L", clip="Idle", frame=0, names=("Coat", "
             M = M * (1.0 / tot)
             keyed[i] = rest[i] + inv_obj @ (M.inverted() @ (radial[i] * d))
         shape_key(ob, "HipPress", keyed)
-        report[name] = {"covered": len(target), "moved": len(disp),
+        report[name] = {"covered": len(target), "moved": len(disp), "still_cutting": cutting,
                         "deepest_mm": round(-min(disp.values(), default=0.0) * 1000, 1)}
     arm_ob.animation_data.action = None
     return report

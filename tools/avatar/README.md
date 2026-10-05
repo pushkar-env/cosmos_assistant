@@ -52,7 +52,7 @@ still for a quick look.
 | `kit/geom.py` | Lofts, tubes, open sheets, flat strips, `MeshBuilder` |
 | `kit/strands.py` | Anime hair: skull shell, swept clumps, volume cap |
 | `kit/rig.py` | VRM-named skeleton, plus capsule, chain and cloth-panel weights |
-| `kit/anims.py` | 12 clips authored as poses (FK + Blender IK baked to rotations) |
+| `kit/anims.py` | 12 clips authored as poses (FK + Blender IK baked to rotations), solved against the hand and clothes meshes |
 | `kit/export.py` | Merges meshes by material, exports the GLB |
 
 ### Weights
@@ -68,10 +68,20 @@ still for a quick look.
 
 ### Poses and hands
 
-- A spec with `BASE_STYLE = "hip"` rests one hand on the hip. `POINTS["hip_left"]` is the wrist target, and `HIP_HAND` is an optional (finger direction, palm normal) pair.
+- A spec with `BASE_STYLE = "hip"` rests one hand on the hip. `POINTS["hip_left"]` is the wrist target. `HIP_HAND` is an optional (finger direction, palm normal) pair, and `HIP_FINGERS` optional `fingers` arguments.
+  - The resting hand is placed when each key is written (`rest_hand`), at its spot in the reference stance relative to her hips as they are then. It rests on cloth hanging from her hips, so it has to ride with them. A hand left where it was placed slid through that cloth whenever a clip bent or turned her spine. Its fingers are settled once, in that stance.
+  - A clip that takes the hand off her hip first keys it lifted straight off (`lifted`, `HIP_LIFT` = 8 cm), and does the same on the way back. Gliding straight to a gesture swept it through the coat, which is pressed in under the hand and hangs ~5 cm further out once it's gone.
+  - The looping states (Idle, Listen, Think, Talk) keep the hand on the hip, because the app crossfades between them bone by bone and a blend can't lift it first. A hand-on-hip character listens in her stance and thinks with her elbow out. Happy starts and ends on her stance. Folded arms can only cut through a full bust and an open coat, and a hand blending to behind her back passes through her hip.
 - `k.fingers(..., spread=+n)` fans the fingers out on either hand.
-- A spec's `HAND_CONTACT` lists surfaces (Tsunade's tunic and obi) that fingers rest ON in every key of every clip. `settle_hands` lifts a finger that has sunk in just clear of the cloth, and curls one hovering within a few millimetres down onto it. Fingers touching nothing are left alone.
-- A spec's optional `after_anims(arm)` runs once the clips exist, for anything that needs her posed. Tsunade's adds the "HipPress" morph: the haori laid flat under her resting hand, worked out in the Idle pose and carried back to the rest pose through the skinning. The app fades it in and out with the hand (`handPress` in `avatars.ts`).
+- A spec's `HAND_CONTACT` lists surfaces (Tsunade's tunic and obi) that fingers rest ON in every key of every clip. `settle_hands` lifts a finger that has sunk in just clear of the cloth, and curls one hovering within a few millimetres down onto it. Fingers touching nothing are left alone. In poses where one hand is laid on the other (`hands_touch`), the other hand counts as a surface too.
+- **Contact.** A spec's `HAND_MESHES`, `SLEEVES` and `HAND_SOLIDS` (clothes, skin, head, hair cap) let clips be solved against the real skinned meshes. `PoseKit.clear(pose, moves)` re-poses with a hand's reach target pushed along an axis until it stops cutting the other hand or anything solid. Only the arm past its sleeve counts. Every solve is logged in `CONTACT_LOG`.
+  - Folded hands (Bow, Shy) lay the right hand over the left, a little higher, so the left hand's edge nests in the right thumb's web. Stacked squarely, the thumb pad held them ~5 cm apart. Hands behind the back nest the other way round.
+  - Stretch sweeps the wrists out round her sides to finish apart above her head.
+  - Surprised puts one hand on each side of her upper chest.
+  - Clips whose hands meet are keyed every few frames (`_eased`). Each key is solved; rotations interpolated across a swaying body let the hands drift into each other between sparse keys.
+- A spec's optional `after_anims(arm)` runs once the clips exist, for anything that needs her posed. Tsunade's adds the "HipPress" morph: the haori laid flat 3 mm under her resting hand, worked out in the Idle pose and carried back to the rest pose through the skinning. The app fades it in and out with the hand (`handPress` in `avatars.ts`).
+  - The hand is only sampled at the cloth's vertices, so a face bridging a pressed vertex and a free one beside a finger can still cut it. A correction pass sinks the corners of any face within 2 mm of the hand, never into the tunic.
+  - The coat is meshed about 4× finer where the hand rests (`COAT_ROWS` / `COAT_COLS`). At the base ~2 cm spacing the press couldn't follow the fingers.
 - A spec's `FINGER_CASCADE` and `FINGER_SPREAD` are layered on every finger pose. The cascade curls each finger a little more than the one before it, index to little; the spread fans them.
 - **Tsunade's feet** are made the same way: a foot loft that slopes into the toes plus five toes, fused (`_fuse` in `tsunade/body.py`). Each toe is tapered, slightly flat, with knuckles and a tip pad resting on the sole. The joints sit on a slant, the lengths step down from the big toe, and the toes fan slightly. The toenails follow each toe's shape and are widest at the tip.
 - **Tsunade's hands** are sculpted, not lofted. The forearm, palm, fingers and thumb are built as overlapping parts, then voxel-remeshed into one surface (real finger webs, a thumb growing from its pad, no wrist seam). The result is smoothed, decimated, and re-tagged per part for weighting; see `_fuse_hand` in `tsunade/body.py`. Her almond nails follow each fingertip's own cross-section, and `_seat_nails` re-seats them on the fused surface. The fingers rest fanned a little wider than a relaxed hand so they stay separate surfaces when fused. Her negative `FINGER_SPREAD` draws them back together in every pose.

@@ -57,6 +57,12 @@ export interface SpringChainSpec {
   wind?: number
   /** collider group — only colliders listing this group (or none) touch it */
   group?: string
+  /** cloth hanging round her: may swing out freely, but never more than this
+   *  (m) nearer her body than it hangs at rest (see SpringSettings.inward) */
+  inward?: number
+  /** …and per joint, root first, never more than this further out (joints
+   *  past the list swing out freely — see SpringSettings.outward) */
+  outward?: number[]
 }
 
 export interface ColliderSpec {
@@ -103,6 +109,10 @@ export interface AvatarConfig {
   /** a morph that presses her clothes under the resting hand, faded in as
    *  the hand nears its resting spot and out as it leaves */
   handPress?: string
+  /** spring bones carrying the cloth under the resting hand: held at rest
+   *  as far as the press is in, so the breeze can't swing pressed cloth back
+   *  out through her fingers */
+  pressHolds?: string[]
 }
 
 const SKIN_FACE = (color: string, shade: string, outline: string): MaterialSpec => ({
@@ -231,6 +241,9 @@ const LIBRARY: Record<AvatarId, Omit<AvatarConfig, 'url'> & { url: string | unde
       { prefix: 'hair_tail_R', stiffness: 0.8, drag: 0.32, gravity: 0.3, radius: 0.026, wind: 0.6, group: 'hair' },
       { prefix: 'hair_lock_L', stiffness: 1.0, drag: 0.36, gravity: 0.25, radius: 0.012, wind: 0.35, group: 'hair' },
       { prefix: 'hair_lock_R', stiffness: 1.0, drag: 0.36, gravity: 0.25, radius: 0.012, wind: 0.35, group: 'hair' },
+      // the haori's skirt swings round her, but never in through her tunic (it
+      // hangs only ~3 cm off it at the hips), nor far out at hand height —
+      // it swept through her hanging hand; the hem below swings out freely
       ...['FL', 'SL', 'BL', 'BR', 'SR', 'FR'].map((p) => ({
         prefix: `cloth_coat_${p}`,
         stiffness: 1.9,
@@ -238,7 +251,9 @@ const LIBRARY: Record<AvatarId, Omit<AvatarConfig, 'url'> & { url: string | unde
         gravity: 0.18,
         radius: 0.015,
         wind: 1,
-        group: 'cloth'
+        group: 'cloth',
+        inward: 0.01,
+        outward: [0.012, 0.016, 0.02]
       })),
       // gentle secondary motion: ~7° of sway on a hop or a quick gesture,
       // settling in under a second (tuned live in the app at 60 fps)
@@ -249,6 +264,7 @@ const LIBRARY: Record<AvatarId, Omit<AvatarConfig, 'url'> & { url: string | unde
     fingerLife: 4,
     restingHand: 'left',
     handPress: 'HipPress',
+    pressHolds: ['cloth_coat_FL_1', 'cloth_coat_SL_1'],
     colliders: [
       { bone: 'head', at: [0, 1.54, 0], radius: 0.098 },
       { bone: 'neck', at: [0, 1.42, 0], radius: 0.045 },

@@ -155,7 +155,8 @@ The default centrepiece: an anime girl who reacts to the conversation. The model
   - every finger joint drifts a few degrees on its own slow rhythm, and the free wrist sways a little;
   - every few seconds there's a small hand "moment": fingers drumming or rippling on the resting hand, or a flex, an opening, a thumb or a wrist turn on the free one.
   - Fingers only ever *lift* off the pose (at the knuckle), so a hand resting on her clothes never presses into them.
-  - `handPress` names a morph that presses her clothes under the resting hand (`restingHand`). It follows how close that hand is to its resting spot, so it releases when a gesture lifts the hand away.
+  - `handPress` names a morph that presses her clothes under the resting hand (`restingHand`). It follows how close that hand is to its resting spot: full within 2 cm, gone by 8 cm. That is slower than the clips lift the hand off, so the cloth springing back never catches it.
+  - `pressHolds` lists the spring bones carrying the cloth under that hand. They're held at rest as far as the press is in, so the breeze can't swing pressed cloth back out through the fingers.
   - Outline shells share their mesh's morph weights.
 
   Every rotation the controller layers on top of the clips (head turns, living hands) is taken back off before the mixer runs each frame. Three.js's `AnimationMixer` only rewrites a bone when the clip's value *changes*, so during a held pose anything layered on top would otherwise compound.
@@ -173,7 +174,14 @@ The default centrepiece: an anime girl who reacts to the conversation. The model
   reader: sentences → emotion + intensity + optional gesture (greeting → wave,
   compliment → shy, thanks → bow, …). No model call, no latency.
 - [`springBones.ts`](../../src/renderer/src/features/avatar/springBones.ts) —
-  verlet spring joints with body colliders for the hair chains.
+  verlet spring joints with body colliders, for hair and cloth chains. Colliders
+  only hold the joints off the body; the cloth between joints can still cut what
+  lies just under it. So cloth chains can also be kept within limits of where
+  they hang at rest, measured from the body's axis: `inward` (never more than
+  this much closer, so the coat can't swing in through the tunic) and `outward`
+  per joint (never more than this much further, so it can't sweep through an arm
+  hanging beside it; joints past the list, such as a hem, swing freely).
+  `hold(bone, amount)` pins a joint at its animated rest.
 
 - [`avatars.ts`](../../src/renderer/src/features/avatar/avatars.ts) — the avatar
   registry: per character, its model, camera framing, eye geometry and iris

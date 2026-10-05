@@ -21,6 +21,17 @@ export interface SpringSettings {
   wind?: number
   /** collider group this chain belongs to (see Collider.groups) */
   group?: string
+  /** cloth hanging round the body: a joint may swing out and around freely,
+   *  but never more than this (m) closer to the body's axis — the line of the
+   *  bone the chain hangs from — than it hangs at rest. Colliders only hold
+   *  the joints off the body; the cloth between them still cut through
+   *  whatever lay just under it when it swung in. */
+  inward?: number
+  /** per joint, root first: never more than this (m) further out from the
+   *  body's axis than it hangs at rest — so cloth swinging out can't sweep
+   *  through an arm hanging just beyond it. Joints past the end of the list
+   *  swing out freely (a hem below the hands can flare). */
+  outward?: number[]
 }
 
 interface Joint {
@@ -32,6 +43,14 @@ interface Joint {
   tail: THREE.Vector3
   prevTail: THREE.Vector3
   settings: SpringSettings
+  /** the bone the chain hangs from, and the body's up axis in its frame (from
+   *  the rest pose, where she stands upright) — the axis for `inward` */
+  hangsFrom: THREE.Object3D
+  upLocal: THREE.Vector3
+  /** 0..1: how firmly the tail is held at its animated rest (see hold) */
+  held: number
+  /** position in its chain (0 = root) */
+  index: number
 }
 
 export interface Collider {
@@ -47,6 +66,10 @@ const _v2 = new THREE.Vector3()
 const _v3 = new THREE.Vector3()
 const _q1 = new THREE.Quaternion()
 const _q2 = new THREE.Quaternion()
+const _v4 = new THREE.Vector3()
+const _v5 = new THREE.Vector3()
+const _v6 = new THREE.Vector3()
+const _q3 = new THREE.Quaternion()
 const _pos = new THREE.Vector3()
 const _delta = new THREE.Quaternion()
 const _gravity = new THREE.Vector3(0, -1, 0)
@@ -62,6 +85,9 @@ export class SpringBones {
   readonly external = new THREE.Vector3()
 
   addChain(bones: THREE.Bone[], settings: SpringSettings): void {
+    const hangsFrom = (bones[0]?.parent ?? bones[0]) as THREE.Object3D
+    hangsFrom.updateWorldMatrix(true, false)
+    const upLocal = new THREE.Vector3(0, 1, 0).applyQuaternion(hangsFrom.getWorldQuaternion(new THREE.Quaternion()).invert())
     for (let i = 0; i < bones.length; i++) {
       const bone = bones[i]
       const child = bones[i + 1]
@@ -87,9 +113,19 @@ export class SpringBones {
         restLocal: bone.quaternion.clone(),
         tail: tail.clone(),
         prevTail: tail.clone(),
-        settings
+        settings,
+        hangsFrom,
+        upLocal,
+        held: 0,
+        index: i
       })
     }
+  }
+
+  /** hold a joint's tail at its animated rest (0 = free, 1 = fixed) — e.g.
+   *  cloth pressed under a resting hand, which mustn't swing out through it */
+  hold(boneName: string, amount: number): void {
+    for (const j of this.joints) if (j.bone.name === boneName) j.held = amount
   }
 
   /** collider sphere given by its REST world position, carried by ``bone`` */
@@ -176,6 +212,13 @@ export class SpringBones {
           next.sub(_pos).normalize().multiplyScalar(j.length).add(_pos)
         }
       }
+      const out = s.outward?.[j.index]
+      if (s.inward !== undefined || out !== undefined || j.held > 0) {
+        const restTail = _v4.copy(restDir).multiplyScalar(j.length).add(_pos)
+        if (s.inward !== undefined || out !== undefined) this.keepWithin(j, next, restTail, s.inward, out)
+        if (j.held > 0) next.lerp(restTail, Math.min(1, j.held))
+        next.sub(_pos).normalize().multiplyScalar(j.length).add(_pos)
+      }
       j.prevTail.copy(j.tail)
       j.tail.copy(next)
 
@@ -185,5 +228,32 @@ export class SpringBones {
       j.bone.quaternion.copy(_q1.invert().multiply(worldRot))
       j.bone.updateWorldMatrix(false, false)
     }
+  }
+
+  /** keep ``tail`` between ``inward`` nearer and ``outward`` further from the
+   *  body's axis (the line of the bone the chain hangs from) than
+   *  ``restTail`` is (either may be undefined: no limit that way) */
+  private keepWithin(
+    j: Joint,
+    tail: THREE.Vector3,
+    restTail: THREE.Vector3,
+    inward: number | undefined,
+    outward: number | undefined
+  ): void {
+    const origin = j.hangsFrom.getWorldPosition(_v5)
+    const up = _v6.copy(j.upLocal).applyQuaternion(j.hangsFrom.getWorldQuaternion(_q3))
+    // radial offsets from the axis (the along-axis part removed)
+    const restR = _v3.copy(restTail).sub(origin)
+    restR.addScaledVector(up, -restR.dot(up))
+    const rest = restR.length()
+    const rel = _v3.copy(tail).sub(origin)
+    const along = rel.dot(up)
+    rel.addScaledVector(up, -along)
+    const r = rel.length()
+    if (r < 1e-6) return
+    let want = r
+    if (inward !== undefined) want = Math.max(want, rest - inward)
+    if (outward !== undefined) want = Math.min(want, rest + outward)
+    if (want !== r) tail.copy(origin).addScaledVector(up, along).addScaledVector(rel, want / r)
   }
 }
