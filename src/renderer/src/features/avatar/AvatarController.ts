@@ -1,13 +1,13 @@
 import * as THREE from 'three'
 import type { AssistantState } from '@shared/types'
-import type { NovaRig } from './avatarAsset'
+import type { AvatarRig } from './avatarAsset'
 import type { Emotion, Gesture, Reading } from './emotion'
 import { LipSync, VISEMES } from './lipsync'
 import { SpringBones } from './springBones'
 import { shared } from './toonMaterials'
 
 /*
- * Nova's "nervous system": everything that makes the model feel alive,
+ * The avatar's "nervous system": everything that makes the model feel alive,
  * evaluated once per frame in a fixed order —
  *
  *   1. body clips   — a looping base per assistant state (Idle/Listen/Think/
@@ -16,7 +16,8 @@ import { shared } from './toonMaterials'
  *                     and head follow part of the way, layered on the clip
  *   3. face         — emotion preset + natural blinking + lip-sync, blended
  *                     into the blendshapes with per-channel smoothing
- *   4. hair         — spring bones react to whatever the body just did
+ *   4. hair & cloth — spring bones react to whatever the body just did, plus
+ *                     a faint ambient breeze
  *
  * Inputs arrive as plain fields/methods (state, pointer, emotion readings)
  * so React never re-renders on the hot path.
@@ -63,8 +64,14 @@ const SIDED = ['E_Blink', 'E_Happy', 'E_Wide', 'E_Relax', 'E_Sad', 'E_Angry', 'B
 
 const _q = new THREE.Quaternion()
 const _q2 = new THREE.Quaternion()
+const _q3 = new THREE.Quaternion()
+const _vPress = new THREE.Vector3()
+
+type HandMoment = 'tap' | 'ripple' | 'flex' | 'open' | 'thumb' | 'wrist'
+/** how a finger's lift (a negative curl) splits over its three joints */
+const LIFT_SHARE = [1.25, 0.3, 0.1]
 const _e = new THREE.Euler()
-const HEAD_PIVOT_OFFSET = new THREE.Vector3(0, 0.085, 0.006)
+const _axis = new THREE.Vector3()
 
 interface Track {
   action: THREE.AnimationAction
@@ -79,7 +86,10 @@ export class AvatarController {
   /** pointer in NDC, or null when the cursor is off the avatar canvas */
   pointer: THREE.Vector2 | null = null
 
-  private rig: NovaRig
+  private rig: AvatarRig
+  private headPivot: THREE.Vector3
+  /** resting blush relative to the presets (tuned for a 0.14 base) */
+  private blushScale: number
   private mixer: THREE.AnimationMixer
   private tracks = new Map<string, Track>()
   private baseName = 'Idle'
@@ -97,7 +107,7 @@ export class AvatarController {
   private emotion: Emotion = 'neutral'
   private emotionIntensity = 0
   private emotionHold = 0
-  private blush = 0.14
+  private blush = 0
   private lines = 0
   private sparkle = 0
   private pupil = 1
@@ -118,9 +128,39 @@ export class AvatarController {
   private time = 0
 
   private restWorld = new Map<string, THREE.Quaternion>()
+  private breathApplied = new Map<string, THREE.Quaternion>()
+  /** living hands: every finger joint (axis: its curl axis in its own frame,
+   *  w: share of the motion, phase: its own rhythm, side 0 = left, finger
+   *  0 = thumb … 4 = little) and each wrist (flex / sideways axes) */
+  private joints: {
+    bone: THREE.Bone
+    axis: THREE.Vector3
+    w: number
+    phase: number
+    side: number
+    finger: number
+    seg: number
+    q: THREE.Quaternion
+  }[] = []
+  private wrists: { bone: THREE.Bone; flex: THREE.Vector3; sway: THREE.Vector3; side: number; q: THREE.Quaternion }[] = []
+  /** every rotation layered on top of the clips this frame (head turns,
+   *  living hands), taken back off before the mixer runs: three's mixer only
+   *  rewrites a bone when the clip's value CHANGES, so during a held pose
+   *  (a bow, the end of a gesture) anything layered on top would otherwise
+   *  compound frame after frame */
+  private layered = new Map<THREE.Bone, THREE.Quaternion>()
+  /** an occasional small hand "moment" (a tap, a flex…) */
+  private moment: { kind: HandMoment; side: number; start: number; dur: number } | null = null
+  private nextMoment = 6
+  /** where the resting hand sits on her (hips space, in the base pose) and
+   *  how pressed her clothes are under it right now (0..1) */
+  private pressRest: THREE.Vector3 | null = null
+  private pressGoal = 0
 
-  constructor(rig: NovaRig) {
+  constructor(rig: AvatarRig) {
     this.rig = rig
+    this.headPivot = new THREE.Vector3(...rig.config.headPivot)
+    this.blushScale = rig.config.blush / 0.14
     this.mixer = new THREE.AnimationMixer(rig.root)
     for (const clip of rig.clips) {
       const action = this.mixer.clipAction(clip)
@@ -155,11 +195,13 @@ export class AvatarController {
       if (b) this.restWorld.set(name, rootInv.clone().multiply(b.getWorldQuaternion(new THREE.Quaternion())))
     }
 
+    this.setupFingers()
     this.setupSprings()
     // settle the first pose so the springs start from the idle stance
     this.mixer.update(0)
     rig.root.updateWorldMatrix(true, true)
     this.springs.reset()
+    this.pressRest = this.handOnHips()
   }
 
   private setupSprings(): void {
@@ -174,26 +216,88 @@ export class AvatarController {
       return out
     }
     this.rig.root.updateWorldMatrix(true, true)
-    const back = { stiffness: 0.85, drag: 0.32, gravity: 0.25, radius: 0.016 }
-    for (const g of ['hair_back_C', 'hair_back_L', 'hair_back_R']) this.springs.addChain(chain(g), back)
-    for (const g of ['hair_side_L', 'hair_side_R']) this.springs.addChain(chain(g), { stiffness: 1.1, drag: 0.38, gravity: 0.2, radius: 0.008 })
-    this.springs.addChain(chain('hair_ahoge'), { stiffness: 3.2, drag: 0.22, gravity: 0, radius: 0 })
-
-    const col = (bone: string, x: number, y: number, z: number, r: number): void => {
-      const bb = b(bone)
-      if (bb) this.springs.addCollider(bb, new THREE.Vector3(x, y, z), r)
+    const { springs, colliders } = this.rig.config
+    for (const s of springs) {
+      const bones = chain(s.prefix)
+      if (bones.length) this.springs.addChain(bones, s)
     }
-    col('head', 0, 1.405, -0.004, 0.1)
-    col('neck', 0, 1.27, 0.0, 0.038)
-    col('upperChest', 0, 1.15, -0.005, 0.088)
-    col('chest', 0, 1.05, 0.0, 0.088)
-    col('spine', 0, 0.96, 0.0, 0.09)
-    col('hips', 0, 0.86, -0.005, 0.11)
-    col('leftUpperArm', 0.15, 1.16, 0, 0.055)
-    col('rightUpperArm', -0.15, 1.16, 0, 0.055)
+    for (const c of colliders) {
+      const bone = b(c.bone)
+      if (bone) this.springs.addCollider(bone, new THREE.Vector3(...c.at), c.radius, c.groups)
+    }
+  }
+
+  /** find each finger joint's curl axis from the rest pose: the palm normal
+   *  comes from the knuckles' spread and the middle finger's direction, and
+   *  points the way the (slightly curled) rest fingers bend */
+  private setupFingers(): void {
+    if (!this.rig.config.fingerLife) return
+    const pos = (n: string): THREE.Vector3 | null => {
+      const b = this.rig.bones.get(n)
+      return b ? b.getWorldPosition(new THREE.Vector3()) : null
+    }
+    const q = new THREE.Quaternion()
+    for (const [h, s] of (['left', 'right'] as const).entries()) {
+      const idx = pos(`${s}IndexProximal`)
+      const lit = pos(`${s}LittleProximal`)
+      const mp = pos(`${s}MiddleProximal`)
+      const mi = pos(`${s}MiddleIntermediate`)
+      const md = pos(`${s}MiddleDistal`)
+      if (!idx || !lit || !mp || !mi || !md) continue
+      const dir = mi.clone().sub(mp).normalize()
+      const palm = idx.clone().sub(lit).cross(dir).normalize()
+      const bend = md.clone().sub(mi)
+      bend.addScaledVector(dir, -bend.dot(dir))
+      if (bend.dot(palm) < 0) palm.negate()
+      const fingers = ['Thumb', 'Index', 'Middle', 'Ring', 'Little']
+      for (const [i, f] of fingers.entries()) {
+        const segs = ['Proximal', 'Intermediate', 'Distal']
+        for (const [k, seg] of segs.entries()) {
+          const bone = this.rig.bones.get(`${s}${f}${seg}`)
+          if (!bone) continue
+          const a = bone.getWorldPosition(new THREE.Vector3())
+          // a joint points at the next one; the last carries on its parent's line
+          const next = k < 2 ? pos(`${s}${f}${segs[k + 1]}`) : null
+          const prev = k === 2 ? pos(`${s}${f}${segs[1]}`) : null
+          const fdir = next ? next.sub(a).normalize() : prev ? a.clone().sub(prev).normalize() : dir
+          // positive turns curl the finger toward the palm
+          const world = fdir.clone().cross(palm).normalize()
+          const axis = world.applyQuaternion(bone.getWorldQuaternion(q).invert())
+          const thumb = f === 'Thumb'
+          this.joints.push({
+            bone,
+            axis,
+            w: (thumb ? 0.5 : 1) * [1, 0.8, 0.6][k],
+            phase: h * 1.7 + i * 0.9 + k * 0.25,
+            side: h,
+            finger: i,
+            seg: k,
+            q: new THREE.Quaternion()
+          })
+        }
+      }
+      // the wrist: flexing toward the palm, and tilting sideways
+      const hand = this.rig.bones.get(`${s}Hand`)
+      if (hand) {
+        const toKnuckles = mp.clone().sub(hand.getWorldPosition(new THREE.Vector3())).normalize()
+        const inv = hand.getWorldQuaternion(q).invert()
+        this.wrists.push({
+          bone: hand,
+          flex: toKnuckles.clone().cross(palm).normalize().applyQuaternion(inv),
+          sway: palm.clone().applyQuaternion(inv),
+          side: h,
+          q: new THREE.Quaternion()
+        })
+      }
+    }
   }
 
   // ── public API ──
+
+  /** true while a one-shot gesture (wave, stretch…) is playing */
+  get gesturing(): boolean {
+    return this.gesture !== null
+  }
 
   /** a reading from the conversation (user message or reply sentence) */
   feel(r: Reading): void {
@@ -252,17 +356,31 @@ export class AvatarController {
     shared.uTime.value = this.time
 
     this.updateBody(dt)
+    // take last frame's finger drift back off first, in case a clip leaves a
+    // joint unkeyed (the mixer would not reset it)
+    for (const [bone, q] of this.layered) bone.quaternion.multiply(_q2.copy(q).invert())
+    this.layered.clear()
     this.mixer.update(dt)
+    this.applyHands()
     this.updateGaze(dt)
     this.applyHead(dt)
+    this.updatePress()
     this.updateFace(dt)
 
     this.rig.root.updateWorldMatrix(true, true)
-    this.springs.update(dt)
+    // a faint, shifting breeze so hair and cloth never look frozen
+    const t = this.time
+    this.springs.external.set(
+      Math.sin(t * 0.55) * 0.16 + Math.sin(t * 1.7 + 1.3) * 0.06,
+      0,
+      -0.08 + Math.sin(t * 0.8 + 0.4) * 0.07
+    )
+    const stepped = this.springs.update(dt) > 0
+    this.applyBreath(stepped)
 
     // keep the face shading sphere glued to the moving head
     const head = this.rig.bones.get('head')
-    if (head) shared.uHeadCenter.value.copy(HEAD_PIVOT_OFFSET).applyMatrix4(head.matrixWorld)
+    if (head) shared.uHeadCenter.value.copy(this.headPivot).applyMatrix4(head.matrixWorld)
   }
 
   private updateBody(dt: number): void {
@@ -362,8 +480,9 @@ export class AvatarController {
     this.gaze.y += (ty - this.gaze.y) * Math.min(1, dt * 14)
 
     const m = this.rig.materials
-    const gx = this.gaze.x * 0.0072
-    const gy = this.gaze.y * 0.0045
+    const [rx, ry] = this.rig.config.eyes.gaze
+    const gx = this.gaze.x * rx
+    const gy = this.gaze.y * ry
     ;(m.eyeL.uniforms.uGaze.value as THREE.Vector2).set(gx, gy)
     ;(m.eyeR.uniforms.uGaze.value as THREE.Vector2).set(gx, gy)
   }
@@ -383,6 +502,145 @@ export class AvatarController {
     this.addRotation('upperChest', 0, this.headYaw * 0.12, 0)
   }
 
+  /** the config's breath-synced lift, layered after the spring sim (which
+   *  rewrites these bones every step, so this never accumulates) */
+  /** Living hands, layered over whatever the clips pose:
+   *  - every finger joint drifts a few degrees on its own slow, uneven rhythm
+   *    — only ever lifting off its pose, so a hand resting on something
+   *    never presses into it — and the free wrist breathes a little;
+   *  - now and then a small "moment": fingers drumming or rippling on the
+   *    resting hand; a flex, an opening, a thumb or a wrist turn on the free
+   *    one. Livelier while she talks, calmer mid-gesture. */
+  private applyHands(): void {
+    const amp = this.rig.config.fingerLife
+    if (!amp || !this.joints.length) return
+    const t = this.time
+    const lively = (this.state === 'speaking' ? 1.5 : 1) * (this.gesture ? 0.5 : 1)
+    const drift = THREE.MathUtils.degToRad(amp) * lively
+    this.scheduleMoment()
+    for (const j of this.joints) {
+      const c = Math.sin(t * 0.53 + j.phase) * 0.6 + Math.sin(t * 1.37 + 2.1 * j.phase) * 0.4
+      const curl = -0.5 * (1 + c) * drift + this.momentCurl(j.side, j.finger)
+      // a finger lifts at its knuckle — its outer joints barely straighten
+      // (bending them all back reads as a squashed fingertip)
+      const share = curl < 0 ? LIFT_SHARE[j.seg] / (j.finger === 0 ? 2 : 1) : j.w
+      j.q.setFromAxisAngle(j.axis, curl * share)
+      this.layer(j.bone, j.q)
+    }
+    const resting = this.restingSide()
+    const D = THREE.MathUtils.degToRad
+    for (const w of this.wrists) {
+      if (w.side === resting) continue
+      const ph = w.side * 2.3
+      const flex = D(1.4) * lively * Math.sin(t * 0.41 + ph) + this.momentWrist(w.side)
+      const sway = D(0.9) * lively * Math.sin(t * 0.29 + 1.1 + ph)
+      w.q.setFromAxisAngle(w.flex, flex).multiply(_q3.setFromAxisAngle(w.sway, sway))
+      this.layer(w.bone, w.q)
+    }
+  }
+
+  /** the resting hand's wrist in hips space (null when the avatar has none) */
+  private handOnHips(out = new THREE.Vector3()): THREE.Vector3 | null {
+    const side = this.rig.config.restingHand
+    const hand = side && this.rig.bones.get(`${side}Hand`)
+    const hips = this.rig.bones.get('hips')
+    if (!this.rig.config.handPress || !hand || !hips) return null
+    hand.updateWorldMatrix(true, false)
+    return hips.worldToLocal(hand.getWorldPosition(out))
+  }
+
+  /** the press under the resting hand: full while it rests where it was
+   *  posed, gone once it has moved a few centimetres off */
+  private updatePress(): void {
+    if (!this.pressRest) return
+    const now = this.handOnHips(_vPress)
+    const d = now ? now.distanceTo(this.pressRest) : 1
+    this.pressGoal = 1 - THREE.MathUtils.smoothstep(d, 0.015, 0.06)
+  }
+
+  /** 0 = left, 1 = right, -1 = neither: the hand her base pose rests on her */
+  private restingSide(): number {
+    const r = this.rig.config.restingHand
+    return r === 'left' ? 0 : r === 'right' ? 1 : -1
+  }
+
+  private scheduleMoment(): void {
+    if (this.moment && this.time > this.moment.start + this.moment.dur) this.moment = null
+    if (this.moment || this.gesture || this.time < this.nextMoment) return
+    const resting = this.restingSide()
+    const free = resting === 0 ? 1 : 0
+    const pool: [HandMoment, number, number][] = [
+      ['flex', free, 1.5],
+      ['open', free, 1.4],
+      ['thumb', free, 0.9],
+      ['wrist', free, 1.6]
+    ]
+    // a resting hand only ever lifts its fingers
+    if (resting >= 0) pool.push(['tap', resting, 1.0], ['tap', resting, 1.0], ['ripple', resting, 1.1])
+    const [kind, side, dur] = pool[Math.floor(Math.random() * pool.length)]
+    this.moment = { kind, side, start: this.time, dur }
+    const talking = this.state === 'speaking'
+    this.nextMoment = this.time + dur + (talking ? 2.5 + Math.random() * 3 : 4.5 + Math.random() * 5.5)
+  }
+
+  /** the current moment's curl for one finger (radians; + curls, − lifts) */
+  private momentCurl(side: number, finger: number): number {
+    const m = this.moment
+    if (!m || m.side !== side) return 0
+    const u = (this.time - m.start) / m.dur
+    if (u < 0 || u > 1) return 0
+    const D = THREE.MathUtils.degToRad
+    const bell = Math.sin(Math.PI * u) ** 2
+    switch (m.kind) {
+      case 'tap': {
+        // index and middle drum twice on her hip, the middle a beat behind
+        if (finger !== 1 && finger !== 2) return 0
+        const lift = Math.max(0, Math.sin(4 * Math.PI * (u - (finger - 1) * 0.06)))
+        return -D(16) * lift * Math.sin(Math.PI * u) ** 0.5
+      }
+      case 'ripple': {
+        // little → index, each lifting a moment after the last
+        if (finger === 0) return 0
+        const v = Math.min(1, Math.max(0, (u - (4 - finger) * 0.12) / 0.55))
+        return -D(12) * Math.sin(Math.PI * v) ** 2
+      }
+      case 'flex':
+        return D(finger === 0 ? 7 : 11) * bell
+      case 'open':
+        return -D(finger === 0 ? 5 : 9) * bell
+      case 'thumb':
+        return finger === 0 ? D(16) * bell : 0
+      default:
+        return 0
+    }
+  }
+
+  private momentWrist(side: number): number {
+    const m = this.moment
+    if (!m || m.side !== side || m.kind !== 'wrist') return 0
+    const u = (this.time - m.start) / m.dur
+    return u < 0 || u > 1 ? 0 : THREE.MathUtils.degToRad(7) * Math.sin(Math.PI * u) ** 2
+  }
+
+  private applyBreath(simStepped: boolean): void {
+    const breath = this.rig.config.breath
+    if (!breath) return
+    const angle = Math.sin((this.time / breath.period) * Math.PI * 2) * THREE.MathUtils.degToRad(breath.degrees)
+    for (const name of breath.bones) {
+      const b = this.rig.bones.get(name)
+      if (!b) continue
+      // no sim step this frame → the bone still carries last frame's lift
+      const prev = this.breathApplied.get(name)
+      if (!simStepped && prev) b.quaternion.multiply(_q2.copy(prev).invert())
+      // pitch about the world's left-right axis, expressed in the bone's frame
+      b.getWorldQuaternion(_q).invert()
+      const axis = _axis.set(1, 0, 0).applyQuaternion(_q)
+      const lift = _q2.setFromAxisAngle(axis, angle)
+      b.quaternion.multiply(lift)
+      this.breathApplied.set(name, lift.clone())
+    }
+  }
+
   /** add a rotation expressed in the avatar's rest frame (degrees: pitch-down, yaw-left, tilt-left) */
   private addRotation(bone: string, pitch: number, yaw: number, tilt: number): void {
     const b = this.rig.bones.get(bone)
@@ -393,7 +651,17 @@ export class AvatarController {
     _q.setFromEuler(_e)
     // local *= R⁻¹ · Q · R
     _q2.copy(rest).invert().multiply(_q).multiply(rest)
-    b.quaternion.multiply(_q2)
+    this.layer(b, _q2)
+  }
+
+  /** right-multiply a rotation onto a bone, remembering it so the next frame
+   *  can take it back off before the mixer runs (see ``layered``) */
+  private layer(bone: THREE.Bone, q: THREE.Quaternion): void {
+    bone.quaternion.multiply(q)
+    const prev = this.layered.get(bone)
+    // two layers on one bone: (·A)(·B) is undone as (·B⁻¹)(·A⁻¹) = ·(AB)⁻¹
+    if (prev) prev.multiply(q)
+    else this.layered.set(bone, q.clone())
   }
 
   private currentEmotion(): Emotion {
@@ -467,11 +735,14 @@ export class AvatarController {
     // looking down lowers the lids a touch
     if (this.gaze.y < 0) add('E_Relax', -this.gaze.y * 0.25)
 
+    const press = this.rig.config.handPress
+    if (press) target.set(press, this.pressGoal)
+
     // smooth every channel toward its target
     for (const name of this.morphIndex.keys()) {
       const goal = THREE.MathUtils.clamp(target.get(name) ?? 0, 0, 1)
       const cur = this.weights.get(name) ?? 0
-      const fast = name.startsWith('V_') || name.startsWith('E_Blink')
+      const fast = name.startsWith('V_') || name.startsWith('E_Blink') || name === press
       const next = cur + (goal - cur) * Math.min(1, dt * (fast ? 30 : 7))
       this.weights.set(name, next)
       for (const { mesh, index } of this.morphIndex.get(name)!) mesh.morphTargetInfluences![index] = next
@@ -479,7 +750,8 @@ export class AvatarController {
 
     // shader-side expression channels
     const m = this.rig.materials
-    const blushGoal = Math.max(preset.blush ?? 0.14, 0.12) * (emo === 'neutral' ? 1 : Math.max(0.35, amt))
+    const blushGoal =
+      Math.max(preset.blush ?? 0.14, 0.12) * (emo === 'neutral' ? 1 : Math.max(0.35, amt)) * Math.min(1, this.blushScale + (preset.lines ?? 0))
     this.blush += (blushGoal - this.blush) * Math.min(1, dt * 2.5)
     this.lines += ((preset.lines ?? 0) * amt - this.lines) * Math.min(1, dt * 3)
     this.sparkle += ((preset.sparkle ?? 0) * amt - this.sparkle) * Math.min(1, dt * 4)

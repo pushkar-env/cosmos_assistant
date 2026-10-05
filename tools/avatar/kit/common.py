@@ -16,7 +16,7 @@ import bpy
 from mathutils import Matrix, Vector
 from mathutils.bvhtree import BVHTree
 
-COLL = "Nova"
+COLL = "Avatar"
 
 
 # ── maths ────────────────────────────────────────────────────────────────

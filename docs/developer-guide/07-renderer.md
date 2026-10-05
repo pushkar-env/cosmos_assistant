@@ -150,12 +150,22 @@ The default centrepiece: an anime girl who reacts to the conversation. The model
   the per-frame "nervous system", in order: body clips (a base loop per assistant
   state — Idle/Listen/Think/Talk — crossfaded by hand, one-shot gestures on top),
   gaze (eyes track the cursor with saccades, head follows), face (emotion preset +
-  blinking + lip-sync blended into the blendshapes), then spring-bone hair.
+  blinking + lip-sync blended into the blendshapes), then spring-bone hair. An
+  avatar with `fingerLife` gets living hands, layered over the clips:
+  - every finger joint drifts a few degrees on its own slow rhythm, and the free wrist sways a little;
+  - every few seconds there's a small hand "moment": fingers drumming or rippling on the resting hand, or a flex, an opening, a thumb or a wrist turn on the free one.
+  - Fingers only ever *lift* off the pose (at the knuckle), so a hand resting on her clothes never presses into them.
+  - `handPress` names a morph that presses her clothes under the resting hand (`restingHand`). It follows how close that hand is to its resting spot, so it releases when a gesture lifts the hand away.
+  - Outline shells share their mesh's morph weights.
+
+  Every rotation the controller layers on top of the clips (head turns, living hands) is taken back off before the mixer runs each frame. Three.js's `AnimationMixer` only rewrites a bone when the clip's value *changes*, so during a held pose anything layered on top would otherwise compound.
 - [`toonMaterials.ts`](../../src/renderer/src/features/avatar/toonMaterials.ts) —
   cel-shading `ShaderMaterial`s on three's skinning/morph chunks: spherical face
   normals, theme-tinted rim, angel-ring hair highlight, voice-reactive glow trims,
   the procedural eye (iris drawn from the *morphed* position so lids cover it),
-  mouth and blush shaders, and inverted-hull outlines.
+  mouth and blush shaders, and inverted-hull outlines. The hair's height bands
+  (skull shading, angel ring, fringe line fade) are tuned on Nova's head and
+  shift with each model's own head height (`uHeadShift`, set on load).
 - [`lipsync.ts`](../../src/renderer/src/features/avatar/lipsync.ts) — vowel shapes
   (A/I/U/E/O) from the TTS loudness + four formant bands that `SpeechPlayer`
   writes to `voiceSignal.bands`; a synthetic chatter when replies are text-only.
@@ -164,6 +174,12 @@ The default centrepiece: an anime girl who reacts to the conversation. The model
   compliment → shy, thanks → bow, …). No model call, no latency.
 - [`springBones.ts`](../../src/renderer/src/features/avatar/springBones.ts) —
   verlet spring joints with body colliders for the hair chains.
+
+- [`avatars.ts`](../../src/renderer/src/features/avatar/avatars.ts) — the avatar
+  registry: per character, its model, camera framing, eye geometry and iris
+  colours, per-material shading, spring-chain physics (hair and cloth) and body
+  colliders. Models are discovered with `import.meta.glob`, so only avatars whose
+  `.glb` is present are offered (`Settings.avatarId` falls back to the first one).
 
 Materials are matched to the GLB **by material name**, blendshapes and bones **by
 name** — see the contract in [`tools/avatar/README.md`](../../tools/avatar/README.md).

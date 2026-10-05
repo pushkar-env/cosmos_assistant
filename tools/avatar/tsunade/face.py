@@ -12,6 +12,10 @@ covered like a real eyelid instead of being squashed. UV.y stores how far a
 vertex sits from the lower lid (0) to the upper lid (1), which the shader uses
 for the soft lash shadow across the top of the eye.
 
+This character's variant: narrow almond eyes with a slight cat-eye lift and
+hazel irises, thin low brows rising outward, a full lower lip that follows
+every mouth shape, and the blue-violet diamond seal on her forehead.
+
 Shape-key contract (read by src/renderer/src/features/avatar):
   eyes + lashes : E_Blink_L/R E_Happy_L/R E_Wide_L/R E_Relax_L/R E_Sad_L/R E_Angry_L/R
   brows         : B_Up_L/R B_Angry_L/R B_Sad_L/R
@@ -33,7 +37,7 @@ from kit.common import (
     smoothstep,
     srgb,
 )
-from .head import EYE_X, EYE_Z, HEAD_C, MOUTH_Z
+from .head import EYE_X, EYE_Z, HEAD_C, MARK_Z, MOUTH_Z, NOSE_Z
 
 # ── projection onto the skin ────────────────────────────────────────────
 
@@ -60,26 +64,28 @@ def _sinp(a, p=1.0):
 
 # ── eyes ────────────────────────────────────────────────────────────────
 
-U_IN, U_OUT = -0.0195, 0.0215  # eye-local horizontal extent (outward +)
+U_IN, U_OUT = -0.0180, 0.0200  # eye-local horizontal extent (outward +)
 
+# almond: a long, fairly straight upper lid that lifts toward the outer
+# corner and a shallow lower lid — narrow and mature, about 2.3 : 1
 _top = pchip(
-    [(0.0, -0.0010), (0.07, 0.0085), (0.18, 0.0158), (0.36, 0.0199), (0.55, 0.0207),
-     (0.74, 0.0184), (0.88, 0.0130), (1.0, 0.0042)]
+    [(0.0, -0.0004), (0.10, 0.0050), (0.25, 0.0088), (0.45, 0.0104), (0.65, 0.0106),
+     (0.82, 0.0094), (0.93, 0.0072), (1.0, 0.0050)]
 )
 _bot = pchip(
-    [(0.0, -0.0010), (0.10, -0.0074), (0.28, -0.0124), (0.48, -0.0141), (0.68, -0.0132),
-     (0.86, -0.0088), (1.0, 0.0042)]
+    [(0.0, -0.0004), (0.12, -0.0036), (0.32, -0.0062), (0.52, -0.0068), (0.72, -0.0058),
+     (0.90, -0.0022), (1.0, 0.0050)]
 )
 
 
 def _closed(a):
     # a relaxed downward arc — the classic anime closed eye
-    return lerp(-0.0010, 0.0042, a) - 0.0072 * _sinp(a, 0.85)
+    return lerp(-0.0006, 0.0050, a) - 0.0050 * _sinp(a, 0.85)
 
 
 def _happy(a):
     # ^ ^ — an upward arc, sitting a little low
-    return lerp(-0.0045, -0.0005, a) + 0.0072 * _sinp(a, 0.8) - 0.001
+    return lerp(-0.0035, 0.0005, a) + 0.0060 * _sinp(a, 0.8) - 0.001
 
 
 def eye_lids(key, a):
@@ -92,7 +98,7 @@ def eye_lids(key, a):
         h = _happy(a)
         return h, h
     if key == "E_Wide":
-        return t + 0.0028 * _sinp(a, 0.5), b - 0.0013 * _sinp(a)
+        return t + 0.0030 * _sinp(a, 0.5), b - 0.0012 * _sinp(a)
     if key == "E_Relax":
         return t - 0.40 * (t - b), b + 0.10 * (t - b)
     if key == "E_Sad":
@@ -104,7 +110,7 @@ def eye_lids(key, a):
 
 EYE_KEYS = ["E_Blink", "E_Happy", "E_Wide", "E_Relax", "E_Sad", "E_Angry"]
 
-IRIS_RX, IRIS_RZ = 0.0128, 0.0170
+IRIS_RX, IRIS_RZ = 0.0104, 0.0110
 
 
 def _preview_iris(mat, cx, cz):
@@ -134,8 +140,8 @@ def _preview_iris(mat, cx, cz):
     els = ramp.color_ramp.elements
     els[0].position, els[0].color = 0.0, (0.01, 0.03, 0.06, 1)
     els[1].position, els[1].color = 1.0, (0.95, 0.96, 1.0, 1)
-    for pos, col in ((0.30, (0.01, 0.04, 0.08, 1)), (0.36, (0.02, 0.35, 0.45, 1)), (0.80, (0.05, 0.6, 0.7, 1)),
-                     (0.93, (0.01, 0.08, 0.14, 1)), (0.985, (0.01, 0.08, 0.14, 1))):
+    for pos, col in ((0.30, (0.04, 0.02, 0.01, 1)), (0.36, (0.30, 0.15, 0.04, 1)), (0.80, (0.55, 0.32, 0.10, 1)),
+                     (0.93, (0.10, 0.05, 0.02, 1)), (0.985, (0.10, 0.05, 0.02, 1))):
         e = els.new(pos)
         e.color = col
     links.new(d, ramp.inputs[0])
@@ -168,7 +174,7 @@ def build_eye(surf, side, cols=22, rows=10):
             faces.append(q if side > 0 else tuple(reversed(q)))
     uvs = [(c / cols, r / rows) for r in range(rows + 1) for c in range(cols + 1)]
     mat = material(f"Eye_{suffix}", srgb("#f6f8ff"), roughness=0.2)
-    _preview_iris(mat, *_eye_xz(side, 0.0008, 0.0012))
+    _preview_iris(mat, *_eye_xz(side, 0.0008, 0.0028))
     ob = mesh_object(f"Eye_{suffix}", positions(None), faces, mat, uvs=uvs)
     for k in EYE_KEYS:
         shape_key(ob, f"{k}_{suffix}", positions(k))
@@ -178,7 +184,7 @@ def build_eye(surf, side, cols=22, rows=10):
 # ── lashes / eyelid crease ──────────────────────────────────────────────
 
 # upper lash thickness along the lid (thin at the tear duct, bold outside)
-_lash_th = pchip([(-0.04, 0.0008), (0.0, 0.0015), (0.3, 0.0029), (0.7, 0.0042), (1.0, 0.0052)])
+_lash_th = pchip([(-0.04, 0.0007), (0.0, 0.0013), (0.3, 0.0024), (0.7, 0.0034), (1.0, 0.0044)])
 
 
 def _band(surf, side, rows_uv, lift, flip):
@@ -216,7 +222,7 @@ def _upper_lash_columns(key, n=26):
     # the outer wing: a little flick past the outer corner
     top1, _ = eye_lids(key, 1.0)
     th1 = _lash_th(1.0) * (0.72 if key in ("E_Blink", "E_Happy") else 1.0)
-    for du, dv, f in ((0.0034, 0.0014, 0.78), (0.0064, 0.0034, 0.45), (0.0090, 0.0058, 0.0)):
+    for du, dv, f in ((0.0032, 0.0017, 0.75), (0.0060, 0.0038, 0.42), (0.0086, 0.0062, 0.0)):
         base = top1 - 0.00055 + dv
         cols.append([(U_OUT + du, base), (U_OUT + du, base + th1 * 0.55 * f + 0.0001), (U_OUT + du, base + th1 * f + 0.0002)])
     return cols
@@ -240,7 +246,7 @@ def _crease_columns(key, n=14):
         top, bot = eye_lids(key, a)
         rest_top, _ = eye_lids(None, a)
         # the crease rides above the lid but flattens as the lid closes
-        gap = 0.0042 * (0.35 + 0.65 * max(0.0, (top - bot)) / max(1e-6, rest_top - _bot(a)))
+        gap = 0.0034 * (0.35 + 0.65 * max(0.0, (top - bot)) / max(1e-6, rest_top - _bot(a)))
         th = 0.00055 * _sinp((a - 0.22) / 0.73, 0.6)
         u = lerp(U_IN, U_OUT, a)
         cols.append([(u, top + gap), (u, top + gap + th + 0.00005)])
@@ -268,8 +274,9 @@ def build_lid_lines(surf, side):
 
 # ── brows ───────────────────────────────────────────────────────────────
 
-_BROW = [(-0.0175, 0.0335), (-0.009, 0.0382), (0.003, 0.0402), (0.015, 0.0392), (0.0265, 0.0345)]
-_BROW_TH = [0.0033, 0.0031, 0.0025, 0.0016, 0.0003]
+# thin, low brows that rise toward the outer end — her composed, confident look
+_BROW = [(-0.0160, 0.0128), (-0.0060, 0.0160), (0.0050, 0.0186), (0.0160, 0.0200), (0.0255, 0.0186)]
+_BROW_TH = [0.0021, 0.0023, 0.0020, 0.0014, 0.0003]
 BROW_KEYS = ["B_Up", "B_Angry", "B_Sad"]
 
 
@@ -310,7 +317,7 @@ def build_brow(surf, side):
         return _band(surf, side, cols, 0.0008, False)
 
     verts, faces = verts_for(None)
-    mat = material("Brow", srgb("#5a3b52"), roughness=0.8)
+    mat = material("Brow", srgb("#a8804c"), roughness=0.8)
     ob = mesh_object(f"Brow_{suffix}", verts, faces, mat)
     for k in BROW_KEYS:
         kv, _ = verts_for(k)
@@ -325,16 +332,16 @@ MOUTH_KEYS = ["V_A", "V_I", "V_U", "V_E", "V_O", "M_Smile", "M_Frown", "M_Joy", 
 
 def mouth_shape(key):
     """(half_width, centre-line(a), top(a), bottom(a)) — offsets from the line."""
-    hw = 0.0095
-    line = lambda a: 0.0010 * (2 * a - 1) ** 2  # noqa: E731 — a soft resting smile
+    hw = 0.0126
+    line = lambda a: 0.0008 * (2 * a - 1) ** 2  # noqa: E731 — a composed, faint smile
     top = lambda a: 0.00042 * _sinp(a, 0.5)  # noqa: E731
     bot = lambda a: -0.00042 * _sinp(a, 0.5)  # noqa: E731
     if key == "V_A":
-        hw = 0.0118
+        hw = 0.0132
         top = lambda a: 0.0016 * _sinp(a, 0.45)  # noqa: E731
         bot = lambda a: -0.0125 * _sinp(a, 0.75)  # noqa: E731
     elif key == "V_I":
-        hw = 0.0150
+        hw = 0.0168
         line = lambda a: 0.0020 * (2 * a - 1) ** 2  # noqa: E731
         top = lambda a: 0.0014 * _sinp(a, 0.35)  # noqa: E731
         bot = lambda a: -0.0030 * _sinp(a, 0.45)  # noqa: E731
@@ -344,7 +351,7 @@ def mouth_shape(key):
         top = lambda a: 0.0030 * _sinp(a, 0.75)  # noqa: E731
         bot = lambda a: -0.0036 * _sinp(a, 0.75)  # noqa: E731
     elif key == "V_E":
-        hw = 0.0128
+        hw = 0.0145
         top = lambda a: 0.0018 * _sinp(a, 0.45)  # noqa: E731
         bot = lambda a: -0.0068 * _sinp(a, 0.65)  # noqa: E731
     elif key == "V_O":
@@ -353,19 +360,19 @@ def mouth_shape(key):
         top = lambda a: 0.0042 * _sinp(a, 0.65)  # noqa: E731
         bot = lambda a: -0.0080 * _sinp(a, 0.7)  # noqa: E731
     elif key == "M_Smile":
-        hw = 0.0128
+        hw = 0.0150
         line = lambda a: 0.0046 * (2 * a - 1) ** 2 - 0.0008  # noqa: E731
     elif key == "M_Frown":
-        hw = 0.0090
+        hw = 0.0110
         line = lambda a: -0.0030 * (2 * a - 1) ** 2  # noqa: E731
     elif key == "M_Joy":
         # open "D" laugh: flat-topped smile line, deep round bottom
-        hw = 0.0135
+        hw = 0.0155
         line = lambda a: 0.0040 * (2 * a - 1) ** 2 - 0.0006  # noqa: E731
         top = lambda a: 0.0006 * _sinp(a, 0.4)  # noqa: E731
         bot = lambda a: -0.0118 * _sinp(a, 0.8)  # noqa: E731
     elif key == "M_Grin":
-        hw = 0.0145
+        hw = 0.0165
         line = lambda a: 0.0042 * (2 * a - 1) ** 2 - 0.0006  # noqa: E731
         top = lambda a: 0.0012 * _sinp(a, 0.35)  # noqa: E731
         bot = lambda a: -0.0040 * _sinp(a, 0.5)  # noqa: E731
@@ -417,15 +424,15 @@ def build_blush(surf):
     segs, rings = 20, 5
     for side in (1, -1):
         base = len(verts)
-        cx, cz = side * 0.0545, HEAD_C.z - 0.054
+        cx, cz = side * 0.052, HEAD_C.z - 0.050
         verts.append(surf.at(cx, cz, 0.00025))
         uvs.append((0.5, 0.5))
         for r in range(1, rings + 1):
             f = r / rings
             for s in range(segs):
                 t = 2 * math.pi * s / segs
-                x = cx + math.cos(t) * 0.0175 * f
-                z = cz + math.sin(t) * 0.0088 * f
+                x = cx + math.cos(t) * 0.0165 * f
+                z = cz + math.sin(t) * 0.0080 * f
                 verts.append(surf.at(x, z, 0.00025))
                 uvs.append((0.5 + 0.5 * f * math.cos(t), 0.5 + 0.5 * f * math.sin(t)))
         # the ellipse is not mirrored per side, so both share one winding
@@ -440,6 +447,95 @@ def build_blush(surf):
     return mesh_object("Blush", verts, faces, mat, uvs=uvs)
 
 
+# ── lips ────────────────────────────────────────────────────────────────
+
+
+def build_lips(surf, cols=20):
+    """A soft lower lip just under the mouth line. It carries every mouth
+    shape key, re-derived from the same outline, so it rides the jaw."""
+
+    def positions(key):
+        hw, line, _top, bot = mouth_shape(key)
+        pts = []
+        for r, depth in enumerate((0.0004, 0.0027, 0.0043)):
+            for c in range(cols + 1):
+                a = lerp(0.18, 0.82, c / cols)
+                u = lerp(-hw, hw, a)
+                edge = line(a) + bot(a)
+                v = edge - 0.0009 - depth * _sinp((a - 0.18) / 0.64, 0.7)
+                pts.append(surf.at(u, HEAD_C.z + MOUTH_Z + v, 0.0005))
+        return pts
+
+    faces = []
+    for r in range(2):
+        for c in range(cols):
+            i = r * (cols + 1) + c
+            faces.append((i + cols + 1, i + cols + 2, i + 1, i))
+    mat = material("Lips", srgb("#e0868e"), roughness=0.5)
+    ob = mesh_object("Lips", positions(None), faces, mat)
+    for k in MOUTH_KEYS:
+        shape_key(ob, k, positions(k))
+    return ob
+
+
+# ── nose ────────────────────────────────────────────────────────────────
+
+
+def build_nose(surf):
+    """Anime noses read through a little shading, not geometry: a short
+    shadow stroke down the shaded side (her right — the key light comes from
+    her left) curling under the tip, and a small highlight on the bridge."""
+    nz = HEAD_C.z + NOSE_Z
+    stroke = [(-0.0016, 0.0115), (-0.0028, 0.0070), (-0.0040, 0.0025), (-0.0036, -0.0008),
+              (-0.0018, -0.0029), (0.0004, -0.0033)]
+    width = [0.0003, 0.0007, 0.0010, 0.0011, 0.0009, 0.0002]
+    verts, faces = [], []
+    for i, ((x, z), w) in enumerate(zip(stroke, width)):
+        nxt = stroke[min(i + 1, len(stroke) - 1)]
+        prv = stroke[max(i - 1, 0)]
+        tx, tz = nxt[0] - prv[0], nxt[1] - prv[1]
+        ln = math.hypot(tx, tz) or 1.0
+        px, pz = -tz / ln, tx / ln  # perpendicular in the face plane
+        verts.append(surf.at(x - px * w, nz + z - pz * w, 0.0005))
+        verts.append(surf.at(x + px * w, nz + z + pz * w, 0.0005))
+    for i in range(len(stroke) - 1):
+        a = 2 * i
+        faces.append((a, a + 2, a + 3, a + 1))
+    shadow = mesh_object("NoseShadow", verts, faces, material("NoseShadow", srgb("#d49a8b"), roughness=0.6))
+    # front-facing check: flip if the strip came out facing into the head
+    if shadow.data.polygons and shadow.data.polygons[0].normal.y > 0:
+        shadow.data.flip_normals()
+
+    hl, hf = [surf.at(0.0010, nz + 0.0060, 0.0005)], []
+    for k in range(10):
+        t = 2 * math.pi * k / 10
+        hl.append(surf.at(0.0010 + math.cos(t) * 0.0011, nz + 0.0060 + math.sin(t) * 0.0022, 0.0005))
+    hf = [(0, 1 + k, 1 + (k + 1) % 10) for k in range(10)]
+    light = mesh_object("NoseLight", hl, hf, material("NoseLight", srgb("#fff8f2"), roughness=0.4))
+    if light.data.polygons and light.data.polygons[0].normal.y > 0:
+        light.data.flip_normals()
+    return [shadow, light]
+
+
+# ── forehead seal ───────────────────────────────────────────────────────
+
+
+def build_mark(surf):
+    """The violet diamond seal centred on her forehead."""
+    cz = HEAD_C.z + MARK_Z
+    ring = [(0.0, 0.0062), (0.0038, 0.0), (0.0, -0.0062), (-0.0038, 0.0)]
+    verts = [surf.at(0.0, cz, 0.0004)]
+    for k in range(4):
+        x0, z0 = ring[k]
+        x1, z1 = ring[(k + 1) % 4]
+        for t in (0.0, 0.5):
+            verts.append(surf.at(lerp(x0, x1, t), cz + lerp(z0, z1, t), 0.0004))
+    n = len(verts) - 1
+    faces = [(0, 1 + (k + 1) % n, 1 + k) for k in range(n)]
+    mat = material("Mark", srgb("#5f6cb4"), roughness=0.5)
+    return mesh_object("Mark", verts, faces, mat)
+
+
 def build_face(head_ob):
     surf = Surface(head_ob)
     out = []
@@ -448,5 +544,8 @@ def build_face(head_ob):
         out.extend(build_lid_lines(surf, side))
         out.append(build_brow(surf, side))
     out.append(build_mouth(surf))
+    out.append(build_lips(surf))
+    out.extend(build_nose(surf))
     out.append(build_blush(surf))
+    out.append(build_mark(surf))
     return [o.name for o in out]

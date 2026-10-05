@@ -10,6 +10,7 @@ import {
   type ElevenVoice,
   type GithubIdentity,
   type ProviderId,
+  type Settings,
   type SttProviderId,
   type ThemeId,
   type TtsProviderId,
@@ -17,6 +18,7 @@ import {
 } from '@shared/types'
 import { resolvePreset } from '@shared/personality'
 import { THEMES } from '@/core/theme/themes'
+import { AVATAR_IDS, AVATARS } from '@/features/avatar/avatars'
 import { useSettingsStore } from '@/core/stores/useSettingsStore'
 import { useUIStore } from '@/core/stores/useUIStore'
 import { useNotificationStore } from '@/core/stores/useNotificationStore'
@@ -787,30 +789,36 @@ export function SettingsPanel(): React.JSX.Element {
         id: 'core-visual',
         label: 'Assistant Presence',
         group: 'personal',
-        hint: 'Nova, the 3D avatar — or the classic AI core orb',
-        keywords: 'avatar nova anime girl character orb core visual 3d model presence',
-        render: () => (
-          <div className="flex gap-2">
-            {(
-              [
-                ['avatar', 'Nova Avatar'],
-                ['orb', 'Core Orb']
-              ] as const
-            ).map(([id, label]) => (
-              <button
-                key={id}
-                onClick={() => void update({ coreVisual: id })}
-                className={`rounded-lg border px-4 py-2 font-ui text-xs font-bold uppercase tracking-widest transition-colors ${
-                  settings.coreVisual === id
-                    ? 'border-[var(--accent-dim)] bg-white/5 text-[var(--accent-bright)]'
-                    : 'border-white/10 text-dim hover:text-body'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        )
+        hint: 'A 3D anime avatar — or the classic AI core orb',
+        keywords: 'avatar nova tsunade anime girl character orb core visual 3d model presence',
+        render: () => {
+          const options = [
+            ...AVATAR_IDS.map((id) => ({
+              key: id,
+              label: AVATARS[id]?.label ?? id,
+              active: settings.coreVisual === 'avatar' && settings.avatarId === id,
+              patch: { coreVisual: 'avatar', avatarId: id } as Partial<Settings>
+            })),
+            { key: 'orb', label: 'Core Orb', active: settings.coreVisual === 'orb', patch: { coreVisual: 'orb' } as Partial<Settings> }
+          ]
+          return (
+            <div className="flex flex-wrap gap-2">
+              {options.map((o) => (
+                <button
+                  key={o.key}
+                  onClick={() => void update(o.patch)}
+                  className={`rounded-lg border px-4 py-2 font-ui text-xs font-bold uppercase tracking-widest transition-colors ${
+                    o.active
+                      ? 'border-[var(--accent-dim)] bg-white/5 text-[var(--accent-bright)]'
+                      : 'border-white/10 text-dim hover:text-body'
+                  }`}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          )
+        }
       },
       {
         id: 'sound',

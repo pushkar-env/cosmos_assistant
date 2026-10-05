@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import type { AssistantState, ThemeId } from '@shared/types'
+import type { AssistantState, AvatarId, ThemeId } from '@shared/types'
 import { useAssistantStore } from '@/core/stores/useAssistantStore'
 import { useSettingsStore } from '@/core/stores/useSettingsStore'
 import { applyTheme, THEMES } from '@/core/theme/themes'
 import { voiceSignal } from '@/core/voice/voiceSignal'
 import { AvatarScene, avatarBridge } from './AvatarScene'
+import { AVATAR_IDS, AVATARS } from './avatars'
 import { readUserMessage, readReplySentence, type Emotion } from './emotion'
 
 /*
@@ -64,6 +65,7 @@ function useFakeVoice(on: boolean): void {
 export function AvatarLab(): React.JSX.Element {
   const state = useAssistantStore((s) => s.state)
   const theme = useSettingsStore((s) => s.settings.theme)
+  const avatarId = useSettingsStore((s) => s.settings.avatarId)
   const [talking, setTalking] = useState(false)
   const [text, setText] = useState('')
   const [failed, setFailed] = useState<string | null>(null)
@@ -83,6 +85,10 @@ export function AvatarLab(): React.JSX.Element {
     const st = useSettingsStore.getState()
     useSettingsStore.setState({ settings: { ...st.settings, theme: t } })
   }
+  const setAvatar = (id: AvatarId): void => {
+    const st = useSettingsStore.getState()
+    useSettingsStore.setState({ settings: { ...st.settings, avatarId: id } })
+  }
   const btn = 'rounded-md border border-white/10 px-2.5 py-1 font-ui text-[11px] uppercase tracking-wider hover:border-[var(--accent)] hover:text-[var(--accent-bright)]'
   const on = 'border-[var(--accent)] text-[var(--accent-bright)]'
 
@@ -101,6 +107,13 @@ export function AvatarLab(): React.JSX.Element {
       </div>
       <div className="absolute left-4 top-4 z-10 flex w-72 flex-col gap-3 rounded-xl border border-white/10 bg-black/50 p-3 text-body backdrop-blur">
         <div className="font-display text-xs font-bold tracking-[0.3em] text-[var(--accent-bright)]">AVATAR LAB</div>
+        <Row label="Avatar">
+          {AVATAR_IDS.map((id) => (
+            <button key={id} className={`${btn} ${avatarId === id ? on : ''}`} onClick={() => setAvatar(id)}>
+              {AVATARS[id]?.label}
+            </button>
+          ))}
+        </Row>
         <Row label="State">
           {STATES.map((s) => (
             <button key={s} className={`${btn} ${state === s ? on : ''}`} onClick={() => setState(s)}>

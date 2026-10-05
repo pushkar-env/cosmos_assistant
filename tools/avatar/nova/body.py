@@ -13,13 +13,15 @@ import math
 
 from mathutils import Matrix, Vector
 
-from .common import frames_along, lerp, material, mesh_object, pchip, srgb
+from kit.common import lerp, material, pchip, srgb
+from kit.geom import MeshBuilder, loft, polyline, superellipse_ring, tube
+
 from .head import SKIN
 
 ARM_ANGLE = math.radians(42)  # A-pose: arms this far below horizontal
 
 
-def _arm_dir(side):
+def arm_dir(side):
     return Vector((side * math.cos(ARM_ANGLE), 0.0, -math.sin(ARM_ANGLE)))
 
 
@@ -34,7 +36,7 @@ def _joints():
         "headTop": Vector((0, 0.0, 1.52)),
     }
     for side, s in ((1, "left"), (-1, "right")):
-        d = _arm_dir(side)
+        d = arm_dir(side)
         sh = Vector((side * 0.150, 0.005, 1.172))
         j[s + "Shoulder"] = Vector((side * 0.030, 0.0, 1.205))
         j[s + "UpperArm"] = sh
@@ -48,115 +50,6 @@ def _joints():
 
 
 JOINTS = _joints()
-
-
-# ── generic lofting ─────────────────────────────────────────────────────
-
-
-def superellipse_ring(center, ax, ay, rx, ry, n=2.0, segs=32, start=0.0):
-    pts = []
-    for k in range(segs):
-        t = start + 2 * math.pi * k / segs
-        c, s = math.cos(t), math.sin(t)
-        x = rx * math.copysign(abs(c) ** (2.0 / n), c)
-        y = ry * math.copysign(abs(s) ** (2.0 / n), s)
-        pts.append(center + ax * x + ay * y)
-    return pts
-
-
-def loft(rings, cap_start=True, cap_end=True, v_coords=None):
-    """Quad-strip a list of equal-length closed rings; optional fan caps.
-
-    Returns verts, faces, uvs (u around, v along)."""
-    segs = len(rings[0])
-    verts, faces, uvs = [], [], []
-    nr = len(rings)
-    for i, ring in enumerate(rings):
-        v = v_coords[i] if v_coords else i / (nr - 1)
-        for k, p in enumerate(ring):
-            verts.append(p)
-            uvs.append((k / segs, v))
-    for i in range(nr - 1):
-        for k in range(segs):
-            a = i * segs + k
-            b = i * segs + (k + 1) % segs
-            faces.append((a, b, b + segs, a + segs))
-    if cap_start:
-        c = sum(rings[0], Vector()) / segs
-        ci = len(verts)
-        verts.append(c)
-        uvs.append((0.5, 0.0))
-        for k in range(segs):
-            faces.append((ci, (k + 1) % segs, k))
-    if cap_end:
-        c = sum(rings[-1], Vector()) / segs
-        ci = len(verts)
-        verts.append(c)
-        uvs.append((0.5, 1.0))
-        o = (nr - 1) * segs
-        for k in range(segs):
-            faces.append((ci, o + k, o + (k + 1) % segs))
-    return verts, faces, uvs
-
-
-def tube(path, radius_x, radius_y, up_hint, segs=20, n=2.0, cap_start=True, cap_end=True, tip=None):
-    """Loft round/elliptical sections along ``path``.
-
-    radius_x/radius_y: callables over t in [0, 1]. ``up_hint`` orients the
-    first frame (ry runs along it). ``tip`` adds a rounded end point."""
-    frames = frames_along(path, up_hint)
-    rings = []
-    n_pts = len(path)
-    for i, (p, (tan, nrm, bin_)) in enumerate(zip(path, frames)):
-        t = i / (n_pts - 1)
-        # ring runs nrm → bin, which winds counter-clockwise about the
-        # tangent so the quads face outward (bin follows the up hint)
-        rings.append(superellipse_ring(p, nrm, bin_, radius_x(t), radius_y(t), n, segs))
-    verts, faces, uvs = loft(rings, cap_start=cap_start, cap_end=cap_end and tip is None)
-    if tip is not None:
-        ci = len(verts)
-        verts.append(tip)
-        uvs.append((0.5, 1.0))
-        o = (n_pts - 1) * segs
-        for k in range(segs):
-            faces.append((ci, o + k, o + (k + 1) % segs))
-    return verts, faces, uvs
-
-
-class MeshBuilder:
-    """Accumulates pieces into one mesh. Pieces can carry a ``tag`` that is
-    stored as a ``piece_<tag>`` vertex group, which the rig step uses to pick
-    the bones each piece may be weighted to."""
-
-    def __init__(self):
-        self.verts, self.faces, self.uvs, self.tags = [], [], [], []
-
-    def add(self, data, tag=None):
-        v, f, uv = data
-        o = len(self.verts)
-        self.verts += list(v)
-        self.faces += [tuple(i + o for i in face) for face in f]
-        self.uvs += list(uv)
-        self.tags += [tag] * len(v)
-
-    def build(self, name, mat):
-        ob = mesh_object(name, self.verts, self.faces, mat)
-        uvl = ob.data.uv_layers.new(name="UVMap")
-        for loop in ob.data.loops:
-            uvl.data[loop.index].uv = self.uvs[loop.vertex_index]
-        for tag in sorted({t for t in self.tags if t}):
-            vg = ob.vertex_groups.new(name="piece_" + tag)
-            vg.add([i for i, t in enumerate(self.tags) if t == tag], 1.0, "REPLACE")
-        return ob
-
-
-def polyline(points, per_seg=6):
-    out = []
-    for i in range(len(points) - 1):
-        for k in range(per_seg):
-            out.append(points[i].lerp(points[i + 1], k / per_seg))
-    out.append(points[-1].copy())
-    return out
 
 
 # ── torso ───────────────────────────────────────────────────────────────
@@ -207,7 +100,7 @@ def build_torso(mb, z0=1.205, z1=1.345, rows=14):
 
 
 def arm_path(side):
-    d = _arm_dir(side)
+    d = arm_dir(side)
     sh = JOINTS[("left" if side > 0 else "right") + "UpperArm"]
     pts = [sh - d * 0.045, sh, sh + d * 0.245, sh + d * 0.460]
     return polyline(pts, 8)
@@ -221,7 +114,7 @@ _ARM_RY = pchip([(0.0, 0.034), (0.10, 0.042), (0.30, 0.036), (0.47, 0.029), (0.5
 
 def palm_frame(side):
     """(along, across→thumb side, palm-normal) unit axes of the hand."""
-    d = _arm_dir(side)
+    d = arm_dir(side)
     palm_n = Vector((-math.sin(ARM_ANGLE) * side, 0.0, -math.cos(ARM_ANGLE)))  # palm faces down
     thumb = Vector((0.0, -1.0, 0.0))  # palms down → thumbs point forward
     return d, thumb, palm_n

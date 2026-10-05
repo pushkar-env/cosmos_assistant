@@ -20,8 +20,14 @@ export const shared = {
   /** 0..1 live voice envelope — the glowing trims breathe with her voice */
   uVoice: { value: 0 },
   /** head pivot in world space — drives the face's spherical normals */
-  uHeadCenter: { value: new THREE.Vector3(0, 1.4, 0) }
+  uHeadCenter: { value: new THREE.Vector3(0, 1.4, 0) },
+  /** how far the loaded avatar's head (rest pose) sits above Nova's — the
+   *  hair shading bands below are tuned in Nova's heights and shift with it */
+  uHeadShift: { value: 0 }
 }
+
+/** the head-pivot height the hair bands in the shaders were tuned for */
+export const HAIR_BAND_HEAD_Y = 1.4
 
 const VERT_COMMON = /* glsl */ `
   #include <common>
@@ -75,6 +81,7 @@ const TOON_FRAG = /* glsl */ `
   uniform vec3 uAccent;
   uniform vec3 uAccentBright;
   uniform float uTipMix;
+  uniform float uHeadShift;
   varying vec3 vNormalV;
   varying vec3 vViewPos;
   varying vec3 vWorldPos;
@@ -89,7 +96,8 @@ const TOON_FRAG = /* glsl */ `
     // (hair uses it too, but only over the skull — the long locks keep
     // their own strand normals)
     float sphereK = uSphere;
-    if (uHair > 0.0) sphereK *= smoothstep(1.22, 1.33, vWorldPos.y);
+    float hy = vWorldPos.y - uHeadShift; // height on Nova's scale
+    if (uHair > 0.0) sphereK *= smoothstep(1.22, 1.33, hy);
     if (sphereK > 0.0) {
       vec3 sn = normalize((viewMatrix * vec4(normalize(vWorldPos - uHeadCenter), 0.0)).xyz);
       n = normalize(mix(n, sn, sphereK));
@@ -103,7 +111,7 @@ const TOON_FRAG = /* glsl */ `
     if (uHair > 0.0) {
       // silver → theme-coloured ends on the long locks (uv.y: root 0 → tip 1);
       // the fringe and crown stay silver
-      float tip = smoothstep(0.45, 1.0, vUv2.y) * smoothstep(1.32, 1.12, vWorldPos.y) * uTipMix;
+      float tip = smoothstep(0.45, 1.0, vUv2.y) * smoothstep(1.32, 1.12, hy) * uTipMix;
       base = mix(base, mix(base, uAccentBright, 0.75), tip);
       shade = mix(shade, uAccent * 0.75, tip);
     }
@@ -118,7 +126,7 @@ const TOON_FRAG = /* glsl */ `
       float spec = dot(n, h);
       float jag = 0.06 * sin(vUv2.x * 6.2831 * 3.0 + vWorldPos.y * 40.0);
       float ring = smoothstep(0.86 + jag, 0.9 + jag, spec) * (1.0 - smoothstep(0.94, 0.975, spec));
-      ring *= smoothstep(1.34, 1.44, vWorldPos.y);
+      ring *= smoothstep(1.34, 1.44, hy);
       col += vec3(1.0, 0.98, 1.0) * ring * 0.35 * uHair;
     }
 
@@ -141,6 +149,8 @@ export interface ToonOptions {
   opacity?: number
   sphere?: number
   hair?: boolean
+  /** hair only: 0..1 how strongly strand ends take the theme colour */
+  tipMix?: number
   doubleSided?: boolean
   transparent?: boolean
 }
@@ -159,10 +169,11 @@ export function toonMaterial(o: ToonOptions): THREE.ShaderMaterial {
       uOpacity: { value: o.opacity ?? 1 },
       uSphere: { value: o.sphere ?? 0 },
       uHair: { value: o.hair ? 1 : 0 },
-      uTipMix: { value: o.hair ? 1 : 0 },
+      uTipMix: { value: o.hair ? (o.tipMix ?? 1) : 0 },
       uLightDir: shared.uLightDir,
       uRimColor: shared.uRimColor,
       uHeadCenter: shared.uHeadCenter,
+      uHeadShift: shared.uHeadShift,
       uAccent: shared.uAccent,
       uAccentBright: shared.uAccentBright
     },
@@ -240,8 +251,8 @@ const EYE_FRAG = /* glsl */ `
   uniform vec2 uCenter;
   uniform vec2 uGaze;
   uniform vec2 uIrisR;
-  uniform vec3 uAccent;
-  uniform vec3 uAccentBright;
+  uniform vec3 uIris;
+  uniform vec3 uIrisBright;
   uniform float uTime;
   uniform float uPupil;
   uniform float uSparkle;
@@ -270,9 +281,9 @@ const EYE_FRAG = /* glsl */ `
     sclera = mix(sclera, vec3(0.90, 0.88, 0.95), lower * 0.4);
     vec3 col = sclera;
 
-    vec3 deep = uAccent * 0.22 + vec3(0.02, 0.02, 0.06);
-    vec3 mid = uAccent * 0.85;
-    vec3 light = mix(uAccentBright, vec3(1.0), 0.15);
+    vec3 deep = uIris * 0.22 + vec3(0.02, 0.02, 0.06);
+    vec3 mid = uIris * 0.85;
+    vec3 light = mix(uIrisBright, vec3(1.0), 0.15);
     // iris: deep at the top, bright toward the bottom, radial fibres
     float g = clamp(p.y * 0.5 + 0.5, 0.0, 1.0);
     vec3 iris = mix(light, mid, smoothstep(0.05, 0.55, g));
@@ -281,7 +292,7 @@ const EYE_FRAG = /* glsl */ `
     float fib = 0.5 + 0.5 * sin(ang * 26.0 + sin(ang * 5.0 + uSeed) * 2.5);
     iris *= 0.88 + 0.16 * fib * smoothstep(0.3, 0.9, d);
     // the glowing crescent along the bottom of the iris
-    iris += uAccentBright * 0.55 * smoothstep(0.35, 0.95, d) * smoothstep(-0.05, -0.75, p.y);
+    iris += uIrisBright * 0.55 * smoothstep(0.35, 0.95, d) * smoothstep(-0.05, -0.75, p.y);
     // limbal ring
     iris = mix(iris, deep * 0.6, smoothstep(0.80, 0.97, d));
     // pupil — a soft vertical oval
@@ -308,16 +319,25 @@ const EYE_FRAG = /* glsl */ `
   }
 `
 
-export function eyeMaterial(center: THREE.Vector2, seed: number): THREE.ShaderMaterial {
+/**
+ * Procedural anime eye. ``iris`` null → the iris follows the COSMOS theme
+ * accent; otherwise a fixed [base, bright] colour pair.
+ */
+export function eyeMaterial(
+  center: THREE.Vector2,
+  seed: number,
+  irisRadius: THREE.Vector2,
+  iris: [THREE.Color, THREE.Color] | null
+): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     vertexShader: TOON_VERT,
     fragmentShader: EYE_FRAG,
     uniforms: {
       uCenter: { value: center },
       uGaze: { value: new THREE.Vector2() },
-      uIrisR: { value: new THREE.Vector2(0.0128, 0.017) },
-      uAccent: shared.uAccent,
-      uAccentBright: shared.uAccentBright,
+      uIrisR: { value: irisRadius },
+      uIris: iris ? { value: iris[0] } : shared.uAccent,
+      uIrisBright: iris ? { value: iris[1] } : shared.uAccentBright,
       uTime: shared.uTime,
       uPupil: { value: 1 },
       uSparkle: { value: 0 },
@@ -395,6 +415,8 @@ const OUTLINE_VERT = /* glsl */ `
   #include <skinning_pars_vertex>
   uniform float uWidth;
   uniform float uTipTaper;
+  uniform float uFringe;
+  uniform float uHeadShift;
   void main() {
     #include <morphinstance_vertex>
     #include <beginnormal_vertex>
@@ -416,8 +438,8 @@ const OUTLINE_VERT = /* glsl */ `
     // ...and fade out entirely where the fringe lies over the face (rest
     // pose: in front of the forehead, below the hairline), where the hull
     // would show between strand and skin
-    float fringe = smoothstep(0.035, 0.065, restPos.z) * (1.0 - smoothstep(1.40, 1.445, restPos.y));
-    taper *= 1.0 - uTipTaper * fringe;
+    float fringe = smoothstep(0.035, 0.065, restPos.z) * (1.0 - smoothstep(1.40, 1.445, restPos.y - uHeadShift));
+    taper *= 1.0 - uFringe * fringe;
     mvPosition.xyz += nv * uWidth * taper * (-mvPosition.z) * 0.0016;
     gl_Position = projectionMatrix * mvPosition;
   }
@@ -431,14 +453,17 @@ const OUTLINE_FRAG = /* glsl */ `
   }
 `
 
-export function outlineMaterial(color: string, width: number, tipTaper = 0): THREE.ShaderMaterial {
+/** ``fringe``: fade the line where bangs lie over the face (see the shader) */
+export function outlineMaterial(color: string, width: number, tipTaper = 0, fringe = tipTaper): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     vertexShader: OUTLINE_VERT,
     fragmentShader: OUTLINE_FRAG,
     uniforms: {
       uColor: { value: new THREE.Color(color) },
       uWidth: { value: width },
-      uTipTaper: { value: tipTaper }
+      uTipTaper: { value: tipTaper },
+      uFringe: { value: fringe },
+      uHeadShift: shared.uHeadShift
     },
     side: THREE.BackSide
   })

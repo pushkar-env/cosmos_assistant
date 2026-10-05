@@ -17,6 +17,10 @@ export interface SpringSettings {
   gravity: number
   /** collision radius of the strand around the chain */
   radius: number
+  /** response to the ambient breeze (`external`), 0 = none */
+  wind?: number
+  /** collider group this chain belongs to (see Collider.groups) */
+  group?: string
 }
 
 interface Joint {
@@ -34,6 +38,8 @@ export interface Collider {
   bone: THREE.Object3D
   offset: THREE.Vector3
   radius: number
+  /** chain groups this collider affects; undefined = every chain */
+  groups?: string[]
 }
 
 const _v1 = new THREE.Vector3()
@@ -51,7 +57,7 @@ export class SpringBones {
   private joints: Joint[] = []
   private colliders: Collider[] = []
   private acc = 0
-  private colliderScratch: { center: THREE.Vector3; radius: number }[] = []
+  private colliderScratch: { center: THREE.Vector3; radius: number; groups?: string[] }[] = []
   /** world-space wind / body motion impulse added on top of gravity */
   readonly external = new THREE.Vector3()
 
@@ -87,10 +93,10 @@ export class SpringBones {
   }
 
   /** collider sphere given by its REST world position, carried by ``bone`` */
-  addCollider(bone: THREE.Object3D, worldCenter: THREE.Vector3, radius: number): void {
+  addCollider(bone: THREE.Object3D, worldCenter: THREE.Vector3, radius: number, groups?: string[]): void {
     bone.updateWorldMatrix(true, false)
     const offset = bone.worldToLocal(worldCenter.clone())
-    this.colliders.push({ bone, offset, radius })
+    this.colliders.push({ bone, offset, radius, groups })
   }
 
   /** collider centres in world space (debug view) */
@@ -111,11 +117,12 @@ export class SpringBones {
     }
   }
 
-  update(dt: number): void {
+  /** advance the simulation; returns how many fixed steps ran (0 = bones untouched) */
+  update(dt: number): number {
     if (dt > 0.25) {
       // returning from a pause — don't integrate a quarter-second of physics
       this.reset()
-      return
+      return 1
     }
     this.acc += dt
     let steps = 0
@@ -125,6 +132,7 @@ export class SpringBones {
       steps++
     }
     if (steps === 4) this.acc = 0
+    return steps
   }
 
   private step(dt: number): void {
@@ -135,6 +143,7 @@ export class SpringBones {
       if (!cols[i]) cols[i] = { center: new THREE.Vector3(), radius: 0 }
       cols[i].center.copy(c.offset).applyMatrix4(c.bone.matrixWorld)
       cols[i].radius = c.radius
+      cols[i].groups = c.groups
     }
 
     for (const j of this.joints) {
@@ -153,11 +162,12 @@ export class SpringBones {
         .addScaledVector(_v3.copy(j.tail).sub(j.prevTail), 1 - s.drag)
         .addScaledVector(restDir, s.stiffness * dt)
         .addScaledVector(_gravity, s.gravity * dt)
-        .addScaledVector(this.external, dt)
+        .addScaledVector(this.external, dt * (s.wind ?? 0))
       // keep bone length
       next.sub(_pos).normalize().multiplyScalar(j.length).add(_pos)
       // push out of colliders
       for (const c of cols) {
+        if (c.groups && !c.groups.includes(s.group ?? '')) continue
         const r = c.radius + s.radius
         _v3.copy(next).sub(c.center)
         const d = _v3.length()

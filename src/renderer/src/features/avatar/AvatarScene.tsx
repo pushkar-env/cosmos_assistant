@@ -7,8 +7,9 @@ import { useUIStore } from '@/core/stores/useUIStore'
 import { voiceSignal } from '@/core/voice/voiceSignal'
 import { THEMES } from '@/core/theme/themes'
 import { FrameDriver } from '@/shared/three/FrameDriver'
-import { loadNova, prepareNova, type NovaRig } from './avatarAsset'
+import { loadAvatar, prepareAvatar, type AvatarRig } from './avatarAsset'
 import { AvatarController } from './AvatarController'
+import { resolveAvatar, type AvatarConfig } from './avatars'
 import { readReplySentence, readUserMessage, SentenceSplitter } from './emotion'
 import { shared } from './toonMaterials'
 
@@ -27,7 +28,11 @@ export const avatarBridge = {
   /** render one frame at the given time (seconds) — dev/testing aid */
   advance: null as ((t: number) => void) | null,
   /** smoothed CPU cost of the avatar's per-frame update, in ms */
-  updateMs: 0
+  updateMs: 0,
+  /** dev/testing aid: orbit the camera around her (radians, 0 = front) */
+  orbit: 0,
+  /** dev/testing aid: a close-up instead of the full-body framing */
+  focus: null as { x?: number; y: number; dist: number } | null
 }
 
 if (import.meta.env.DEV) (window as unknown as { __nova: typeof avatarBridge }).__nova = avatarBridge
@@ -35,29 +40,29 @@ if (import.meta.env.DEV) (window as unknown as { __nova: typeof avatarBridge }).
 const _v = new THREE.Vector3()
 const _w = new THREE.Vector3()
 
-function NovaModel({ onFail }: { onFail: (err: unknown) => void }): React.JSX.Element | null {
-  const [rig, setRig] = useState<NovaRig | null>(null)
+function AvatarModel({ cfg, onFail }: { cfg: AvatarConfig; onFail: (err: unknown) => void }): React.JSX.Element | null {
+  const [rig, setRig] = useState<AvatarRig | null>(null)
   const camera = useThree((s) => s.camera)
   const size = useThree((s) => s.size)
 
   useEffect(() => {
     let alive = true
-    let prepared: NovaRig | null = null
-    loadNova()
+    let prepared: AvatarRig | null = null
+    loadAvatar(cfg)
       .then((gltf) => {
         if (!alive) return
-        prepared = prepareNova(gltf)
+        prepared = prepareAvatar(gltf, cfg)
         setRig(prepared)
       })
       .catch((err) => {
-        console.error('[avatar] failed to load Nova:', err)
+        console.error(`[avatar] failed to load ${cfg.label}:`, err)
         if (alive) onFail(err)
       })
     return () => {
       alive = false
       prepared?.dispose()
     }
-  }, [onFail])
+  }, [cfg, onFail])
 
   const ctrl = useMemo(() => (rig ? new AvatarController(rig) : null), [rig])
 
@@ -168,7 +173,7 @@ function ExposeAdvance(): null {
 }
 
 /** Framing: head to hips (VTuber-style), easing closer while she talks to you. */
-function CameraRig(): null {
+function CameraRig({ cfg }: { cfg: AvatarConfig }): null {
   const camera = useThree((s) => s.camera) as THREE.PerspectiveCamera
   const size = useThree((s) => s.size)
   const pos = useRef(new THREE.Vector3(0, 1.2, 3))
@@ -180,22 +185,32 @@ function CameraRig(): null {
     const st = useAssistantStore.getState().state
     const aspect = size.width / Math.max(1, size.height)
     const half = THREE.MathUtils.degToRad(camera.fov / 2)
-    // vertical span to fit (metres) — tighter while she's speaking
-    const span = st === 'speaking' ? 0.88 : st === 'listening' ? 0.94 : 1.02
+    // full body: from just under the soles to just over her hair, with a
+    // little air. While she talks the camera leans in a touch — never enough
+    // to crop her feet or a raised hand.
+    const top = cfg.frame.top + 0.04
+    const bottom = -0.05
+    const span = (top - bottom) * (st === 'speaking' && !avatarBridge.ctrl?.gesturing ? 1.03 : 1.07)
     let dist = span / 2 / Math.tan(half)
-    // keep ~0.9 m of width so gestures never clip on narrow windows
-    dist = Math.max(dist, 0.45 / (Math.tan(half) * aspect))
+    // keep ~1.2 m of width so an arm or the coat never clips on narrow windows
+    dist = Math.max(dist, 0.6 / (Math.tan(half) * aspect))
     const t = state.clock.elapsedTime
     const px = avatarBridge.inside ? avatarBridge.pointer.x : 0
     const py = avatarBridge.inside ? avatarBridge.pointer.y : 0
-    // keep the top of her head (≈1.52 m, ears ≈1.58) just inside the frame
-    const lookY = 1.645 - span / 2
-    goalLook.set(px * 0.02, lookY + py * 0.01, 0)
-    goalPos.set(px * 0.06 + Math.sin(t * 0.13) * 0.025, lookY + 0.04 + Math.sin(t * 0.21) * 0.012, dist)
-    const k = Math.min(1, delta * 1.6)
+    const lookY = (top + bottom) / 2
+    goalLook.set(px * 0.03, lookY + py * 0.015, 0)
+    // camera a little above the middle of her, looking very slightly down
+    goalPos.set(px * 0.08 + Math.sin(t * 0.13) * 0.03, lookY + 0.12 + Math.sin(t * 0.21) * 0.015, dist)
+    const f = avatarBridge.focus
+    if (f) {
+      goalLook.set(f.x ?? 0, f.y, 0)
+      goalPos.set(f.x ?? 0, f.y, f.dist)
+    }
+    const k = f ? 1 : Math.min(1, delta * 1.6)
     pos.current.lerp(goalPos, k)
     look.current.lerp(goalLook, k)
     camera.position.copy(pos.current)
+    if (avatarBridge.orbit) camera.position.applyAxisAngle(THREE.Object3D.DEFAULT_UP, avatarBridge.orbit)
     camera.lookAt(look.current)
   })
   return null
@@ -254,8 +269,8 @@ function Halo(): React.JSX.Element {
   )
   useEffect(() => () => mat.dispose(), [mat])
   return (
-    <mesh position={[0, 1.26, -0.45]} material={mat} renderOrder={-10}>
-      <planeGeometry args={[1.5, 1.5]} />
+    <mesh position={[0, 1.18, -0.5]} material={mat} renderOrder={-10}>
+      <planeGeometry args={[2.0, 2.0]} />
     </mesh>
   )
 }
@@ -267,9 +282,9 @@ const MOTE_VERT = /* glsl */ `
   void main() {
     vec3 p = position;
     float t = uTime * (0.03 + aSeed * 0.04) + aSeed * 10.0;
-    p.y = 0.5 + mod(p.y + t, 1.6);
+    p.y = 0.05 + mod(p.y + t, 1.95);
     p.x += sin(t * 2.0 + aSeed * 6.0) * 0.03;
-    vAlpha = smoothstep(0.5, 0.8, p.y) * smoothstep(2.1, 1.8, p.y) * (0.4 + 0.6 * aSeed);
+    vAlpha = smoothstep(0.05, 0.35, p.y) * smoothstep(2.0, 1.7, p.y) * (0.4 + 0.6 * aSeed);
     vec4 mv = modelViewMatrix * vec4(p, 1.0);
     gl_PointSize = (2.0 + aSeed * 3.0) * (2.5 / -mv.z);
     gl_Position = projectionMatrix * mv;
@@ -295,7 +310,7 @@ function Motes({ count = 140 }: { count?: number }): React.JSX.Element {
       const a = Math.random() * Math.PI * 2
       const r = 0.35 + Math.random() * 0.55
       pos[i * 3] = Math.cos(a) * r
-      pos[i * 3 + 1] = Math.random() * 1.6
+      pos[i * 3 + 1] = Math.random() * 1.95
       pos[i * 3 + 2] = Math.sin(a) * r * 0.6 - 0.25
       seed[i] = Math.random()
     }
@@ -326,9 +341,85 @@ function Motes({ count = 140 }: { count?: number }): React.JSX.Element {
   return <points geometry={geo} material={mat} />
 }
 
-/** Nova — the 3D anime avatar at the heart of the main view. */
+/* ── the floor she stands on ───────────────────────────────────────── */
+
+const FLOOR_FRAG = /* glsl */ `
+  uniform vec3 uAccent;
+  uniform vec3 uAccentBright;
+  uniform float uTime;
+  uniform float uVoice;
+  varying vec2 vUv;
+  void main() {
+    vec2 p = (vUv - 0.5) * 2.0;
+    float r = length(p);
+    float ang = atan(p.y, p.x);
+    // a holographic pad: two rings, rotating segments, a soft inner glow
+    float ring1 = exp(-pow((r - 0.62) * 60.0, 2.0)) * 0.6;
+    float segs = step(0.45, fract((ang / 6.2831) * 12.0 - uTime * 0.05));
+    float ring2 = exp(-pow((r - 0.80) * 90.0, 2.0)) * 0.45 * segs;
+    float glow = exp(-r * r * 3.5) * (0.10 + 0.12 * uVoice);
+    float a = clamp(ring1 + ring2 + glow, 0.0, 1.0) * smoothstep(1.0, 0.9, r);
+    vec3 col = uAccent * glow + uAccentBright * (ring1 + ring2);
+    gl_FragColor = vec4(col, a);
+    #include <colorspace_fragment>
+  }
+`
+const SHADOW_FRAG = /* glsl */ `
+  varying vec2 vUv;
+  void main() {
+    vec2 p = (vUv - 0.5) * vec2(2.0, 3.2);
+    float a = (1.0 - smoothstep(0.0, 1.0, length(p))) * 0.55;
+    gl_FragColor = vec4(0.0, 0.0, 0.0, a);
+  }
+`
+
+function Floor(): React.JSX.Element {
+  const [pad, shadow] = useMemo(
+    () => [
+      new THREE.ShaderMaterial({
+        vertexShader: HALO_VERT,
+        fragmentShader: FLOOR_FRAG,
+        uniforms: {
+          uAccent: shared.uAccent,
+          uAccentBright: shared.uAccentBright,
+          uTime: shared.uTime,
+          uVoice: shared.uVoice
+        },
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+      }),
+      new THREE.ShaderMaterial({ vertexShader: HALO_VERT, fragmentShader: SHADOW_FRAG, transparent: true, depthWrite: false })
+    ],
+    []
+  )
+  useEffect(
+    () => () => {
+      pad.dispose()
+      shadow.dispose()
+    },
+    [pad, shadow]
+  )
+  return (
+    <group rotation={[-Math.PI / 2, 0, 0]}>
+      <mesh position={[0, 0, 0.002]} material={pad} renderOrder={-9}>
+        <planeGeometry args={[1.1, 1.1]} />
+      </mesh>
+      <mesh position={[0, 0.01, 0.004]} material={shadow} renderOrder={-8}>
+        <planeGeometry args={[0.55, 0.55]} />
+      </mesh>
+    </group>
+  )
+}
+
+/** The 3D anime avatar at the heart of the main view. */
 export function AvatarScene({ onFail }: { onFail: (err: unknown) => void }): React.JSX.Element {
   const visible = useUIStore((s) => s.windowVisible)
+  const avatarId = useSettingsStore((s) => s.settings.avatarId)
+  const cfg = resolveAvatar(avatarId)
+  useEffect(() => {
+    if (!cfg) onFail(new Error('no avatar model is bundled'))
+  }, [cfg, onFail])
   const toNdc = (e: React.PointerEvent | React.MouseEvent, out: THREE.Vector2): THREE.Vector2 => {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
     return out.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1)
@@ -354,10 +445,11 @@ export function AvatarScene({ onFail }: { onFail: (err: unknown) => void }): Rea
     >
       <FrameDriver fps={visible ? AVATAR_FPS : null} />
       <ExposeAdvance />
-      <CameraRig />
+      {cfg && <CameraRig cfg={cfg} />}
       <Halo />
+      <Floor />
       <Motes />
-      <NovaModel onFail={onFail} />
+      {cfg && <AvatarModel key={cfg.id} cfg={cfg} onFail={onFail} />}
     </Canvas>
   )
 }

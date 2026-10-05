@@ -1,9 +1,7 @@
-"""Head base mesh — an anime-proportioned skull built by deforming a sphere.
-
-The face is deliberately simple geometry (tiny nose, no ears — the headset
-covers them): in anime rendering the *features* (eyes, lashes, brows, mouth,
-blush) are separate thin meshes laid onto this surface, and the app's toon
-shader bends the face normals toward a sphere so the shading stays clean.
+"""Head base mesh — a mature anime woman's skull (longer, slimmer jaw, small
+defined nose) built from front/side profile tables. Features (eyes, lashes,
+brows, lips, the forehead mark) are thin meshes laid onto this surface; the
+long face-framing locks cover the ears.
 """
 
 import math
@@ -13,37 +11,40 @@ from mathutils import Vector
 from kit.common import lerp, material, mesh_object, pchip, smoothstep, srgb
 
 # head pivot (roughly the centre of the cranium), world space
-HEAD_C = Vector((0.0, 0.0, 1.40))
+HEAD_C = Vector((0.0, 0.0, 1.535))
 
 # head-local landmark heights (metres relative to HEAD_C)
-TOP_Z = 0.118
-CHIN_Z = -0.124
-EYE_Z = -0.026
-EYE_X = 0.0395
-NOSE_Z = -0.056
-MOUTH_Z = -0.087
+TOP_Z = 0.112
+CHIN_Z = -0.118  # a short, softly pointed chin under a small mouth
+EYE_Z = -0.019
+EYE_X = 0.0355
+NOSE_Z = -0.058
+MOUTH_Z = -0.0785  # close under the nose, as in the reference
+MARK_Z = 0.027  # the diamond seal on her forehead
 
-SKIN = "#fde7dc"
+SKIN = "#f6dccd"
 
 
-HALF_W = 0.091  # cranium half-width
-FRONT = 0.0905  # forehead depth in front of the pivot
-BACK = 0.1035  # skull depth behind the pivot
+HALF_W = 0.0845  # cranium half-width
+FRONT = 0.088  # forehead depth in front of the pivot
+BACK = 0.100  # skull depth behind the pivot
 
 # lower-face profiles over head-local Z (front view half-width, side-view
-# front/back extents). The back extent swings forward under the jaw so the
-# underside rises from the chin to the nape instead of sagging.
+# front/back extents), drawn for a chin at -0.128 and compressed onto CHIN_Z.
+# The back extent swings forward under the jaw so the underside rises from the
+# chin to the nape instead of sagging. A slim oval: the cheeks taper early.
+_TABLE_CHIN = -0.128
 _W = pchip(
-    [(-0.124, 0.0), (-0.1215, 0.014), (-0.116, 0.027), (-0.107, 0.043), (-0.095, 0.060),
-     (-0.080, 0.074), (-0.065, 0.083), (-0.050, 0.088), (-0.030, 0.0905), (0.0, HALF_W)]
+    [(-0.128, 0.0), (-0.1255, 0.009), (-0.120, 0.018), (-0.110, 0.030), (-0.097, 0.043),
+     (-0.080, 0.055), (-0.062, 0.066), (-0.042, 0.0750), (-0.020, 0.0815), (0.0, HALF_W)]
 )
 _F = pchip(
-    [(-0.124, 0.064), (-0.115, 0.0745), (-0.100, 0.0805), (-0.080, 0.0855),
-     (-0.060, 0.0885), (-0.030, 0.0898), (0.0, FRONT)]
+    [(-0.128, 0.068), (-0.118, 0.0775), (-0.100, 0.0825), (-0.080, 0.0855),
+     (-0.055, 0.0875), (-0.030, 0.0878), (0.0, FRONT)]
 )
 _B = pchip(
-    [(-0.124, -0.060), (-0.1215, -0.036), (-0.117, -0.008), (-0.110, 0.020), (-0.100, 0.042),
-     (-0.085, 0.064), (-0.070, 0.080), (-0.050, 0.092), (-0.025, 0.100), (0.0, BACK)]
+    [(-0.128, -0.064), (-0.1255, -0.040), (-0.121, -0.012), (-0.113, 0.016), (-0.102, 0.038),
+     (-0.087, 0.058), (-0.070, 0.074), (-0.048, 0.087), (-0.022, 0.096), (0.0, BACK)]
 )
 
 
@@ -66,11 +67,12 @@ def head_point(x, y, z):
         W = HALF_W * k
         F = FRONT * k
         B = BACK * k + 0.006 * math.sin(math.pi * z)
-        n_front = lerp(2.35, 2.0, smoothstep(0.0, 0.6, z))
+        n_front = lerp(2.25, 2.0, smoothstep(0.0, 0.6, z))
     else:
         Z = z * (-CHIN_Z)
-        W, F, B = _W(Z), _F(Z), _B(Z)
-        n_front = 2.35
+        T = z * (-_TABLE_CHIN)
+        W, F, B = _W(T), _F(T), _B(T)
+        n_front = 2.25
     yc = (B - F) * 0.5
     d = (F + B) * 0.5
     s, c = math.sin(th), math.cos(th)
@@ -83,12 +85,12 @@ def head_point(x, y, z):
         front = smoothstep(0.0, -0.05, p.y)
         # tiny pointed nose: soft on top, crisp underneath
         dz = Z - NOSE_Z
-        sz = 0.010 if dz > 0 else 0.004
-        p.y -= 0.0036 * math.exp(-((X / 0.0045) ** 2) - (dz / sz) ** 2) * front
-        # a hint of baby fat under the eyes
+        sz = 0.014 if dz > 0 else 0.0042
+        p.y -= 0.0060 * math.exp(-((X / 0.0047) ** 2) - (dz / sz) ** 2) * front
+        # gentle cheekbones
         for sx in (-1, 1):
-            g = math.exp(-(((X - sx * 0.05) / 0.022) ** 2) - ((Z + 0.062) / 0.02) ** 2)
-            p.y -= 0.0018 * g * front
+            g = math.exp(-(((X - sx * 0.052) / 0.02) ** 2) - ((Z + 0.045) / 0.018) ** 2)
+            p.y -= 0.0012 * g * front
     return p
 
 

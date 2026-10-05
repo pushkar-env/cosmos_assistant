@@ -1,38 +1,41 @@
 import * as THREE from 'three'
 import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js'
-import novaUrl from '@/assets/avatar/nova.glb?url'
+import type { AvatarConfig, MaterialSpec } from './avatars'
 import {
+  HAIR_BAND_HEAD_Y,
   blushMaterial,
   eyeMaterial,
   flatMaterial,
   glowMaterial,
   mouthMaterial,
   outlineMaterial,
+  shared,
   toonMaterial
 } from './toonMaterials'
 
 /*
- * Loads Nova (built by tools/avatar from Blender) once per session and dresses
+ * Loads an avatar GLB (built by tools/avatar) once per session and dresses
  * every mesh in the app's anime shaders. Materials are matched by the NAME the
- * generator gave them, so the .glb can be rebuilt freely without touching this
- * file as long as the names stay.
+ * generator gave them (see avatars.ts), so a model can be rebuilt freely
+ * without touching this file as long as the names stay.
  */
 
-// eye centres (rest pose, metres) — mirror of tools/avatar/nova/head.py
-const EYE_CENTER_L = new THREE.Vector2(0.0403, 1.3752)
-const EYE_CENTER_R = new THREE.Vector2(-0.0403, 1.3752)
+const cache = new Map<string, Promise<GLTF>>()
 
-let cached: Promise<GLTF> | null = null
-
-export function loadNova(): Promise<GLTF> {
-  cached ??= new GLTFLoader().loadAsync(novaUrl).catch((err) => {
-    cached = null // allow a retry on the next mount
-    throw err
-  })
-  return cached
+export function loadAvatar(cfg: AvatarConfig): Promise<GLTF> {
+  let p = cache.get(cfg.url)
+  if (!p) {
+    p = new GLTFLoader().loadAsync(cfg.url).catch((err) => {
+      cache.delete(cfg.url) // allow a retry on the next mount
+      throw err
+    })
+    cache.set(cfg.url, p)
+  }
+  return p
 }
 
-export interface NovaRig {
+export interface AvatarRig {
+  config: AvatarConfig
   root: THREE.Object3D
   bones: Map<string, THREE.Bone>
   /** every mesh that carries blendshapes */
@@ -42,72 +45,18 @@ export interface NovaRig {
     eyeR: THREE.ShaderMaterial
     mouth: THREE.ShaderMaterial
     blush: THREE.ShaderMaterial
-    hair: THREE.ShaderMaterial
   }
   clips: THREE.AnimationClip[]
   dispose: () => void
 }
 
-type Spec =
-  | { kind: 'toon'; color: string; shade: string; outline?: [string, number]; sphere?: number; rim?: number; double?: boolean; step?: number }
-  | { kind: 'hair' }
-  | { kind: 'flat'; color: string; opacity?: number; overHair?: boolean }
-  | { kind: 'eyeL' | 'eyeR' | 'mouth' | 'blush' | 'glow' }
-
-function specFor(materialName: string, meshName: string): Spec {
-  switch (materialName) {
-    case 'Skin':
-      return meshName === 'Head'
-        ? { kind: 'toon', color: '#fff0e8', shade: '#f4bfb2', sphere: 0.85, rim: 0.22, step: 0.42, outline: ['#b97b70', 0.55] }
-        : { kind: 'toon', color: '#fff0e8', shade: '#efb6a8', rim: 0.25, step: 0.45, outline: ['#b97b70', 0.7] }
-    case 'Hair':
-      return { kind: 'hair' }
-    case 'Eye_L':
-      return { kind: 'eyeL' }
-    case 'Eye_R':
-      return { kind: 'eyeR' }
-    case 'Mouth':
-      return { kind: 'mouth' }
-    case 'Blush':
-      return { kind: 'blush' }
-    case 'Accent':
-      return { kind: 'glow' }
-    case 'Lash':
-      return { kind: 'flat', color: '#2a1a26' }
-    case 'LashLower':
-      return { kind: 'flat', color: '#7a4c5c', opacity: 0.85 }
-    case 'Crease':
-      return { kind: 'flat', color: '#c99088', opacity: 0.6 }
-    case 'Brow':
-      return { kind: 'flat', color: '#8c7ea6', overHair: true }
-    case 'Cloth_White':
-      return { kind: 'toon', color: '#f1f3fa', shade: '#aeb8d6', double: true, rim: 0.22, outline: ['#5d678c', 0.8] }
-    case 'Cloth_Dark':
-      return { kind: 'toon', color: '#2b3254', shade: '#171b33', double: true, rim: 0.4, outline: ['#0a0c18', 0.8] }
-    case 'Ribbon':
-      return { kind: 'toon', color: '#ff86b0', shade: '#d9507f', double: true, rim: 0.3, outline: ['#8c2a50', 0.6] }
-    case 'Sock':
-      return { kind: 'toon', color: '#262838', shade: '#14151f', rim: 0.45, outline: ['#07080d', 0.8] }
-    case 'Shoe':
-      return { kind: 'toon', color: '#f6f7fb', shade: '#bcc4dc', outline: ['#5d678c', 0.8] }
-    case 'Sole':
-      return { kind: 'toon', color: '#33406b', shade: '#1e2647', outline: ['#0a0c18', 0.8] }
-    case 'Headset':
-      return { kind: 'toon', color: '#f8f9fd', shade: '#b6c0dc', rim: 0.4, outline: ['#5d678c', 0.7] }
-    case 'Headset_Dark':
-      return { kind: 'toon', color: '#2a3150', shade: '#161a2e', rim: 0.4, outline: ['#0a0c18', 0.6] }
-    default:
-      return { kind: 'toon', color: '#ffffff', shade: '#c0c0d0' }
-  }
-}
-
 const KEEP_POSITION = new Set(['hips'])
 
-/** drop the tracks the app drives itself (hair springs, scale, stray translations) */
+/** drop the tracks the app drives itself (spring chains, scale, stray translations) */
 function trimClip(clip: THREE.AnimationClip): THREE.AnimationClip {
   const tracks = clip.tracks.filter((t) => {
     const [node, prop] = t.name.split('.')
-    if (node.startsWith('hair_')) return false
+    if (node.startsWith('hair_') || node.startsWith('cloth_') || node.startsWith('bust_')) return false
     if (prop === 'scale') return false
     if (prop === 'position') return KEEP_POSITION.has(node)
     return true
@@ -115,53 +64,81 @@ function trimClip(clip: THREE.AnimationClip): THREE.AnimationClip {
   return new THREE.AnimationClip(clip.name, clip.duration, tracks)
 }
 
-export function prepareNova(gltf: GLTF): NovaRig {
+export function prepareAvatar(gltf: GLTF, cfg: AvatarConfig): AvatarRig {
   // each mount gets its own skeleton/material instances
   const root = cloneSkinned(gltf.scene)
   const bones = new Map<string, THREE.Bone>()
   const morphMeshes: THREE.Mesh[] = []
   const created: THREE.Material[] = []
-  let eyeL!: THREE.ShaderMaterial
-  let eyeR!: THREE.ShaderMaterial
-  let mouth!: THREE.ShaderMaterial
-  let blush!: THREE.ShaderMaterial
-  let hair!: THREE.ShaderMaterial
   const outlines: THREE.Mesh[] = []
+  const found: Partial<AvatarRig['materials']> = {}
+
+  const iris =
+    cfg.eyes.iris === 'theme'
+      ? null
+      : ([new THREE.Color(cfg.eyes.iris.base), new THREE.Color(cfg.eyes.iris.bright)] as [THREE.Color, THREE.Color])
+  const irisR = new THREE.Vector2(...cfg.eyes.irisRadius)
 
   root.traverse((o) => {
     if ((o as THREE.Bone).isBone) bones.set(o.name, o as THREE.Bone)
   })
 
+  // the hair shading bands follow this avatar's head height (rest pose)
+  const head = bones.get('head')
+  if (head) {
+    root.updateMatrixWorld(true)
+    const pivot = new THREE.Vector3(...cfg.headPivot).applyMatrix4(head.matrixWorld)
+    shared.uHeadShift.value = pivot.y - HAIR_BAND_HEAD_Y
+  }
+
   const meshes: THREE.SkinnedMesh[] = []
   root.traverse((o) => {
-    if ((o as THREE.SkinnedMesh).isSkinnedMesh || (o as THREE.Mesh).isMesh) meshes.push(o as THREE.SkinnedMesh)
+    if ((o as THREE.Mesh).isMesh) meshes.push(o as THREE.SkinnedMesh)
   })
 
   for (const mesh of meshes) {
     const old = mesh.material as THREE.Material
-    const spec = specFor(old.name, mesh.name)
+    // `Material:Mesh` overrides a plain material entry (e.g. face vs body skin)
+    const spec: MaterialSpec = cfg.materials[`${old.name}:${mesh.name}`] ??
+      cfg.materials[old.name] ?? { kind: 'toon', color: '#ffffff', shade: '#c0c0d0' }
     let mat: THREE.ShaderMaterial
     switch (spec.kind) {
       case 'toon':
-        mat = toonMaterial({ color: spec.color, shade: spec.shade, sphere: spec.sphere, rim: spec.rim, doubleSided: spec.double, step: spec.step })
+        mat = toonMaterial({
+          color: spec.color,
+          shade: spec.shade,
+          sphere: spec.sphere,
+          rim: spec.rim,
+          doubleSided: spec.double,
+          step: spec.step
+        })
         break
       case 'hair':
-        mat = hair = toonMaterial({ color: '#e6e3f4', shade: '#a9a1cc', step: 0.48, rim: 0.14, hair: true, sphere: 0.6, doubleSided: true })
+        mat = toonMaterial({
+          color: spec.color,
+          shade: spec.shade,
+          step: 0.48,
+          rim: 0.14,
+          hair: true,
+          tipMix: spec.tipMix,
+          sphere: 0.6,
+          doubleSided: true
+        })
         break
       case 'flat':
         mat = flatMaterial(spec.color, spec.opacity ?? 1, spec.overHair)
         break
       case 'eyeL':
-        mat = eyeL = eyeMaterial(EYE_CENTER_L.clone(), 0.3)
+        mat = found.eyeL = eyeMaterial(new THREE.Vector2(...cfg.eyes.centerL), 0.3, irisR.clone(), iris)
         break
       case 'eyeR':
-        mat = eyeR = eyeMaterial(EYE_CENTER_R.clone(), 1.7)
+        mat = found.eyeR = eyeMaterial(new THREE.Vector2(...cfg.eyes.centerR), 1.7, irisR.clone(), iris)
         break
       case 'mouth':
-        mat = mouth = mouthMaterial()
+        mat = found.mouth = mouthMaterial()
         break
       case 'blush':
-        mat = blush = blushMaterial()
+        mat = found.blush = blushMaterial()
         break
       case 'glow':
         mat = glowMaterial()
@@ -175,10 +152,15 @@ export function prepareNova(gltf: GLTF): NovaRig {
     if (spec.kind === 'blush') mesh.renderOrder = 3
     if (mesh.morphTargetDictionary && Object.keys(mesh.morphTargetDictionary).length) morphMeshes.push(mesh)
 
-    const outline = spec.kind === 'hair' ? (['#8279a8', 0.85] as [string, number]) : spec.kind === 'toon' ? spec.outline : undefined
+    const outline = spec.kind === 'hair' || spec.kind === 'toon' ? spec.outline : undefined
     if (outline && mesh.isSkinnedMesh) {
-      const o = new THREE.SkinnedMesh(mesh.geometry, outlineMaterial(outline[0], outline[1], spec.kind === 'hair' ? 1 : 0))
+      const hair = spec.kind === 'hair'
+      const fringe = hair && spec.fringeFade !== false ? 1 : 0
+      const o = new THREE.SkinnedMesh(mesh.geometry, outlineMaterial(outline[0], outline[1], hair ? 1 : 0, fringe))
       o.name = mesh.name + '_outline'
+      // the line follows the mesh's blendshapes (a mouth opening, cloth
+      // pressed under a hand): one weights array for both
+      if (mesh.morphTargetInfluences) o.morphTargetInfluences = mesh.morphTargetInfluences
       o.bind(mesh.skeleton, mesh.bindMatrix)
       o.frustumCulled = false
       o.renderOrder = -1
@@ -188,11 +170,16 @@ export function prepareNova(gltf: GLTF): NovaRig {
     }
   }
 
+  if (!found.eyeL || !found.eyeR || !found.mouth || !found.blush) {
+    throw new Error(`avatar "${cfg.id}" is missing face materials (Eye_L/Eye_R/Mouth/Blush)`)
+  }
+
   return {
+    config: cfg,
     root,
     bones,
     morphMeshes,
-    materials: { eyeL, eyeR, mouth, blush, hair },
+    materials: found as AvatarRig['materials'],
     clips: gltf.animations.map(trimClip),
     dispose: () => {
       created.forEach((m) => m.dispose())

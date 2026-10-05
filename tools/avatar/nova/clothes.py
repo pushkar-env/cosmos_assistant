@@ -11,20 +11,11 @@ import math
 
 from mathutils import Matrix, Vector
 
-from .body import (
-    JOINTS,
-    LEG_RX,
-    LEG_RY,
-    MeshBuilder,
-    _arm_dir,
-    arm_path,
-    leg_path,
-    loft,
-    polyline,
-    superellipse_ring,
-    tube,
-)
-from .common import bvh_of, catmull_rom, lerp, material, pchip, resample, smoothstep, srgb
+from kit.common import bvh_of, catmull_rom, frames_along, lerp, material, pchip, resample, smoothstep, srgb
+from kit.geom import MeshBuilder, flat_strip, loft, polyline, superellipse_ring, tube
+from kit.strands import Shell
+
+from .body import JOINTS, LEG_RX, LEG_RY, arm_dir, leg_path
 from .head import HEAD_C
 
 WHITE = "#f3f5fb"
@@ -149,15 +140,12 @@ SLEEVE_R = pchip([(0.0, 0.038), (0.13, 0.053), (0.40, 0.050), (0.55, 0.047), (0.
 def build_sleeves(m):
     out = []
     for side in (1, -1):
-        d = _arm_dir(side)
+        d = arm_dir(side)
         sh = JOINTS[("left" if side > 0 else "right") + "UpperArm"]
         start, end = sh - d * 0.070, sh + d * 0.505  # past the wrist: covers the palm
         path = polyline([start, sh, sh + d * 0.245, end], 10)
         n = len(path)
-        frames_up = Vector((0, 1, 0))
-        from .common import frames_along
-
-        frames = frames_along(path, frames_up)
+        frames = frames_along(path, Vector((0, 1, 0)))
         rings = []
         for i, (p, (tan, nrm, bn)) in enumerate(zip(path, frames)):
             t = i / (n - 1)
@@ -196,31 +184,6 @@ def build_sleeves(m):
 # ── ribbon bow ──────────────────────────────────────────────────────────
 
 
-def _flat_strip(path, width, thick, up_fn):
-    """A flat ribbon along ``path``; width/thick are callables over t."""
-    verts, faces, uvs = [], [], []
-    n = len(path)
-    for i, p in enumerate(path):
-        t = i / (n - 1)
-        tan = (path[min(i + 1, n - 1)] - path[max(i - 1, 0)]).normalized()
-        out = up_fn(p)
-        out = (out - tan * out.dot(tan)).normalized()
-        side = tan.cross(out).normalized()
-        w, h = width(t), thick(t)
-        for k, (sx, sy) in enumerate(((-1, -1), (1, -1), (1, 1), (-1, 1))):
-            verts.append(p + side * (w * sx) + out * (h * sy))
-            uvs.append((k / 4, t))
-    for i in range(n - 1):
-        for k in range(4):
-            a = i * 4 + k
-            b = i * 4 + (k + 1) % 4
-            faces.append((a, b, b + 4, a + 4))
-    faces.append((3, 2, 1, 0))
-    o = (n - 1) * 4
-    faces.append((o, o + 1, o + 2, o + 3))
-    return verts, faces, uvs
-
-
 def build_bow(m):
     mb = MeshBuilder()
     knot = Vector((0.0, -0.058, 1.236))
@@ -245,9 +208,9 @@ def build_bow(m):
             tail.append(p)
         tail[0] = knot + Vector((side * 0.004, -0.001, -0.004))
         tw = pchip([(0, 0.004), (0.2, 0.0075), (1, 0.0095)])
-        mb.add(_flat_strip(tail, tw, lambda t: 0.0018, lambda p: Vector((p.x * 0.3, p.y, 0.0))))
+        mb.add(flat_strip(tail, tw, lambda t: 0.0018, lambda p: Vector((p.x * 0.3, p.y, 0.0))))
     # the knot
-    mb.add(_flat_strip([knot + Vector((0, 0, 0.007)), knot + Vector((0, -0.002, 0)), knot + Vector((0, 0, -0.007))],
+    mb.add(flat_strip([knot + Vector((0, 0, 0.007)), knot + Vector((0, -0.002, 0)), knot + Vector((0, 0, -0.007))],
                        lambda t: 0.0065, lambda t: 0.0042, forward))
     bow = mb.build("Bow", m["ribbon"])
     bow["double_sided"] = True
@@ -267,7 +230,7 @@ def _pleat(th):
 
 
 def skirt_ring(t, segs=PLEATS * 6, extra=0.0):
-    from .body import TORSO_B, TORSO_F, TORSO_HW
+    from .body import TORSO_B, TORSO_F, TORSO_HW  # noqa: PLC0415
 
     z = lerp(0.968, 0.680, t)
     zz = max(z, 0.865)  # below the hips the skirt hangs, it doesn't follow the body
@@ -381,7 +344,7 @@ def build_headset(m, shell):
     pts = shell.path([(-90, 8, 0.016), (-90, 50, 0.022), (0, 90, 0.024), (90, 50, 0.022), (90, 8, 0.016)], per_seg=6)
     pts = [p + Vector((0, 0.012, 0)) for p in pts]
     band = resample(pts, 60)
-    mb_dark.add(_flat_strip(band, lambda t: 0.0068, lambda t: 0.0032, lambda p: (p - HEAD_C).normalized()))
+    mb_dark.add(flat_strip(band, lambda t: 0.0068, lambda t: 0.0032, lambda p: (p - HEAD_C).normalized()))
 
     # cat ears riding on the band
     for side in (1, -1):
@@ -421,8 +384,6 @@ def build_headset(m, shell):
 
 
 def build_clothes(head_ob):
-    from .hair import Shell
-
     m = mats()
     out = []
     jacket = build_jacket(m)
@@ -433,5 +394,5 @@ def build_clothes(head_ob):
     out += build_skirt(m)
     out += build_socks(m)
     out += build_shoes(m)
-    out += build_headset(m, Shell(head_ob))
+    out += build_headset(m, Shell(head_ob, HEAD_C))
     return [o.name for o in out]
