@@ -97,8 +97,8 @@ export function prepareAvatar(gltf: GLTF, cfg: AvatarConfig): AvatarRig {
     if ((o as THREE.Mesh).isMesh) meshes.push(o as THREE.SkinnedMesh)
   })
 
-  // which skin joints are her hands (the stage keeps them in front of a card
-  // she holds — see shared.uCut)
+  // which skin joints are her hands: inside a HUD card only they can show,
+  // where they're in front of it (see shared.uCut)
   const skinned = meshes.find((m) => m.isSkinnedMesh)
   if (skinned) {
     const flags = shared.uHandBones.value

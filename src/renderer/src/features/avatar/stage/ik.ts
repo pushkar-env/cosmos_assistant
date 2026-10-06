@@ -159,6 +159,14 @@ export function slerpFrame(
   refA.copy(_uy).applyQuaternion(_qa)
 }
 
+/** the point of segment a–b nearest p, written into out */
+export function closestOnSegment(p: THREE.Vector3, a: THREE.Vector3, b: THREE.Vector3, out: THREE.Vector3): THREE.Vector3 {
+  const ab = _a.subVectors(b, a)
+  const len2 = ab.lengthSq()
+  const t = len2 > 1e-12 ? clamp(_b.subVectors(p, a).dot(ab) / len2, 0, 1) : 0
+  return out.copy(a).addScaledVector(ab, t)
+}
+
 /** quadratic Bézier, written into out */
 export function bezier(a: THREE.Vector3, c: THREE.Vector3, b: THREE.Vector3, u: number, out: THREE.Vector3): THREE.Vector3 {
   const v = 1 - u

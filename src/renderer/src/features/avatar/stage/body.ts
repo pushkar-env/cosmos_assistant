@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import type { AvatarRig } from '../avatarAsset'
-import { clamp, frameQuat, solveTwoBone, twistAngle, twoBoneResult } from './ik'
+import { clamp, closestOnSegment, frameQuat, smooth, solveTwoBone, twistAngle, twoBoneResult } from './ik'
 
 /*
  * The avatar's procedural body: everything the clips can't know in advance —
@@ -24,7 +24,10 @@ export interface PoseLayers {
   layerPos(bone: THREE.Bone, offset: THREE.Vector3): void
 }
 
-export type Contact = 'palm' | 'index' | 'wrist'
+/** the point of the hand that lands on a target: the middle of the palm, the
+ *  index fingertip's pad, the wrist, or the web between the thumb and the
+ *  index finger (a card's edge sits in it as she pinches it) */
+export type Contact = 'palm' | 'index' | 'wrist' | 'pinch'
 
 export interface ArmGoal {
   weight: number
@@ -46,6 +49,10 @@ export interface FingerPose {
   spread: number
   /** thumb swung away from the index (degrees) */
   thumbOut: number
+  /** the thumb's own flexion toward the palm, joint by joint (degrees): at
+   *  its base, its middle joint and its tip — the base can bring the thumb
+   *  round in front of the palm while the rest stays straight */
+  thumb: number[]
 }
 
 export interface LegGoal {
@@ -117,6 +124,8 @@ interface FingerJoint {
   /** share of the finger's curl this joint takes */
   w: number
   finger: number
+  /** 0 proximal, 1 intermediate, 2 distal */
+  seg: number
 }
 
 export interface HandRest {
@@ -126,6 +135,8 @@ export interface HandRest {
   palm: THREE.Vector3
   /** hand-local: the middle of the palm's skin */
   palmPoint: THREE.Vector3
+  /** hand-local: the web between the thumb and the index finger */
+  pinchPoint: THREE.Vector3
   joints: FingerJoint[]
   /** the index fingertip's pad, in the distal bone's frame */
   indexTip: { bone: THREE.Bone; offset: THREE.Vector3 }
@@ -144,6 +155,21 @@ const _qH = new THREE.Quaternion()
 const _qT = new THREE.Quaternion()
 const _ident = new THREE.Quaternion()
 const _ik = twoBoneResult()
+const _ik2 = twoBoneResult()
+const _pA = new THREE.Vector3()
+const _pB = new THREE.Vector3()
+const _pQ = new THREE.Quaternion()
+const _pQ2 = new THREE.Quaternion()
+const _qP = new THREE.Quaternion()
+const _cOut = new THREE.Vector3()
+const _cH = new THREE.Vector3()
+const _cE = new THREE.Vector3()
+const _cQ = new THREE.Vector3()
+const _cD = new THREE.Vector3()
+const _cA = new THREE.Vector3()
+const _cP = new THREE.Vector3()
+/** how far past the wrist a hand reaches (to the knuckles' far side) */
+const HAND_REACH = 0.085
 const _X = new THREE.Vector3(1, 0, 0)
 const _Y = new THREE.Vector3(0, 1, 0)
 const _Z = new THREE.Vector3(0, 0, 1)
@@ -168,6 +194,14 @@ export class BodyRig {
   readonly shoulderX: number
   readonly armLength: number
   readonly legLength: number
+
+  /** what her arms keep out of (spheres riding on her bones — the bust), and
+   *  how thick her arms are with their sleeves: upper arm, forearm, hand */
+  private readonly keepOut: { bone: THREE.Bone; offset: THREE.Vector3; radius: number; world: THREE.Vector3 }[] = []
+  private readonly armRadius: [number, number, number]
+  /** each arm's elbow swing (rad, round the shoulder→wrist line) away from
+   *  the asked-for pole to keep it out of her body — eased frame to frame */
+  private readonly swivel: Record<Side, number> = { left: 0, right: 0 }
 
   /** set by the last apply: where each hand's contact point actually landed */
   readonly reached: Record<Side, THREE.Vector3> = { left: new THREE.Vector3(), right: new THREE.Vector3() }
@@ -242,6 +276,13 @@ export class BodyRig {
     this.shoulderX = Math.abs(sh.x)
     this.armLength = this.arms.left.l1 + this.arms.left.l2
     this.legLength = this.legs.left.l1 + this.legs.left.l2
+
+    const stage = rig.config.stage
+    this.armRadius = stage?.armRadius ?? [0.04, 0.035, 0.03]
+    for (const k of stage?.keepOut ?? []) {
+      const b = rig.bones.get(k.bone)
+      if (b) this.keepOut.push({ bone: b, offset: b.worldToLocal(new THREE.Vector3(...k.at)), radius: k.radius, world: new THREE.Vector3() })
+    }
   }
 
   private handRest(side: Side, bone: (n: string) => THREE.Bone): HandRest {
@@ -292,7 +333,8 @@ export class BodyRig {
           spread,
           spreadW,
           w: f === 'Thumb' ? [0.5, 1, 1][k] : [0.8, 1.1, 0.9][k],
-          finger: i
+          finger: i,
+          seg: k
         })
       }
     }
@@ -305,11 +347,14 @@ export class BodyRig {
     // the palm's skin, between the wrist and the knuckles
     const knuckles = idx.clone().add(mp).add(ring).add(lit).multiplyScalar(0.25)
     const palmPoint = hp.clone().lerp(knuckles, 0.55).addScaledVector(palm, 0.013).sub(hp).applyQuaternion(handInv)
+    // the web: halfway from the index knuckle to the thumb's middle joint
+    const pinchPoint = idx.clone().lerp(pos(`${s}ThumbIntermediate`), 0.5).sub(hp).applyQuaternion(handInv)
     return {
       bone: hand,
       fingerDir: mp.clone().sub(hp).normalize().applyQuaternion(handInv),
       palm: palm.clone().applyQuaternion(handInv),
       palmPoint,
+      pinchPoint,
       joints,
       indexTip: { bone: distal, offset: tip },
       thumbOut
@@ -349,6 +394,7 @@ export class BodyRig {
     const h = this.hands[side]
     if (contact === 'index') return h.indexTip.bone.localToWorld(out.copy(h.indexTip.offset))
     if (contact === 'palm') return h.bone.localToWorld(out.copy(h.palmPoint))
+    if (contact === 'pinch') return h.bone.localToWorld(out.copy(h.pinchPoint))
     return h.bone.getWorldPosition(out)
   }
 
@@ -362,7 +408,7 @@ export class BodyRig {
 
   // ── the frame ──
 
-  apply(inp: BodyInput, rootQ: THREE.Quaternion): void {
+  apply(inp: BodyInput, rootQ: THREE.Quaternion, dt = 1 / 60): void {
     const hips = this.hips
     ;(hips.parent as THREE.Object3D).updateWorldMatrix(true, false)
 
@@ -452,10 +498,14 @@ export class BodyRig {
       arm.upper.getWorldPosition(a.shoulder)
     }
     inp.beforeArms?.()
+    for (const c of this.keepOut) c.bone.localToWorld(c.world.copy(c.offset))
     for (const s of SIDES) {
       const goal = inp.arms[s]
-      if (goal.weight > 0) this.reachArm(s, goal)
-      else this.contactPoint(s, goal.contact, this.reached[s])
+      if (goal.weight > 0) this.reachArm(s, goal, rootQ, dt)
+      else {
+        this.swivel[s] = 0
+        this.contactPoint(s, goal.contact, this.reached[s])
+      }
     }
   }
 
@@ -465,6 +515,7 @@ export class BodyRig {
     const h = this.hands[side]
     if (contact === 'wrist') return out.copy(a.hand)
     if (contact === 'palm') return out.copy(h.palmPoint).applyQuaternion(a.q).add(a.hand)
+    if (contact === 'pinch') return out.copy(h.pinchPoint).applyQuaternion(a.q).add(a.hand)
     h.indexTip.bone.updateWorldMatrix(true, false)
     const tip = h.indexTip.bone.localToWorld(_v3.copy(h.indexTip.offset))
     h.bone.worldToLocal(tip)
@@ -484,7 +535,8 @@ export class BodyRig {
     const h = this.hands[side]
     const D = THREE.MathUtils.DEG2RAD
     for (const j of h.joints) {
-      _q.copy(j.rest).multiply(_q2.setFromAxisAngle(j.curl, pose.curl[j.finger] * j.w * D))
+      const flex = j.finger === 0 ? pose.thumb[j.seg] : pose.curl[j.finger] * j.w
+      _q.copy(j.rest).multiply(_q2.setFromAxisAngle(j.curl, flex * D))
       if (j.spread && pose.spread) _q.multiply(_q2.setFromAxisAngle(j.spread, pose.spread * j.spreadW * D))
       if (h.thumbOut && j.bone === h.thumbOut.bone && pose.thumbOut) {
         _q.multiply(_q2.setFromAxisAngle(h.thumbOut.axis, pose.thumbOut * D))
@@ -493,7 +545,83 @@ export class BodyRig {
     }
   }
 
-  private reachArm(side: Side, goal: ArmGoal): void {
+  /** the shoulder blade slides forward round her ribs as the hand reaches
+   *  out, and further as it reaches across her: the shoulder comes ~3 cm
+   *  forward and the arm swings in front of her chest instead of through it */
+  private protract(side: Side, wrist: THREE.Vector3, w: number, rootQ: THREE.Quaternion): void {
+    const sg = sideSign(side)
+    const sh = this.arms[side].upper.getWorldPosition(_pA)
+    const d = _pB.subVectors(wrist, sh).applyQuaternion(_pQ.copy(rootQ).invert())
+    const across = -sg * d.x
+    const ang = w * Math.min(0.3, 0.11 * smooth((d.z - 0.1) / 0.3) + 0.2 * smooth(across / 0.3))
+    if (ang < 1e-3) return
+    _pQ.setFromAxisAngle(_Y, -sg * ang)
+    this.rotateWorld(this.shoulders[side], _qP.copy(rootQ).multiply(_pQ).multiply(_pQ2.copy(rootQ).invert()))
+    this.shoulders[side].updateWorldMatrix(false, true)
+  }
+
+  /** the elbow's pull for an arm reaching `wrist` from `root`: the asked-for
+   *  one, swung round the shoulder→wrist line as far as it takes to keep the
+   *  arm (sleeve and all) out of her body (keepOut) — the least swing that
+   *  clears it, eased in so the elbow never snaps round. A hand that would
+   *  sink into her even so is moved out of her (`wrist` is updated). */
+  private clearPole(side: Side, root: THREE.Vector3, wrist: THREE.Vector3, pole: THREE.Vector3, qHand: THREE.Quaternion, dt: number): THREE.Vector3 {
+    const out = _cOut.copy(pole)
+    if (!this.keepOut.length) return out
+    const arm = this.arms[side]
+    const [, , rHand] = this.armRadius
+    const handDir = _cH.copy(this.hands[side].fingerDir).applyQuaternion(qHand)
+    // the hand itself first: out of her, along the shortest way
+    for (const c of this.keepOut) {
+      const q = closestOnSegment(c.world, wrist, _cE.copy(wrist).addScaledVector(handDir, HAND_REACH), _cQ)
+      const d = q.distanceTo(c.world)
+      const need = c.radius + rHand - d
+      if (need > 0 && d > 1e-5) wrist.addScaledVector(_cD.subVectors(q, c.world).divideScalar(d), need)
+    }
+    const handEnd = _cE.copy(wrist).addScaledVector(handDir, HAND_REACH)
+    const axis = _cA.subVectors(wrist, root)
+    if (axis.lengthSq() < 1e-8) return out
+    axis.normalize()
+    const pen = (phi: number): number => {
+      _cP.copy(pole).applyAxisAngle(axis, phi)
+      solveTwoBone(root, wrist, arm.l1, arm.l2, _cP, _ik2)
+      return this.armPenetration(root, _ik2.mid, _ik2.end, handEnd)
+    }
+    const cur = this.swivel[side]
+    // (a few mm into the generous sleeve proxy is fine — the cloth gives)
+    const cost = (phi: number): number => Math.max(0, pen(phi) - 0.004) * 1000 + Math.abs(phi) * 0.8 + Math.abs(phi - cur) * 0.5
+    let best = 0
+    let bestCost = cost(0)
+    if (bestCost > 0.01 || Math.abs(cur) > 1e-3) {
+      for (let k = -10; k <= 10; k++) {
+        if (k === 0) continue
+        const phi = k * 0.16
+        const c = cost(phi)
+        if (c < bestCost) {
+          bestCost = c
+          best = phi
+        }
+      }
+    }
+    const next = cur + (best - cur) * Math.min(1, dt * 10)
+    this.swivel[side] = next
+    return out.applyAxisAngle(axis, next)
+  }
+
+  /** how deep (m, summed) an arm posed root → mid → end, hand to `handEnd`,
+   *  sinks into what it keeps out of */
+  private armPenetration(root: THREE.Vector3, mid: THREE.Vector3, end: THREE.Vector3, handEnd: THREE.Vector3): number {
+    const [rUpper, rFore, rHand] = this.armRadius
+    let p = 0
+    for (const c of this.keepOut) {
+      p += Math.max(0, c.radius + rUpper - closestOnSegment(c.world, root, mid, _cQ).distanceTo(c.world))
+      p += Math.max(0, c.radius + rFore - closestOnSegment(c.world, mid, end, _cQ).distanceTo(c.world))
+      p += Math.max(0, c.radius + rHand - closestOnSegment(c.world, end, handEnd, _cQ).distanceTo(c.world))
+    }
+    return p
+  }
+
+  private reachArm(side: Side, goal: ArmGoal, rootQ: THREE.Quaternion, dt: number): void {
     const arm = this.arms[side]
     const hand = this.hands[side]
     // the hand's world rotation from the requested frame
@@ -501,6 +629,7 @@ export class BodyRig {
     // where the wrist must go so the contact point lands on the target
     let offset: THREE.Vector3
     if (goal.contact === 'palm') offset = _v3.copy(hand.palmPoint)
+    else if (goal.contact === 'pinch') offset = _v3.copy(hand.pinchPoint)
     else if (goal.contact === 'index') {
       // (fingers are posed already; the tip relative to the hand is fixed now)
       hand.indexTip.bone.updateWorldMatrix(true, false)
@@ -510,8 +639,12 @@ export class BodyRig {
     const wrist = _v2.copy(offset).applyQuaternion(_qH)
     wrist.subVectors(goal.target, wrist)
 
+    // a long reach brings the shoulder with it
+    this.protract(side, wrist, goal.weight, rootQ)
     const root = arm.upper.getWorldPosition(_v)
-    solveTwoBone(root, wrist, arm.l1, arm.l2, goal.pole, _ik)
+    // ...and the arm keeps out of her body
+    const pole = this.clearPole(side, root, wrist, goal.pole, _qH, dt)
+    solveTwoBone(root, wrist, arm.l1, arm.l2, pole, _ik)
     frameQuat(arm.dirU, arm.hingeU, _v2.subVectors(_ik.mid, root), _ik.hinge, _qU)
     this.setWorld(arm.upper, _qU, goal.weight)
     arm.upper.updateWorldMatrix(false, false)
@@ -540,7 +673,7 @@ export function bodyInput(): BodyInput {
     pole: new THREE.Vector3(0, -1, -0.3)
   })
   const leg = (): LegGoal => ({ weight: 0, ankle: new THREE.Vector3(), foot: new THREE.Quaternion(), pole: new THREE.Vector3(0, 0, 1), toe: 0 })
-  const fingers = (): FingerPose => ({ weight: 0, curl: [10, 12, 14, 16, 18], spread: 0, thumbOut: 0 })
+  const fingers = (): FingerPose => ({ weight: 0, curl: [10, 12, 14, 16, 18], spread: 0, thumbOut: 0, thumb: [5, 10, 10] })
   return {
     hipsOffset: new THREE.Vector3(),
     hipsYaw: 0,

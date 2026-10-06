@@ -132,6 +132,13 @@ export interface AvatarConfig {
     crouchMax?: number
     /** how far her knees open as she crouches (m of pole, at a full squat) */
     kneeOut?: number
+    /** what her arms keep out of when the stage moves them: spheres riding
+     *  on her bones (rest-pose world centre, radius) — the elbow swings
+     *  round, the shoulder comes forward, a hand moves out of it */
+    keepOut?: { bone: string; at: [number, number, number]; radius: number }[]
+    /** her arms' thickness for that (m: upper arm, forearm, hand — sleeves
+     *  included, as far as they keep her arms off her body) */
+    armRadius?: [number, number, number]
   }
 }
 
@@ -333,6 +340,15 @@ const LIBRARY: Record<AvatarId, Omit<AvatarConfig, 'url'> & { url: string | unde
     restingHand: 'left',
     handPress: 'HipPress',
     pressHolds: ['cloth_coat_FL_1', 'cloth_coat_SL_1'],
+    // her arms reach round her bust (fitted to the kimono over it: a sphere
+    // each, swaying with it); the wide haori sleeves make her arms thick
+    stage: {
+      keepOut: [
+        { bone: 'bust_L_1', at: [0.072, 1.236, 0.068], radius: 0.078 },
+        { bone: 'bust_R_1', at: [-0.072, 1.236, 0.068], radius: 0.078 }
+      ],
+      armRadius: [0.045, 0.05, 0.035]
+    },
     colliders: [
       { bone: 'head', at: [0, 1.54, 0], radius: 0.098 },
       { bone: 'neck', at: [0, 1.42, 0], radius: 0.045 },

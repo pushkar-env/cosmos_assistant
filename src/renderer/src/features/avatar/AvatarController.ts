@@ -102,6 +102,10 @@ export class AvatarController {
   /** she's up and about (walking, reaching…): the clips' ambient gestures
    *  stand down */
   acting = false
+  /** how much her upper body turns with her look here (0 while she's acting:
+   *  the stage turns it before her hands are placed — turned after, it would
+   *  drag them off what they hold) */
+  private chestFollow = 1
   /** 0..1: how freely her cloth may swing out past its at-rest limits (a
    *  striding knee has to push the coat aside) — set by the stage */
   clothFree = 0
@@ -568,7 +572,8 @@ export class AvatarController {
     this.addRotation('neck', this.headPitch * 0.4, this.headYaw * 0.4, (this.headTilt + sway) * 0.4)
     this.addRotation('head', this.headPitch * 0.6, this.headYaw * 0.6, (this.headTilt + sway) * 0.6)
     // the upper body turns a touch toward what she's watching
-    this.addRotation('upperChest', 0, this.headYaw * 0.12, 0)
+    this.chestFollow += ((this.acting ? 0 : 1) - this.chestFollow) * Math.min(1, dt * 4)
+    if (this.chestFollow > 1e-3) this.addRotation('upperChest', 0, this.headYaw * 0.12 * this.chestFollow, 0)
   }
 
   /** the config's breath-synced lift, layered after the spring sim (which

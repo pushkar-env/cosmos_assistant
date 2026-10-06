@@ -11,6 +11,9 @@ import * as THREE from 'three'
  * objects referenced by every material, so one write per frame updates all.
  */
 
+/** how many HUD cards the shaders can cut her out behind (the HUD has seven) */
+export const CUT_SLOTS = 8
+
 export const shared = {
   uLightDir: { value: new THREE.Vector3(0.35, 0.55, 0.75).normalize() },
   uRimColor: { value: new THREE.Color('#7df9ff') },
@@ -28,22 +31,25 @@ export const shared = {
   uDissolve: { value: 0 },
   /** 0 = scattered noise, 1 = a seam sweeping up from her feet */
   uDissolveSweep: { value: 0 },
-  /** HUD cards she has taken off the "wall" (held, tossed, left out in front
-   *  of her): each a rounded rect on screen — centre x, y (drawing-buffer px,
+  /** the HUD cards while she's up and about (her canvas is then above the
+   *  HUD): each a rounded rect on screen — centre x, y (drawing-buffer px,
    *  from the bottom left), half width, half height — and its angle (rad),
-   *  corner radius (px) and whether it's on. Inside one, everything of hers
-   *  but her hands is cut away, so the card sits between her body and her
-   *  hands (the card is DOM, under the canvas) */
-  uCut: { value: [new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4()] },
-  uCutShape: { value: [new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4()] },
+   *  corner radius (px), whether it's on, and the world z of the card's
+   *  plane. The cards are on the glass in front of her, so inside one all of
+   *  her is cut away (the card is DOM, under the canvas) but her hands where
+   *  they are in front of its plane: a hand holding it from behind is hidden
+   *  but for the thumb wrapped round its edge onto its face (and a thick
+   *  sleeve never pokes through it) */
+  uCut: { value: Array.from({ length: CUT_SLOTS }, () => new THREE.Vector4()) },
+  uCutShape: { value: Array.from({ length: CUT_SLOTS }, () => new THREE.Vector4()) },
   /** per skin joint (packed 4 to a vec4): 1 for her hands and fingers */
   uHandBones: { value: Array.from({ length: 32 }, () => new THREE.Vector4()) }
 }
 
 /** the card cut-outs (see shared.uCut) — for any fragment shader */
 export const STAGE_CUT = /* glsl */ `
-  uniform vec4 uCut[3];
-  uniform vec4 uCutShape[3];
+  uniform vec4 uCut[${CUT_SLOTS}];
+  uniform vec4 uCutShape[${CUT_SLOTS}];
   float cutBox(vec4 c, vec4 sh) {
     if (sh.z < 0.5) return 0.0;
     vec2 d = gl_FragCoord.xy - c.xy;
@@ -53,8 +59,19 @@ export const STAGE_CUT = /* glsl */ `
     vec2 q = abs(d) - c.zw + sh.y;
     return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - sh.y < 0.0 ? 1.0 : 0.0;
   }
+  // inside any card (the backdrop: all of it is behind the cards)
   float inCut() {
-    return max(cutBox(uCut[0], uCutShape[0]), max(cutBox(uCut[1], uCutShape[1]), cutBox(uCut[2], uCutShape[2])));
+    float k = 0.0;
+    for (int i = 0; i < ${CUT_SLOTS}; i++) k = max(k, cutBox(uCut[i], uCutShape[i]));
+    return k;
+  }
+  // inside a card whose plane is in front of world depth z
+  float cutBehind(float z) {
+    float k = 0.0;
+    for (int i = 0; i < ${CUT_SLOTS}; i++) {
+      if (z < uCutShape[i].w) k = max(k, cutBox(uCut[i], uCutShape[i]));
+    }
+    return k;
   }
 `
 
@@ -71,6 +88,7 @@ export const cutUniforms = (): Record<string, THREE.IUniform> => ({
 const DISSOLVE = /* glsl */ `
   uniform float uDissolve;
   uniform float uDissolveSweep;
+  varying float vCutZ;
   varying float vHand;
   ${STAGE_CUT}
   float dHash(vec3 p) {
@@ -87,10 +105,10 @@ const DISSOLVE = /* glsl */ `
       mix(mix(dHash(i + vec3(0.0, 0.0, 1.0)), dHash(i + vec3(1.0, 0.0, 1.0)), f.x), mix(dHash(i + vec3(0.0, 1.0, 1.0)), dHash(i + vec3(1.0, 1.0, 1.0)), f.x), f.y),
       f.z);
   }
-  // discards what has dissolved (or lies behind a card she holds in front of
-  // her); returns the glowing seam (0..1)
+  // discards what has dissolved (or lies behind one of the HUD's cards);
+  // returns the glowing seam (0..1)
   float dissolveSeam(vec3 p) {
-    if (vHand < 0.5 && inCut() > 0.5) discard;
+    if ((vHand < 0.5 && inCut() > 0.5) || cutBehind(vCutZ) > 0.5) discard;
     if (uDissolve <= 0.0) return 0.0;
     float n = dNoise(p * 34.0) * 0.62 + dNoise(p * 97.0) * 0.38;
     // re-forming: the seam rises from her feet, ragged by the noise
@@ -140,6 +158,7 @@ const VERT_COMMON = /* glsl */ `
   varying vec3 vWorldPos;
   varying vec3 vObjPos;
   varying vec2 vUv2;
+  varying float vCutZ;
 `
 
 const VERT_BODY = /* glsl */ `
@@ -159,6 +178,7 @@ const VERT_BODY = /* glsl */ `
   vNormalV = normalize(transformedNormal);
   vViewPos = -mvPosition.xyz;
   vWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
+  vCutZ = vWorldPos.z;
 `
 
 const TOON_VERT = /* glsl */ `
@@ -535,9 +555,7 @@ export function eyeMaterial(
       uPupil: { value: 1 },
       uSparkle: { value: 0 },
       uSeed: { value: seed },
-      uDissolve: shared.uDissolve,
-      uDissolveSweep: shared.uDissolveSweep,
-      uAccentBright: shared.uAccentBright
+      ...dissolveUniforms()
     }
   })
 }
@@ -633,6 +651,7 @@ const OUTLINE_VERT = /* glsl */ `
   uniform float uHeadShift;
   uniform float uCrease;
   varying vec3 vRest;
+  varying float vCutZ;
   ${HAND_PARS}
   void main() {
     ${HAND_VERT}
@@ -647,6 +666,7 @@ const OUTLINE_VERT = /* glsl */ `
     vRest = restPos;
     #include <skinning_vertex>
     #include <project_vertex>
+    vCutZ = (modelMatrix * vec4(transformed, 1.0)).z;
     // push the back faces out along the view-space normal, scaled with depth
     // so the line keeps a steady on-screen weight as the camera moves.
     // (normalMatrix by hand: defaultnormal_vertex would flip it for BackSide)

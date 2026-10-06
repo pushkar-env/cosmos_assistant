@@ -220,12 +220,20 @@ message mid-scene dissolves her and she re-forms at home.
   the procedural body: analytic two-bone IK for arms and legs with a real hinge
   (each bone's own along/hinge axes, from the bind pose), forearm roll to carry
   the hand's twist, hand aiming (finger direction + palm normal), finger poses
-  (curl, spread, thumb), shoulder lift, hips and spine offsets. It never owns a
-  bone: everything is layered through the controller and taken back off before
-  the mixer runs, each limb blended by its own weight. Layered deltas are
-  normalised — `invert()` is a conjugate and the clips' quaternions are only unit
-  to float32, so an un-normalised delta compounds through the layer/undo cycle
-  until the bone explodes.
+  (curl, spread, thumb — the thumb also joint by joint, so its base can swing it
+  round in front of the palm while the rest stays straight), shoulder lift,
+  hips and spine offsets. A hand lands by its palm, its index fingertip, its
+  wrist, or the web of its thumb (`pinch`). A long reach brings the shoulder
+  blade forward with it (`protract`); and an arm keeps out of her body
+  (`stage.keepOut` in `avatars.ts`: spheres riding on her bones — Tsunade's
+  bust — and `stage.armRadius`, the arm's thickness with its sleeve): the
+  elbow swings round the shoulder→wrist line by the least that clears it,
+  eased frame to frame, and a hand that would sink into her is moved out. It
+  never owns a bone: everything is layered through the controller and taken
+  back off before the mixer runs, each limb blended by its own weight. Layered
+  deltas are normalised — `invert()` is a conjugate and the clips' quaternions
+  are only unit to float32, so an un-normalised delta compounds through the
+  layer/undo cycle until the bone explodes.
 - [`locomotion.ts`](../../src/renderer/src/features/avatar/stage/locomotion.ts) —
   procedural walking on a real gait cycle. The root glides toward a goal with
   eased acceleration (never far ahead of a foot still on the floor); a stride
@@ -261,12 +269,28 @@ message mid-scene dissolves her and she re-forms at home.
   arm walks by IK too — hanging as wide as her clip's (clear of the haori),
   palm in, swinging opposite its leg, fingers loosely curled. While she strides or crouches the cloth's
   `outward` limits loosen (`clothFree` → `SpringBones.outwardFree`) so her legs
-  can push the coat aside.
+  can push the coat aside. Her chest turns a little toward what her hands
+  reach for (across her most of all) and toward what she watches — here,
+  before her hands are placed: the controller's own chest-follow-the-look
+  (`chestFollow`) fades out while she acts, as turning her chest after the IK
+  dragged her hands a few cm off whatever they held.
 - [`director.ts`](../../src/renderer/src/features/avatar/stage/director.ts) — the
-  scenes: idle play (carry a card out and squish/stretch it between her palms or
+  scenes: idle play (carry a card out and squish/stretch it in both hands or
   toss and catch it; boop one; flick one into a spin; crouch to a low one; a
   finger snap springs every card home), pressing **New**, and interruptions.
-  `playBits([...])` runs chosen bits (dev aid).
+  `playBits([...])` runs chosen bits (dev aid). She takes a card the way you'd
+  hold up a photo: her hand comes up behind it from below, fingers open and
+  the thumb out of the way; its bottom edge slides into the web of her thumb;
+  the thumb closes round onto its face (`pinchCard`). Then it rides in her
+  hand — a hand's width in from its ends when she holds it in both, so her
+  hands stay behind it — held out in front of her nearer than the glass
+  (`HOLD_Z`, a good bend in her elbows) and on the holding hand's own side:
+  reaching her hand across, her upper arm swept through her bust. Letting go,
+  the thumb comes off first (`letGo`). A boop or a flick pokes the card from
+  behind, palm turned in so the curled fingers fold sideways, not into it.
+  The hand's targets read the card's place live until she has it — after
+  that the card follows the hand, and a target following the card chased the
+  hand back into her body.
 - [`widgets.ts`](../../src/renderer/src/features/avatar/stage/widgets.ts) — what
   she can touch: `StatCard`s register their framer-motion values (she drives
   the same `x`/`y`/`scale` a drag does), the chat's New button registers a
@@ -281,11 +305,17 @@ message mid-scene dissolves her and she re-forms at home.
   While she acts her canvas sits above the HUD and chat (`z-[25]`, no pointer
   events — every click still goes through) and the camera holds still.
 
-**Cards in her hands.** The cards are DOM, under the canvas, yet a card she holds
-in front of her must sit *between* her body and her hands. Each card she has
-taken off the "wall" is a rounded rect on screen (`shared.uCut`); inside it every
-fragment of hers is discarded except those skinned to her hand and finger bones
-(`vHand`, from `uHandBones`) — so the card shows over her body, her hands over it.
+**Cards in front of her.** The cards are DOM, under her canvas while she acts,
+yet they're on the glass in front of her. Every card on screen is a rounded
+rect (`shared.uCut`) with the world depth of its plane: the glass, or — for a
+card in her hands — just in front of the web of her thumb (`PINCH_DEPTH`),
+wherever she holds it (a card she lets go of goes back to the glass). Inside
+one, every fragment of hers is discarded except those skinned to her hand and
+finger bones (`vHand`, from `uHandBones`) that lie in front of that plane
+(`cutBehind`, on each fragment's world z). So a card hides her body, her
+sleeve and the hand holding it from behind — all but the thumb wrapped onto
+its face. Nothing else of hers may come in front of the glass: the swinging
+arm, the finger snap and a hand going back to rest all stay behind it.
 
 The "new chat" request is caught before the model sees it
 ([`features/chat/intents.ts`](../../src/renderer/src/features/chat/intents.ts) —

@@ -5,6 +5,7 @@ import type { Reading } from '../emotion'
 import { shared } from '../toonMaterials'
 import { SIDES, bodyInput, sideSign, type ArmGoal, type BodyInput, type BodyRig, type Contact, type Side } from './body'
 import { angleDiff, bezier, clamp, slerpFrame, smooth, smoother } from './ik'
+import { useStageStore } from './bridge'
 import { CROUCH_DEPTH, Locomotion } from './locomotion'
 import {
   GLASS_Z,
@@ -17,6 +18,7 @@ import {
   stopCard,
   touchRipple,
   view,
+  widgets,
   worldToScreen,
   type CardHome,
   type StageWidget
@@ -59,22 +61,29 @@ export interface HandShape {
   curl: number[]
   spread?: number
   thumbOut?: number
+  /** the thumb's flexion joint by joint (base, middle, tip — degrees), in
+   *  place of curl[0] spread over them */
+  thumb?: number[]
 }
+
+/** a shape's thumb flexion, joint by joint */
+const thumbOf = (s: HandShape): number[] => s.thumb ?? [s.curl[0] * 0.5, s.curl[0], s.curl[0]]
 
 /** hand shapes for the things she does */
 export const SHAPES = {
   relaxed: { curl: [12, 14, 16, 18, 20], spread: 2, thumbOut: 0 },
-  open: { curl: [2, 2, 3, 5, 7], spread: 7, thumbOut: 14 },
-  /** a palm laid on the glass: flat, fingers a touch apart */
-  touch: { curl: [6, 6, 7, 9, 11], spread: 5, thumbOut: 10 },
-  /** holding a card against the glass: fingertips pressing in */
-  grip: { curl: [16, 24, 27, 30, 34], spread: 3, thumbOut: 6 },
   point: { curl: [40, 0, 82, 88, 92], spread: 0, thumbOut: -6 },
   /** a finger snap: thumb pressed to the middle fingertip… then the middle
    *  finger cracks down into the palm and the thumb flies out */
   snapReady: { curl: [40, 44, 56, 86, 90], spread: 0, thumbOut: -16 },
   snapped: { curl: [2, 48, 98, 90, 94], spread: 0, thumbOut: 18 },
   thumbsUp: { curl: [-10, 90, 94, 94, 94], spread: 0, thumbOut: 22 },
+  /** a card pinched by its edge from behind: fingers straight up its back,
+   *  the thumb's base swung round in front of the palm so the thumb lies
+   *  along its face (PINCH_DEPTH: the card runs between them) */
+  pinch: { curl: [0, 5, 6, 7, 8], spread: 2, thumbOut: -18, thumb: [45, -42, -20] },
+  /** about to pinch: fingers up, the thumb out and down, below the edge */
+  pinchOpen: { curl: [0, 7, 8, 9, 10], spread: 2.5, thumbOut: 24, thumb: [18, -8, -6] },
   /** a free hand as she walks: loosely curled, thumb in */
   walk: { curl: [16, 28, 34, 40, 46], spread: 1, thumbOut: -6 }
 } satisfies Record<string, HandShape>
@@ -140,6 +149,8 @@ interface Hold {
   scaling: boolean
   rot0: number
   ang0: number
+  /** the card's plane (world z): where her hands hold it */
+  plane: number
 }
 
 interface Flight {
@@ -152,6 +163,8 @@ interface Flight {
   height: number
   spin: number
   rot0: number
+  /** its plane in flight (world z) */
+  plane: number
   done: () => void
 }
 
@@ -171,6 +184,10 @@ export interface StageFx {
   /** dissolve her out (true) or in (false); resolves when done */
   dissolve(out: boolean, dur: number): Promise<void>
 }
+
+/** how far in front of the pinch point (the web of the thumb) the plane of a
+ *  card she pinches runs: her fingers ~1 cm behind it, the thumb in front */
+export const PINCH_DEPTH = 0.014
 
 const _v = new THREE.Vector3()
 const _v2 = new THREE.Vector3()
@@ -206,6 +223,9 @@ export class Actor {
   private readonly returning = new Map<StageWidget, CardHome>()
   /** each touched card's layout centre (its slot with no offset), CSS px */
   private readonly layouts = new Map<StageWidget, { x: number; y: number }>()
+  /** the plane (world z) of each card in the air between her hands — tossed
+   *  and not yet caught, or let go of for a moment */
+  private readonly planes = new Map<StageWidget, number>()
   private lookTarget: THREE.Vector3 | (() => THREE.Vector3) | null = null
   private readonly look = { target: new THREE.Vector3(), weight: 0 }
   private lookW = 0
@@ -213,6 +233,8 @@ export class Actor {
   private shoulderLift: Record<Side, number> = { left: 0, right: 0 }
   private lean = 0
   private leanGoal = 0
+  /** her chest's turn toward what her hands are reaching for (rad) */
+  private reachTwist = 0
   private time = 0
   private readonly rootQ = new THREE.Quaternion()
   private readonly restingSide: Side | null
@@ -385,6 +407,7 @@ export class Actor {
     this.loco.widen = 0
     this.loco.goal = null
     this.lean = this.leanGoal = 0
+    this.reachTwist = 0
     for (const s of SIDES) {
       const a = this.arms[s]
       a.seg = null
@@ -435,6 +458,26 @@ export class Actor {
     this.loco.pose(inp, dt)
     this.lean += (this.leanGoal - this.lean) * Math.min(1, dt * 4)
     inp.spineBend += this.lean
+    // her chest turns a little toward what her hands reach for — across her
+    // most of all (last frame's goals: they're set once her body is posed)
+    let twist = 0
+    for (const s of SIDES) {
+      const a = this.arms[s]
+      const g = inp.arms[s]
+      if (!a.seg || a.seg.rest || g.weight < 0.01) continue
+      _v.copy(g.target).sub(_v2.set(this.loco.pos.x, g.target.y, this.loco.pos.z)).applyAxisAngle(_Y, -this.loco.yaw)
+      twist += g.weight * Math.atan2(_v.x, Math.max(0.12, _v.z))
+    }
+    twist = clamp(twist * 0.3, -0.26, 0.26)
+    // ...and a touch toward what she's watching (here, not after her hands
+    // are placed — see AvatarController.chestFollow)
+    if (this.lookTarget && this.lookW > 0.01) {
+      const t = typeof this.lookTarget === 'function' ? this.lookTarget() : this.lookTarget
+      _v.copy(t).sub(_v2.set(this.loco.pos.x, t.y, this.loco.pos.z)).applyAxisAngle(_Y, -this.loco.yaw)
+      twist += clamp(Math.atan2(_v.x, Math.max(0.12, _v.z)) * 0.1, -0.1, 0.1) * this.lookW
+    }
+    this.reachTwist += (twist - this.reachTwist) * Math.min(1, dt * 3)
+    inp.spineTwist += this.reachTwist
     for (const s of SIDES) {
       const goal = this.shoulderLift[s]
       inp.shoulderLift[s] += (goal - inp.shoulderLift[s]) * Math.min(1, dt * 6)
@@ -445,6 +488,9 @@ export class Actor {
       for (let i = 0; i < 5; i++) f.curl[i] = a.shapeFrom.curl[i] + (a.shapeTo.curl[i] - a.shapeFrom.curl[i]) * k
       f.spread = (a.shapeFrom.spread ?? 0) + ((a.shapeTo.spread ?? 0) - (a.shapeFrom.spread ?? 0)) * k
       f.thumbOut = (a.shapeFrom.thumbOut ?? 0) + ((a.shapeTo.thumbOut ?? 0) - (a.shapeFrom.thumbOut ?? 0)) * k
+      const t0 = thumbOf(a.shapeFrom)
+      const t1 = thumbOf(a.shapeTo)
+      for (let i = 0; i < 3; i++) f.thumb[i] = t0[i] + (t1[i] - t0[i]) * k
       f.weight = a.fw
       // a free hand relaxes into a loose curl while she walks
       const free = a.seg ? !!a.seg.free : !a.anchor
@@ -454,6 +500,8 @@ export class Actor {
         for (let i = 0; i < 5; i++) f.curl[i] += (wk.curl[i] - f.curl[i]) * ww
         f.spread += (wk.spread - f.spread) * ww
         f.thumbOut += (wk.thumbOut - f.thumbOut) * ww
+        const wt = thumbOf(wk)
+        for (let i = 0; i < 3; i++) f.thumb[i] += (wt[i] - f.thumb[i]) * ww
         f.weight = Math.max(a.fw, ww)
       }
     }
@@ -466,13 +514,12 @@ export class Actor {
       this.ctrl.look = this.look
     } else this.ctrl.look = null
     this.rootQ.setFromAxisAngle(_Y, this.loco.yaw)
-    this.body.apply(inp, this.rootQ)
+    this.body.apply(inp, this.rootQ, dt)
   }
 
-  /** after the frame is posed: cards follow the hands holding them */
+  /** after the frame is posed: cards follow the hands holding them (and the
+   *  cut-outs follow the cards, this same frame) */
   postUpdate(dt: number): void {
-    this.updateCuts()
-    if (!this.holds.length && !this.flights.length) return
     for (const h of this.holds) this.syncHold(h)
     for (const f of [...this.flights]) {
       f.t += dt
@@ -486,9 +533,11 @@ export class Actor {
       m.rotate.set(f.rot0 + f.spin * smoother(u))
       if (u >= 1) {
         this.flights.splice(this.flights.indexOf(f), 1)
+        this.planes.set(f.w, f.plane)
         f.done()
       }
     }
+    this.updateCuts()
   }
 
   // ── arms ───────────────────────────────────────────────────────────────
@@ -637,6 +686,9 @@ export class Actor {
       .addScaledVector(_Y, -len * Math.cos(ang))
       .addScaledVector(fwd, len * Math.sin(ang) + 0.05)
       .addScaledVector(left, sg * 0.14)
+    // walking along the HUD side on, the near hand swings toward you: it
+    // stays behind the glass (in front of it, it would be painted over a card)
+    target.z = Math.min(target.z, GLASS_Z - 0.07)
     dir.set(0, -1, 0).addScaledVector(fwd, Math.sin(ang * 1.4) + 0.06).normalize()
     palm.copy(left).multiplyScalar(-sg).addScaledVector(fwd, -0.25).normalize()
     pole.copy(fwd).multiplyScalar(-1).addScaledVector(left, sg * 0.45).addScaledVector(_Y, -0.2).normalize()
@@ -837,7 +889,9 @@ export class Actor {
     a.claim++
     const seg = this.restSeg(a, 1, 0, 0)
     seg.u = 0
-    seg.arc.set(0, -0.04, 0.05)
+    // (down and home — bulging forward, it would swing through the card it
+    // just let go of)
+    seg.arc.set(0, -0.05, 0)
     this.startFrom(a, seg, 'wrist')
     a.seg = seg
     void this.setShape(side, SHAPES.relaxed, dur * 0.6)
@@ -865,7 +919,7 @@ export class Actor {
   setShape(side: Side, shape: HandShape, dur: number, signal?: AbortSignal): Promise<void> {
     const a = this.arms[side]
     const f = this.inp.fingers[side]
-    a.shapeFrom = { curl: [...f.curl], spread: f.spread, thumbOut: f.thumbOut }
+    a.shapeFrom = { curl: [...f.curl], spread: f.spread, thumbOut: f.thumbOut, thumb: [...f.thumb] }
     a.shapeTo = shape
     a.su = 0
     return this.tween(dur, (u) => (a.su = u), signal)
@@ -877,6 +931,11 @@ export class Actor {
 
   bend(rad: number): void {
     this.leanGoal = rad
+  }
+
+  /** her clock (s): it runs at the stage's rate */
+  get now(): number {
+    return this.time
   }
 
   /** where a hand's contact point is now */
@@ -939,17 +998,22 @@ export class Actor {
     }
   }
 
-  /** a standing spot for reaching `p` (on the glass) with `side`'s hand */
-  standFor(p: THREE.Vector3, side: Side): { x: number; z: number; yaw: number; crouch: number } {
+  /** a standing spot for reaching `p` (on the glass) with `side`'s hand,
+   *  its wrist `below` m under the point that lands on `p` (pinching a card's
+   *  edge, the hand points up from it; a fingertip leads it — negative) */
+  standFor(p: THREE.Vector3, side: Side, below = -0.12): { x: number; z: number; yaw: number; crouch: number } {
     const sg = sideSign(side)
-    const reach = 0.2
+    const reach = 0.18
     const x = p.x - sg * (this.body.shoulderX + reach)
-    const z = Math.min(0.06, p.z - 0.32)
+    const z = Math.min(0.06, p.z - 0.3)
     // a quarter turn toward the reaching side
     const yaw = sg * 0.22
-    // shoulders ~0.4 m above a low hand
-    const want = p.y + 0.42
-    const crouch = clamp((this.body.shoulderHeight - want) / (CROUCH_DEPTH * 1.35), 0, 1)
+    // low enough that the wrist is in easy reach of the shoulder: forward to
+    // the glass, out to the side, and down
+    const fwd = p.z - z
+    const r = this.body.armLength * 0.86
+    const drop = Math.sqrt(Math.max(0.0025, r * r - reach * reach - fwd * fwd))
+    const crouch = clamp((this.body.shoulderHeight - (p.y - below + drop)) / (CROUCH_DEPTH * 1.15), 0, 1)
     return { x, z, yaw, crouch }
   }
 
@@ -962,42 +1026,43 @@ export class Actor {
     this.layouts.set(w, layoutCenter(w))
   }
 
-  /** a card away from its slot (moved, scaled, spun) is "off the wall": in
-   *  front of her body, behind her hands — the shaders cut her body out of
-   *  its rectangle (shared.uCut) */
+  /** the HUD's cards are on the glass in front of her: while she's out there
+   *  (her canvas over the HUD) the shaders cut away whatever of hers is
+   *  behind a card, inside its rectangle (shared.uCut) — her body, and the
+   *  hand holding or poking it from behind; a thumb wrapped round its edge
+   *  onto its face stays in front */
   private updateCuts(): void {
     const cut = shared.uCut.value
     const shape = shared.uCutShape.value
-    const list: StageWidget[] = []
-    const add = (w: StageWidget): void => {
-      if (list.length < cut.length && !list.includes(w) && w.el.isConnected) list.push(w)
-    }
-    for (const h of this.holds) add(h.w)
-    for (const f of this.flights) add(f.w)
-    for (const [w, home] of this.homes) if (displaced(w, home)) add(w)
-    for (const [w, home] of this.returning) {
-      if (displaced(w, home)) add(w)
-      else this.returning.delete(w)
-    }
+    for (const [w, home] of this.returning) if (!displaced(w, home)) this.returning.delete(w)
     const canvas = view.ready ? view.canvas : null
     const r = canvas?.getBoundingClientRect()
+    const list = useStageStore.getState().acting && canvas && r && r.width >= 1 ? widgets.cards() : []
+    // the ones she's handling first (should there ever be more cards than slots)
+    const busy = new Set<StageWidget>([...this.holds.map((h) => h.w), ...this.flights.map((f) => f.w), ...this.planes.keys()])
+    list.sort((a, b) => (busy.has(b) ? 1 : 0) - (busy.has(a) ? 1 : 0))
     for (let i = 0; i < cut.length; i++) {
       const w = list[i]
-      if (!w || !canvas || !r || r.width < 1) {
+      if (!w || !canvas || !r) {
         shape[i].z = 0
         continue
       }
       const k = canvas.width / r.width
       const m = w.motion!
-      let lc = this.layouts.get(w)
-      if (!lc) this.layouts.set(w, (lc = layoutCenter(w)))
+      const lc = this.layouts.get(w) ?? layoutCenter(w)
       const cx = lc.x + m.x.get()
       const cy = lc.y + m.y.get()
       const s = m.scale.get()
       const sx = Math.abs(Math.cos(THREE.MathUtils.degToRad(m.rotateY.get())))
       cut[i].set((cx - r.left) * k, canvas.height - (cy - r.top) * k, (w.el.offsetWidth / 2) * s * sx * k, (w.el.offsetHeight / 2) * s * k)
-      shape[i].set(-THREE.MathUtils.degToRad(m.rotate.get()), 16 * s * k, 1, 0)
+      shape[i].set(-THREE.MathUtils.degToRad(m.rotate.get()), 16 * s * k, 1, this.cardPlane(w))
     }
+  }
+
+  /** a card's plane (world z): where her hands hold it, where it flies, or
+   *  the glass */
+  cardPlane(w: StageWidget): number {
+    return this.holds.find((h) => h.w === w)?.plane ?? this.flights.find((f) => f.w === w)?.plane ?? this.planes.get(w) ?? GLASS_Z
   }
 
   get touchedCards(): StageWidget[] {
@@ -1007,6 +1072,7 @@ export class Actor {
   /** stop minding a card (you took it): she won't tidy it away from you */
   forget(w: StageWidget): void {
     this.release(w, false)
+    this.planes.delete(w)
     this.homes.delete(w)
     this.returning.delete(w)
     setHeld(w, false)
@@ -1038,7 +1104,8 @@ export class Actor {
       dist0: pts.length > 1 ? Math.max(20, Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y)) : 1,
       scaling,
       rot0: st.rotate,
-      ang0: ang
+      ang0: ang,
+      plane: this.holdPlane(sides)
     })
     setHeld(w, true)
     // picked up: it lifts off the glass a little
@@ -1046,12 +1113,18 @@ export class Actor {
     for (const p of pts) touchRipple(p.x, p.y, 'grab')
   }
 
-  /** let go of a card (it stays where it is) */
-  release(w: StageWidget, ripple = true): void {
+  /** let go of a card: it stays where it is on screen, and goes back onto the
+   *  glass — or, `keep`, hangs in the air where she held it (she's about to
+   *  take it again) */
+  release(w: StageWidget, ripple = true, keep = false): void {
     const i = this.holds.findIndex((h) => h.w === w)
     if (i < 0) return
     const h = this.holds[i]
     this.holds.splice(i, 1)
+    // (let go of, it's back on the glass: nothing of her may be in front of
+    // it as she moves on)
+    if (keep) this.planes.set(w, h.plane)
+    else this.planes.delete(w)
     setHeld(w, false)
     if (!h.scaling) void animate(w.motion!.scale, h.scale0, { duration: 0.22, ease: 'easeOut' })
     if (ripple) {
@@ -1070,6 +1143,7 @@ export class Actor {
 
   /** toss a card: it flies along an arc to where `to()` says (px), over `dur` */
   fly(w: StageWidget, to: () => { x: number; y: number }, dur: number, height: number, spin: number): Promise<void> {
+    const plane = this.holds.find((h) => h.w === w)?.plane ?? GLASS_Z
     this.release(w, false)
     const r = w.el.getBoundingClientRect()
     return new Promise<void>((done) => {
@@ -1083,6 +1157,7 @@ export class Actor {
         height,
         spin,
         rot0: w.motion!.rotate.get(),
+        plane,
         done
       })
     })
@@ -1099,6 +1174,8 @@ export class Actor {
       }
     }
     this.homes.clear()
+    // (back on the glass)
+    this.planes.clear()
   }
 
   private handAngle(s: Side): number {
@@ -1107,7 +1184,16 @@ export class Actor {
     return Math.atan2(b.y - a.y, b.x - a.x)
   }
 
+  /** the plane of a card held by these hands: just in front of the webs of
+   *  their thumbs (see PINCH_DEPTH) */
+  private holdPlane(sides: Side[]): number {
+    let z = 0
+    for (const s of sides) z += this.body.reached[s].z / sides.length
+    return z + PINCH_DEPTH
+  }
+
   private syncHold(h: Hold): void {
+    h.plane = this.holdPlane(h.sides)
     const m = h.w.motion!
     const pts = h.sides.map((s) => worldToScreen(this.body.reached[s]))
     let cx = 0
