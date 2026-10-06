@@ -83,6 +83,11 @@ export class SpringBones {
   private colliderScratch: { center: THREE.Vector3; radius: number; groups?: string[] }[] = []
   /** world-space wind / body motion impulse added on top of gravity */
   readonly external = new THREE.Vector3()
+  /** nothing hangs through the floor (her coat's hem when she crouches) */
+  floor = 0.012
+  /** 0..1: loosens every chain's ``outward`` limit (by up to 10 cm) — while
+   *  she strides or crouches her legs must be able to push the cloth aside */
+  outwardFree = 0
 
   addChain(bones: THREE.Bone[], settings: SpringSettings): void {
     const hangsFrom = (bones[0]?.parent ?? bones[0]) as THREE.Object3D
@@ -212,7 +217,13 @@ export class SpringBones {
           next.sub(_pos).normalize().multiplyScalar(j.length).add(_pos)
         }
       }
-      const out = s.outward?.[j.index]
+      const fl = this.floor + s.radius
+      if (next.y < fl) {
+        next.y = fl
+        next.sub(_pos).normalize().multiplyScalar(j.length).add(_pos)
+      }
+      const lim = s.outward?.[j.index]
+      const out = lim === undefined ? undefined : lim + this.outwardFree * 0.1
       if (s.inward !== undefined || out !== undefined || j.held > 0) {
         const restTail = _v4.copy(restDir).multiplyScalar(j.length).add(_pos)
         if (s.inward !== undefined || out !== undefined) this.keepWithin(j, next, restTail, s.inward, out)

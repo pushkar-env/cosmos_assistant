@@ -4,6 +4,7 @@ import { useSettingsStore } from '@/core/stores/useSettingsStore'
 import { useAssistantStore } from '@/core/stores/useAssistantStore'
 import { useUIStore } from '@/core/stores/useUIStore'
 import { useVoiceStore } from '@/features/voice/useVoiceStore'
+import { stageBridge } from '@/features/avatar/stage/bridge'
 
 import type { PluginManifest } from '@shared/types'
 
@@ -99,7 +100,18 @@ export function buildActions(): Action[] {
       subtitle: 'Start a fresh conversation',
       keywords: ['new', 'chat', 'conversation', 'clear', 'reset', 'start'],
       section: 'ai',
-      run: () => useAssistantStore.getState().clear()
+      run: () => void useAssistantStore.getState().newChat()
+    },
+    {
+      id: 'avatar-play',
+      title: 'Play With the Widgets',
+      subtitle: 'Your avatar comes over and plays with the HUD cards',
+      keywords: ['play', 'avatar', 'tsunade', 'nova', 'widgets', 'cards', 'fun', 'idle', 'bored'],
+      section: 'ai',
+      run: () => {
+        // (after the palette has closed)
+        setTimeout(() => stageBridge.playNow(), 250)
+      }
     },
     {
       id: 'ai-clear-history',

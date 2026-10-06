@@ -1,7 +1,8 @@
 """Hair — pale blonde, parted in the middle: curtains that sweep from the part
 over the forehead corners and fall past the cheeks to the collarbones (framing
-the face as in the reference), and two low pigtails tied at the nape, falling
-to the waist.
+the face as in the reference); the hair over the ears swept back behind them;
+and two full pigtails tied low behind the ears, with a curtain of hair between
+them over the nape, falling down her back to the waist.
 
 Spring chains (simulated in the app): ``hair_tail_L/R`` (pigtails) and
 ``hair_lock_L/R`` (the front locks). Everything else rides the head.
@@ -31,8 +32,10 @@ def _curtain_out(p):
     fwd = Vector((0.6 * math.copysign(1.0, p.x), -0.8, 0.0))
     return _out(p).lerp(fwd, k).normalized()
 
-# the pigtail ties sit low at the back of the head, just behind the ears
-TIE = {1: HEAD_C + Vector((0.036, 0.094, -0.100)), -1: HEAD_C + Vector((-0.036, 0.094, -0.100))}
+# the pigtail ties sit low at the back of the head, behind the ears — high
+# enough that, in profile, the hair falls in one mass from behind the ear
+# down her back (as in the reference)
+TIE = {1: HEAD_C + Vector((0.050, 0.086, -0.084)), -1: HEAD_C + Vector((-0.050, 0.086, -0.084))}
 
 
 def tail_path(side):
@@ -41,11 +44,24 @@ def tail_path(side):
     t = TIE[side]
     return [
         t,
-        t + Vector((side * 0.018, 0.022, -0.070)),
-        t + Vector((side * 0.034, 0.040, -0.170)),
-        t + Vector((side * 0.040, 0.046, -0.290)),
-        t + Vector((side * 0.036, 0.044, -0.410)),
-        t + Vector((side * 0.030, 0.038, -0.520)),
+        t + Vector((side * 0.012, 0.024, -0.070)),
+        t + Vector((side * 0.022, 0.046, -0.170)),
+        t + Vector((side * 0.026, 0.054, -0.290)),
+        t + Vector((side * 0.022, 0.052, -0.410)),
+        t + Vector((side * 0.016, 0.046, -0.520)),
+    ]
+
+
+def curtain_path(side, x0):
+    """The hair between the pigtails below its root on the back of the head:
+    straight down over the nape (hiding the neck from behind) onto her upper
+    back."""
+    return [
+        HEAD_C + Vector((side * x0 * 1.06, 0.088, -0.108)),
+        HEAD_C + Vector((side * x0 * 1.16, 0.100, -0.170)),
+        HEAD_C + Vector((side * x0 * 1.26, 0.124, -0.262)),
+        HEAD_C + Vector((side * x0 * 1.32, 0.138, -0.360)),
+        HEAD_C + Vector((side * x0 * 1.34, 0.144, -0.430)),
     ]
 
 
@@ -94,10 +110,17 @@ def build_hair(head_ob):
             el0 = lerp(50, 88, i / 9)  # where it leaves the part
             az1 = lerp(48, 150, i / 9)  # where it lands on the side/back
             el1 = lerp(8, -14, i / 9)
+            # the hair over the ear is swept back above it and down behind
+            # it (the ear shows in profile, as in the reference)
+            over_ear = 84 < az1 < 112
+            if over_ear:
+                el1 = max(el1, 4.0)
             mid_az = side * az1 * 0.55
             mid_el = lerp(el0, el1, 0.45) + 8
             pts = shell.path([(side * 2, el0, 0.010), (mid_az, mid_el, 0.0135), (side * az1, el1, 0.012)], per_seg=3)
-            if az1 > 110:
+            if over_ear:
+                pts += shell.path([(side * az1, el1, 0.012), (side * 121, -12, 0.011)], per_seg=3)[1:]
+            if az1 > 84:
                 # the back strands gather into the pigtail ties
                 pts.append(TIE[side] + Vector((0, -0.004, 0.012)))
             w = 0.020 + 0.004 * rnd.random()
@@ -126,26 +149,41 @@ def build_hair(head_ob):
     # ── two low pigtails ──
     for side, sfx in ((1, "L"), (-1, "R")):
         centre = tail_path(side)
-        for j in range(7):
-            ang = 2 * math.pi * j / 7 + rnd.uniform(-0.2, 0.2)
-            spread = 0.015 + 0.004 * rnd.random()
+        for j in range(9):
+            ang = 2 * math.pi * j / 9 + rnd.uniform(-0.2, 0.2)
+            spread = 0.020 + 0.005 * rnd.random()
             pts = []
             for i, c in enumerate(centre):
-                # a bundle that swells below the tie then gathers to the end
-                k = (0.25, 0.9, 1.25, 1.2, 0.9, 0.5)[i]
-                off = Vector((math.cos(ang) * spread * k * 1.4, math.sin(ang) * spread * k, 0))
+                # a full bundle that swells below the tie then gathers toward
+                # the end (from the side it reads as the mass of hair falling
+                # down her back, as in the reference)
+                k = (0.3, 1.0, 1.32, 1.3, 1.1, 0.7)[i]
+                off = Vector((math.cos(ang) * spread * k * 1.3, math.sin(ang) * spread * k * 1.15, 0))
                 pts.append(c + off)
             length_cut = rnd.uniform(0.0, 0.06)
             pts[-1] = pts[-1] + Vector((0, 0, length_cut))
-            w = 0.017 + 0.005 * rnd.random()
-            hb.add(clump(pts, taper(w * 0.5, w, 0.3, 1.1), taper(0.0060, 0.0095, 0.3, 0.8), _out, n_len=26), "hair_tail_" + sfx)
+            w = 0.019 + 0.006 * rnd.random()
+            hb.add(clump(pts, taper(w * 0.5, w, 0.3, 1.1), taper(0.0065, 0.0105, 0.3, 0.8), _out, n_len=26), "hair_tail_" + sfx)
+        # the hair between the two tails, falling from the back of the head
+        # over the nape (each half rides its own side's tail)
+        for x0 in (0.007, 0.021, 0.035):
+            az0 = 180.0 - math.degrees(math.atan2(x0, 0.075))
+            root = shell.path([(side * az0, -26, 0.004), (side * az0, -40, 0.007)], per_seg=2)
+            pts = root + curtain_path(side, x0)
+            pts[-1] = pts[-1] + Vector((0, 0, rnd.uniform(0.0, 0.05)))
+            w = 0.017 + 0.004 * rnd.random()
+            hb.add(clump(pts, taper(w * 0.8, w, 0.3, 1.0), taper(0.0045, 0.0075, 0.3, 0.8), _out, n_len=24, crescent=0.3),
+                   "hair_tail_" + sfx)
 
     strands = hb.build("HairStrands", mat)
 
     def hairline(az):
         # high at the front: the curtain locks form the hairline there, meeting
-        # in a peak at the part
-        return pchip([(0, 0.066), (25, 0.058), (45, 0.040), (70, 0.012), (95, -0.040), (130, -0.075), (180, -0.090)])(az)
+        # in a peak at the part; it arches over the ear (az ≈ 90–110°) and
+        # drops steeply right behind it to below the lobe, so the hair covers
+        # the back of the head down to the nape
+        return pchip([(0, 0.066), (25, 0.058), (45, 0.040), (62, 0.016), (76, 0.004), (88, -0.001), (110, -0.002),
+                      (114, -0.034), (118, -0.062), (126, -0.076), (150, -0.086), (180, -0.090)])(az)
 
     def volume(rel):
         return 0.008 + 0.010 * smoothstep(-0.02, 0.10, rel.z) + 0.004 * smoothstep(0.0, 0.08, rel.y)

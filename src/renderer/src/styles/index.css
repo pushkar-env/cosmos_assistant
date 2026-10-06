@@ -192,6 +192,95 @@ body {
   transform: scale(1.15);
 }
 
+/* ── The avatar on the glass ──
+   She can pick up HUD cards and press buttons (features/avatar/stage). A card
+   in her hands glows; a button she presses dips; where she touches the glass
+   a ring ripples out (on a layer above everything, clicks pass through). */
+.glass[data-stage-held='true'] {
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 1px var(--accent-dim),
+    0 0 42px -4px var(--glow),
+    inset 0 0 18px -6px var(--glow);
+  z-index: 40;
+}
+.stage-press {
+  transition:
+    transform 0.12s ease,
+    box-shadow 0.12s ease,
+    color 0.15s ease,
+    background-color 0.15s ease;
+}
+.stage-press[data-stage-pressed='true'] {
+  transform: scale(0.88);
+  color: var(--accent-bright);
+  box-shadow: 0 0 18px var(--glow);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.stage-fx {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+  overflow: hidden;
+}
+@keyframes stage-ripple {
+  from {
+    transform: translate(-50%, -50%) scale(0.15);
+    opacity: 0.95;
+  }
+  to {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 0;
+  }
+}
+.stage-ripple {
+  position: absolute;
+  width: 92px;
+  height: 92px;
+  border-radius: 50%;
+  border: 2px solid var(--accent-bright);
+  box-shadow:
+    0 0 16px var(--glow),
+    inset 0 0 12px var(--glow);
+  animation: stage-ripple 0.75s cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
+}
+.stage-ripple-press {
+  width: 64px;
+  height: 64px;
+  border-width: 3px;
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent-bright) 45%, transparent), transparent 60%);
+}
+.stage-ripple-grab {
+  width: 120px;
+  height: 120px;
+}
+.stage-ripple-release {
+  width: 70px;
+  height: 70px;
+  border-width: 1px;
+  animation-duration: 0.55s;
+}
+@keyframes stage-spark {
+  from {
+    transform: translate(-50%, -50%);
+    opacity: 1;
+  }
+  to {
+    transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) scale(0.3);
+    opacity: 0;
+  }
+}
+.stage-spark {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-bright);
+  box-shadow: 0 0 10px 2px var(--glow);
+  animation: stage-spark 0.6s ease-out forwards;
+}
+
 /* Hidden to tray / minimised: hold the ambient loops where they are. Chromium
    does not throttle this window for us (backgroundThrottling is off so the
    voice pipeline survives the tray), so an un-paused conic-gradient blur would

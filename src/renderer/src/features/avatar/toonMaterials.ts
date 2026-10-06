@@ -23,16 +23,118 @@ export const shared = {
   uHeadCenter: { value: new THREE.Vector3(0, 1.4, 0) },
   /** how far the loaded avatar's head (rest pose) sits above Nova's — the
    *  hair shading bands below are tuned in Nova's heights and shift with it */
-  uHeadShift: { value: 0 }
+  uHeadShift: { value: 0 },
+  /** 0 = solid … 1 = gone: she dissolves (teleporting) */
+  uDissolve: { value: 0 },
+  /** 0 = scattered noise, 1 = a seam sweeping up from her feet */
+  uDissolveSweep: { value: 0 },
+  /** HUD cards she has taken off the "wall" (held, tossed, left out in front
+   *  of her): each a rounded rect on screen — centre x, y (drawing-buffer px,
+   *  from the bottom left), half width, half height — and its angle (rad),
+   *  corner radius (px) and whether it's on. Inside one, everything of hers
+   *  but her hands is cut away, so the card sits between her body and her
+   *  hands (the card is DOM, under the canvas) */
+  uCut: { value: [new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4()] },
+  uCutShape: { value: [new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4()] },
+  /** per skin joint (packed 4 to a vec4): 1 for her hands and fingers */
+  uHandBones: { value: Array.from({ length: 32 }, () => new THREE.Vector4()) }
 }
+
+/** the card cut-outs (see shared.uCut) — for any fragment shader */
+export const STAGE_CUT = /* glsl */ `
+  uniform vec4 uCut[3];
+  uniform vec4 uCutShape[3];
+  float cutBox(vec4 c, vec4 sh) {
+    if (sh.z < 0.5) return 0.0;
+    vec2 d = gl_FragCoord.xy - c.xy;
+    float ca = cos(sh.x);
+    float sa = sin(sh.x);
+    d = vec2(ca * d.x + sa * d.y, -sa * d.x + ca * d.y);
+    vec2 q = abs(d) - c.zw + sh.y;
+    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - sh.y < 0.0 ? 1.0 : 0.0;
+  }
+  float inCut() {
+    return max(cutBox(uCut[0], uCutShape[0]), max(cutBox(uCut[1], uCutShape[1]), cutBox(uCut[2], uCutShape[2])));
+  }
+`
+
+export const cutUniforms = (): Record<string, THREE.IUniform> => ({
+  uCut: shared.uCut,
+  uCutShape: shared.uCutShape
+})
+
+/*
+ * The teleport dissolve, shared by every material: fragments vanish by a
+ * noise threshold on the REST position (so the pattern sticks to her body as
+ * she moves), with a glowing seam along the edge.
+ */
+const DISSOLVE = /* glsl */ `
+  uniform float uDissolve;
+  uniform float uDissolveSweep;
+  varying float vHand;
+  ${STAGE_CUT}
+  float dHash(vec3 p) {
+    p = fract(p * 0.3183099 + vec3(0.71, 0.113, 0.419));
+    p *= 17.0;
+    return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+  }
+  float dNoise(vec3 x) {
+    vec3 i = floor(x);
+    vec3 f = fract(x);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(
+      mix(mix(dHash(i), dHash(i + vec3(1.0, 0.0, 0.0)), f.x), mix(dHash(i + vec3(0.0, 1.0, 0.0)), dHash(i + vec3(1.0, 1.0, 0.0)), f.x), f.y),
+      mix(mix(dHash(i + vec3(0.0, 0.0, 1.0)), dHash(i + vec3(1.0, 0.0, 1.0)), f.x), mix(dHash(i + vec3(0.0, 1.0, 1.0)), dHash(i + vec3(1.0, 1.0, 1.0)), f.x), f.y),
+      f.z);
+  }
+  // discards what has dissolved (or lies behind a card she holds in front of
+  // her); returns the glowing seam (0..1)
+  float dissolveSeam(vec3 p) {
+    if (vHand < 0.5 && inCut() > 0.5) discard;
+    if (uDissolve <= 0.0) return 0.0;
+    float n = dNoise(p * 34.0) * 0.62 + dNoise(p * 97.0) * 0.38;
+    // re-forming: the seam rises from her feet, ragged by the noise
+    float h = 1.0 - clamp(p.y / 1.75, 0.0, 1.0);
+    float v = mix(n, h * 0.82 + n * 0.18, uDissolveSweep);
+    float d = v - (uDissolve * 1.1 - 0.05);
+    if (d < 0.0) discard;
+    return 1.0 - smoothstep(0.0, 0.06, d);
+  }
+`
+
+const dissolveUniforms = (): Record<string, THREE.IUniform> => ({
+  uDissolve: shared.uDissolve,
+  uDissolveSweep: shared.uDissolveSweep,
+  uAccentBright: shared.uAccentBright,
+  uHandBones: shared.uHandBones,
+  ...cutUniforms()
+})
 
 /** the head-pivot height the hair bands in the shaders were tuned for */
 export const HAIR_BAND_HEAD_Y = 1.4
+
+/** how much of a vertex rides on her hand/finger bones (vHand) */
+const HAND_PARS = /* glsl */ `
+  uniform vec4 uHandBones[32];
+  varying float vHand;
+  float handOf(float idx) {
+    int i = int(idx + 0.5);
+    return uHandBones[i / 4][i - (i / 4) * 4];
+  }
+`
+const HAND_VERT = /* glsl */ `
+  #ifdef USE_SKINNING
+    vHand = dot(skinWeight, vec4(handOf(skinIndex.x), handOf(skinIndex.y), handOf(skinIndex.z), handOf(skinIndex.w)));
+  #else
+    vHand = 0.0;
+  #endif
+`
 
 const VERT_COMMON = /* glsl */ `
   #include <common>
   #include <morphtarget_pars_vertex>
   #include <skinning_pars_vertex>
+  ${HAND_PARS}
   varying vec3 vNormalV;
   varying vec3 vViewPos;
   varying vec3 vWorldPos;
@@ -42,6 +144,7 @@ const VERT_COMMON = /* glsl */ `
 
 const VERT_BODY = /* glsl */ `
   vUv2 = uv;
+  ${HAND_VERT}
   #include <morphinstance_vertex>
   #include <beginnormal_vertex>
   #include <morphnormal_vertex>
@@ -81,14 +184,15 @@ const TOON_FRAG = /* glsl */ `
   uniform vec3 uAccent;
   uniform vec3 uAccentBright;
   uniform float uTipMix;
-  uniform float uHeadShift;
   varying vec3 vNormalV;
   varying vec3 vViewPos;
   varying vec3 vWorldPos;
   varying vec3 vObjPos;
   varying vec2 vUv2;
+  ${DISSOLVE}
 
   void main() {
+    float seam = dissolveSeam(vObjPos);
     vec3 n = normalize(vNormalV);
     if (!gl_FrontFacing) n = -n;
     // anime faces: bend normals toward a sphere around the head so the face
@@ -96,7 +200,9 @@ const TOON_FRAG = /* glsl */ `
     // (hair uses it too, but only over the skull — the long locks keep
     // their own strand normals)
     float sphereK = uSphere;
-    float hy = vWorldPos.y - uHeadShift; // height on Nova's scale
+    // height on Nova's scale, measured from her head as it is now — the bands
+    // ride along when she bows or crouches
+    float hy = vWorldPos.y - (uHeadCenter.y - ${HAIR_BAND_HEAD_Y.toFixed(2)});
     if (uHair > 0.0) sphereK *= smoothstep(1.22, 1.33, hy);
     if (sphereK > 0.0) {
       vec3 sn = normalize((viewMatrix * vec4(normalize(vWorldPos - uHeadCenter), 0.0)).xyz);
@@ -134,6 +240,7 @@ const TOON_FRAG = /* glsl */ `
     float fres = pow(1.0 - clamp(dot(n, v), 0.0, 1.0), 3.0);
     col += uRimColor * fres * uRim * (0.45 + 0.55 * lit);
     col += uEmissive;
+    col = mix(col, uAccentBright * 1.6 + 0.25, seam);
     gl_FragColor = vec4(col, uOpacity);
     #include <colorspace_fragment>
   }
@@ -173,9 +280,8 @@ export function toonMaterial(o: ToonOptions): THREE.ShaderMaterial {
       uLightDir: shared.uLightDir,
       uRimColor: shared.uRimColor,
       uHeadCenter: shared.uHeadCenter,
-      uHeadShift: shared.uHeadShift,
       uAccent: shared.uAccent,
-      uAccentBright: shared.uAccentBright
+      ...dissolveUniforms()
     },
     side: o.doubleSided ? THREE.DoubleSide : THREE.FrontSide,
     transparent: o.transparent ?? false
@@ -184,22 +290,52 @@ export function toonMaterial(o: ToonOptions): THREE.ShaderMaterial {
 
 /* ── flat unlit detail (lashes, brows, creases) ─────────────────────── */
 
+/** decals drawn on a surface that faces sideways (a line on the side of the
+ *  nose) can fade out as it turns away from the camera: fully drawn when the
+ *  surface faces it more than uFacing.y, gone below uFacing.x (off: 0, 0) */
+const FACING = /* glsl */ `
+  uniform vec2 uFacing;
+  varying vec3 vNormalV;
+  varying vec3 vViewPos;
+  float facingFade() {
+    if (uFacing.y <= 0.0) return 1.0;
+    float f = abs(dot(normalize(vNormalV), normalize(vViewPos)));
+    return smoothstep(uFacing.x, uFacing.y, f);
+  }
+`
+
 const FLAT_FRAG = /* glsl */ `
   uniform vec3 uColor;
   uniform float uOpacity;
+  uniform vec3 uAccentBright;
+  varying vec3 vObjPos;
+  ${DISSOLVE}
+  ${FACING}
   void main() {
-    gl_FragColor = vec4(uColor, uOpacity);
+    float seam = dissolveSeam(vObjPos);
+    gl_FragColor = vec4(mix(uColor, uAccentBright * 1.6 + 0.25, seam), uOpacity * facingFade());
     #include <colorspace_fragment>
   }
 `
 
-export function flatMaterial(color: string, opacity = 1, overHair = false): THREE.ShaderMaterial {
+export function flatMaterial(
+  color: string,
+  opacity = 1,
+  overHair = false,
+  facing?: [number, number]
+): THREE.ShaderMaterial {
+  const fades = opacity < 1 || !!facing
   const m = new THREE.ShaderMaterial({
     vertexShader: TOON_VERT,
     fragmentShader: FLAT_FRAG,
-    uniforms: { uColor: { value: new THREE.Color(color) }, uOpacity: { value: opacity } },
-    transparent: opacity < 1,
-    depthWrite: opacity >= 1
+    uniforms: {
+      uColor: { value: new THREE.Color(color) },
+      uOpacity: { value: opacity },
+      uFacing: { value: new THREE.Vector2(...(facing ?? [0, 0])) },
+      ...dissolveUniforms()
+    },
+    transparent: fades,
+    depthWrite: !fades
   })
   if (overHair) {
     // brows are drawn over the fringe — an anime convention — by testing
@@ -217,14 +353,19 @@ const SOFT_FRAG = /* glsl */ `
   uniform vec3 uColor;
   uniform float uOpacity;
   uniform vec4 uFeather; // uv.x 0 / 1 edge, uv.y 0 / 1 edge (as generated)
+  uniform vec3 uAccentBright;
   varying vec2 vUv2;
+  varying vec3 vObjPos;
+  ${DISSOLVE}
+  ${FACING}
   void main() {
+    float seam = dissolveSeam(vObjPos);
     vec4 f = max(uFeather, vec4(1e-4));
     vec2 uv = vec2(vUv2.x, 1.0 - vUv2.y); // glTF stores v flipped
-    float a = uOpacity
+    float a = uOpacity * facingFade()
       * smoothstep(0.0, f.x, uv.x) * smoothstep(0.0, f.y, 1.0 - uv.x)
       * smoothstep(0.0, f.z, uv.y) * smoothstep(0.0, f.w, 1.0 - uv.y);
-    gl_FragColor = vec4(uColor, a);
+    gl_FragColor = vec4(mix(uColor, uAccentBright * 1.6 + 0.25, seam), a);
     #include <colorspace_fragment>
   }
 `
@@ -234,7 +375,8 @@ const SOFT_FRAG = /* glsl */ `
 export function softMaterial(
   color: string,
   opacity: number,
-  feather: [number, number, number, number]
+  feather: [number, number, number, number],
+  facing?: [number, number]
 ): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     vertexShader: TOON_VERT,
@@ -242,7 +384,9 @@ export function softMaterial(
     uniforms: {
       uColor: { value: new THREE.Color(color) },
       uOpacity: { value: opacity },
-      uFeather: { value: new THREE.Vector4(...feather) }
+      uFeather: { value: new THREE.Vector4(...feather) },
+      uFacing: { value: new THREE.Vector2(...(facing ?? [0, 0])) },
+      ...dissolveUniforms()
     },
     transparent: true,
     depthWrite: false
@@ -259,11 +403,15 @@ const GLOW_FRAG = /* glsl */ `
   varying vec3 vWorldPos;
   varying vec3 vNormalV;
   varying vec3 vViewPos;
+  varying vec3 vObjPos;
+  ${DISSOLVE}
   void main() {
+    float seam = dissolveSeam(vObjPos);
     // a slow energy pulse travelling down the outfit, lifted by her voice
     float wave = 0.5 + 0.5 * sin(vWorldPos.y * 14.0 - uTime * 2.2);
     float k = 0.65 + 0.25 * wave + 0.6 * uVoice;
     vec3 col = mix(uAccent, uAccentBright, 0.35 + 0.35 * wave) * k;
+    col = mix(col, uAccentBright * 1.6 + 0.25, seam);
     gl_FragColor = vec4(col, 1.0);
     #include <colorspace_fragment>
   }
@@ -275,9 +423,9 @@ export function glowMaterial(): THREE.ShaderMaterial {
     fragmentShader: GLOW_FRAG,
     uniforms: {
       uAccent: shared.uAccent,
-      uAccentBright: shared.uAccentBright,
       uTime: shared.uTime,
-      uVoice: shared.uVoice
+      uVoice: shared.uVoice,
+      ...dissolveUniforms()
     },
     side: THREE.DoubleSide
   })
@@ -295,8 +443,10 @@ const EYE_FRAG = /* glsl */ `
   uniform float uPupil;
   uniform float uSparkle;
   uniform float uSeed;
+  uniform vec3 uAccentBright;
   varying vec3 vObjPos;
   varying vec2 vUv2;
+  ${DISSOLVE}
 
   float star(vec2 p, float r) {
     // a soft four-point twinkle
@@ -306,6 +456,7 @@ const EYE_FRAG = /* glsl */ `
   }
 
   void main() {
+    float seam = dissolveSeam(vObjPos);
     // iris placement uses the MORPHED (pre-skin) position: closing lids
     // shrink the mesh and simply cover the iris, like a real eyelid
     vec2 q = vObjPos.xy;
@@ -355,6 +506,7 @@ const EYE_FRAG = /* glsl */ `
       float s2 = star(hq - vec2(-0.40, -0.42), 0.26 * (0.85 + 0.15 * sin(uTime * 9.0 + 1.3)));
       col = mix(col, vec3(1.0), clamp(s1 + s2, 0.0, 1.0) * uSparkle * step(d, 1.0));
     }
+    col = mix(col, uAccentBright * 1.6 + 0.25, seam);
     gl_FragColor = vec4(col, 1.0);
     #include <colorspace_fragment>
   }
@@ -382,7 +534,10 @@ export function eyeMaterial(
       uTime: shared.uTime,
       uPupil: { value: 1 },
       uSparkle: { value: 0 },
-      uSeed: { value: seed }
+      uSeed: { value: seed },
+      uDissolve: shared.uDissolve,
+      uDissolveSweep: shared.uDissolveSweep,
+      uAccentBright: shared.uAccentBright
     }
   })
 }
@@ -392,9 +547,14 @@ export function eyeMaterial(
 const MOUTH_FRAG = /* glsl */ `
   uniform float uOpen;
   uniform float uTeeth;
+  uniform vec3 uLine;
+  uniform vec3 uAccentBright;
   varying vec2 vUv2;
+  varying vec3 vObjPos;
+  ${DISSOLVE}
   void main() {
-    vec3 line = vec3(0.47, 0.20, 0.24);
+    float seam = dissolveSeam(vObjPos);
+    vec3 line = uLine;
     vec3 deep = vec3(0.20, 0.04, 0.08);
     // uv.y: bottom 0 → top 1 as generated (glTF stores v flipped)
     float vy = 1.0 - vUv2.y;
@@ -406,16 +566,23 @@ const MOUTH_FRAG = /* glsl */ `
     float teeth = smoothstep(0.74, 0.86, vy) * smoothstep(0.10, 0.24, vUv2.x) * smoothstep(0.90, 0.76, vUv2.x);
     inner = mix(inner, vec3(1.0, 0.985, 0.98), teeth * uTeeth);
     vec3 col = mix(line, inner, smoothstep(0.02, 0.25, uOpen));
+    col = mix(col, uAccentBright * 1.6 + 0.25, seam);
     gl_FragColor = vec4(col, 1.0);
     #include <colorspace_fragment>
   }
 `
 
-export function mouthMaterial(): THREE.ShaderMaterial {
+/** the mouth; `line` is the colour of the closed mouth's line (sRGB hex) */
+export function mouthMaterial(line?: string): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     vertexShader: TOON_VERT,
     fragmentShader: MOUTH_FRAG,
-    uniforms: { uOpen: { value: 0 }, uTeeth: { value: 0 } }
+    uniforms: {
+      uOpen: { value: 0 },
+      uTeeth: { value: 0 },
+      uLine: { value: line ? new THREE.Color(line) : new THREE.Color(0.47, 0.2, 0.24) },
+      ...dissolveUniforms()
+    }
   })
 }
 
@@ -424,8 +591,12 @@ export function mouthMaterial(): THREE.ShaderMaterial {
 const BLUSH_FRAG = /* glsl */ `
   uniform float uAmount;
   uniform float uLines;
+  uniform vec3 uAccentBright;
   varying vec2 vUv2;
+  varying vec3 vObjPos;
+  ${DISSOLVE}
   void main() {
+    float seam = dissolveSeam(vObjPos);
     vec2 c = (vUv2 - 0.5) * 2.0;
     float r = length(c);
     float a = (1.0 - smoothstep(0.15, 1.0, r)) * uAmount * 0.6;
@@ -435,7 +606,7 @@ const BLUSH_FRAG = /* glsl */ `
     float lines = (1.0 - smoothstep(0.05, 0.11, stripe)) * (1.0 - smoothstep(0.45, 0.62, r)) * uLines;
     col = mix(col, vec3(0.93, 0.33, 0.45), lines);
     a = max(a, lines * 0.85);
-    gl_FragColor = vec4(col, a);
+    gl_FragColor = vec4(col, a * (1.0 - seam));
     #include <colorspace_fragment>
   }
 `
@@ -444,7 +615,7 @@ export function blushMaterial(): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     vertexShader: TOON_VERT,
     fragmentShader: BLUSH_FRAG,
-    uniforms: { uAmount: { value: 0.15 }, uLines: { value: 0 } },
+    uniforms: { uAmount: { value: 0.15 }, uLines: { value: 0 }, ...dissolveUniforms() },
     transparent: true,
     depthWrite: false
   })
@@ -460,7 +631,11 @@ const OUTLINE_VERT = /* glsl */ `
   uniform float uTipTaper;
   uniform float uFringe;
   uniform float uHeadShift;
+  uniform float uCrease;
+  varying vec3 vRest;
+  ${HAND_PARS}
   void main() {
+    ${HAND_VERT}
     #include <morphinstance_vertex>
     #include <beginnormal_vertex>
     #include <morphnormal_vertex>
@@ -469,6 +644,7 @@ const OUTLINE_VERT = /* glsl */ `
     #include <begin_vertex>
     #include <morphtarget_vertex>
     vec3 restPos = transformed;
+    vRest = restPos;
     #include <skinning_vertex>
     #include <project_vertex>
     // push the back faces out along the view-space normal, scaled with depth
@@ -483,21 +659,46 @@ const OUTLINE_VERT = /* glsl */ `
     // would show between strand and skin
     float fringe = smoothstep(0.035, 0.065, restPos.z) * (1.0 - smoothstep(1.40, 1.445, restPos.y - uHeadShift));
     taper *= 1.0 - uFringe * fringe;
-    mvPosition.xyz += nv * uWidth * taper * (-mvPosition.z) * 0.0016;
+    float push = uWidth * taper * (-mvPosition.z) * 0.0016;
+    mvPosition.xyz += nv * push;
+    // the face's creases — under the nose, between the lips, over the chin:
+    // a hull folding out of one draws over her own skin (from the usual
+    // camera, below her face, the hull of the up-facing upper lip shows in
+    // the pocket under the nose as a dark band — a "moustache"). Pushed back
+    // along the view ray it hides behind the skin; on a profile there is only
+    // background behind it, so the line stays. (Head-local rest space: the
+    // nose and mouth, a little in front of the face's sides.)
+    if (uCrease > 0.0) {
+      vec3 hp = restPos - vec3(0.0, ${HAIR_BAND_HEAD_Y.toFixed(2)} + uHeadShift, 0.0);
+      float m = (1.0 - smoothstep(0.026, 0.04, abs(hp.x)))
+        * smoothstep(-0.118, -0.104, hp.y) * (1.0 - smoothstep(-0.058, -0.048, hp.y))
+        * smoothstep(0.03, 0.05, hp.z);
+      mvPosition.z -= push * uCrease * m;
+    }
     gl_Position = projectionMatrix * mvPosition;
   }
 `
 
 const OUTLINE_FRAG = /* glsl */ `
   uniform vec3 uColor;
+  uniform vec3 uAccentBright;
+  varying vec3 vRest;
+  ${DISSOLVE}
   void main() {
-    gl_FragColor = vec4(uColor, 1.0);
+    float seam = dissolveSeam(vRest);
+    gl_FragColor = vec4(mix(uColor, uAccentBright * 1.4, seam), 1.0);
     #include <colorspace_fragment>
   }
 `
 
 /** ``fringe``: fade the line where bangs lie over the face (see the shader) */
-export function outlineMaterial(color: string, width: number, tipTaper = 0, fringe = tipTaper): THREE.ShaderMaterial {
+export function outlineMaterial(
+  color: string,
+  width: number,
+  tipTaper = 0,
+  fringe = tipTaper,
+  crease = 0
+): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     vertexShader: OUTLINE_VERT,
     fragmentShader: OUTLINE_FRAG,
@@ -506,7 +707,9 @@ export function outlineMaterial(color: string, width: number, tipTaper = 0, frin
       uWidth: { value: width },
       uTipTaper: { value: tipTaper },
       uFringe: { value: fringe },
-      uHeadShift: shared.uHeadShift
+      uCrease: { value: crease },
+      uHeadShift: shared.uHeadShift,
+      ...dissolveUniforms()
     },
     side: THREE.BackSide
   })

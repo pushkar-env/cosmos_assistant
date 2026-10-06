@@ -485,8 +485,10 @@ def mouth_shape(key):
     corners."""
     hw = 0.0168
     line = lambda a: 0.0010 * (2 * a - 1) ** 2  # noqa: E731 — a composed, faint smile
-    top = lambda a: 0.00048 * _sinp(a, 0.6)  # noqa: E731
-    bot = lambda a: -0.00048 * _sinp(a, 0.6)  # noqa: E731
+    # closed, a line ~1.5 mm thick in the middle tapering to fine corners —
+    # firm enough to read at the app's normal distance, as in the reference
+    top = lambda a: 0.00074 * _sinp(a, 0.7)  # noqa: E731
+    bot = lambda a: -0.00074 * _sinp(a, 0.7)  # noqa: E731
     if key == "V_A":
         hw = 0.0152
         top = lambda a: 0.0016 * _sinp(a, 0.45)  # noqa: E731
@@ -678,12 +680,20 @@ def build_lips(surf):
 
 
 def build_nose(surf):
-    """Anime noses read through shading, not geometry. As in the reference:
-    a long soft shadow down the shaded side of the bridge (her right — the
-    key light comes from her left), fading in under the brows and curling
-    under the tip; the soft shade on the underside, two small nostrils, and a
-    highlight on the tip. UVs carry the soft edges in the app (x along a
-    stroke, y across it)."""
+    """Anime noses read through shading, not geometry. Measured on the
+    reference's front view (scaled by the distance between the pupils), and
+    sized to read at the app's normal full-body distance, where her face is
+    only ~70 px wide:
+
+    - a soft shadow ~4 mm wide (7 mm feathered) down the shaded side of the bridge (her
+      right, ~6 mm off the midline — the key light comes from her left),
+      fading in ~27 mm below the eye line and leading into the nose's base;
+    - the base: two soft lobes (the nostril wings) either side of a lighter
+      middle, with a darker nostril in each — it reads as the bottom of the
+      nose, not a patch under it, because the bridge shadow runs into it;
+    - a small highlight on the tip.
+
+    UVs carry the soft edges in the app (x along a stroke, y across it)."""
     nz = HEAD_C.z + NOSE_Z
 
     def ribbon(name, col, pts, widths, lift, samples=5):
@@ -716,20 +726,83 @@ def build_nose(surf):
             faces += [tuple(i + o for i in q) for q in _grid(cols, rows)]
         return mesh_object(name, verts, _outward(verts, faces), material(name, srgb(col), roughness=0.6), uvs=uvs)
 
-    # down the side of the bridge from under the brows, curling under the tip
+    # down the side of the bridge, fading in from between the eyes, into the
+    # base's wing on that side
     bridge = ribbon(
-        "NoseShadow", "#cf9583",
-        [(-0.0036, 0.0245), (-0.0041, 0.0170), (-0.0046, 0.0095), (-0.0048, 0.0035), (-0.0040, -0.0006),
-         (-0.0022, -0.0026), (0.0004, -0.0031)],
-        [0.0004, 0.0010, 0.0013, 0.0015, 0.0013, 0.0010, 0.0003],
+        "NoseShadow", "#cfae9d",
+        [(-0.0038, 0.0270), (-0.0046, 0.0190), (-0.0054, 0.0120), (-0.0060, 0.0060), (-0.0062, 0.0015),
+         (-0.0058, -0.0015), (-0.0050, -0.0030)],
+        [0.0036, 0.0054, 0.0064, 0.0070, 0.0070, 0.0062, 0.0044],
         0.0005,
     )
-    # the underside of the nose, from wing to wing
-    under = blob("NoseUnder", "#d9a291", [(-0.0002, -0.0018, 0.0050, 0.0021, 0.0)], 0.0004)
-    nostrils = blob("Nostril", "#b07a6a", [(-0.0034, -0.0004, 0.0011, 0.0005, 0.45), (0.0032, 0.0, 0.0011, 0.0005, -0.40)],
+    # the base: a lobe for each nostril wing (the shaded one fuller), a
+    # lighter middle under the tip
+    under = blob("NoseUnder", "#d6b2a0", [(-0.0046, -0.0032, 0.0042, 0.0027, 0.15), (0.0042, -0.0031, 0.0036, 0.0023, -0.15),
+                                          (-0.0002, -0.0044, 0.0030, 0.0018, 0.0)], 0.0004)
+    nostrils = blob("Nostril", "#a88370", [(-0.0043, -0.0026, 0.0017, 0.0010, 0.25), (0.0042, -0.0025, 0.0015, 0.0009, -0.25)],
                     0.0006, 6, 4)
-    light = blob("NoseLight", "#fff6ef", [(0.0011, 0.0026, 0.0011, 0.0016, -0.25)], 0.0006, 6, 6)
-    return [bridge, under, nostrils, light]
+    light = blob("NoseLight", "#fff6ef", [(0.0006, 0.0024, 0.0008, 0.0011, -0.25)], 0.0006, 6, 6)
+    return [bridge, under, nostrils, light] + build_nose_lines(surf.bvh)
+
+
+def build_nose_lines(bvh):
+    """The nostril, the way the reference draws it in profile: a short soft
+    shade on each side of the nose just above its underside, running back
+    from behind the tip and lifting a little at its back end. It is laid on
+    the side of the nose (found by casting in from the side), so it faces
+    sideways: the app fades it out as the face turns toward the camera
+    (``facing`` on its material) — from the front the reference shows no
+    nostrils. UVs run along it (x) and across it (y) for the soft edges."""
+    # the profile line at the midline, top of the tip → past the underside
+    prof = []
+    for i in range(121):
+        z = HEAD_C.z + NOSE_Z + 0.004 - 0.016 * i / 120
+        hit, _n, _i, _d = bvh.ray_cast(Vector((0.0, -1.0, z)), Vector((0.0, 1.0, 0.0)))
+        prof.append((z, hit.y))
+    k_tip = min(range(len(prof)), key=lambda k: prof[k][1])
+    z_tip, y_tip = prof[k_tip]
+    lower = prof[k_tip:]
+    depth = lower[-1][1] - y_tip
+
+    def underside_z(y):
+        """the underside's height where it is ``y`` deep (the lower branch)"""
+        for (z0, y0), (z1, y1) in zip(lower, lower[1:]):
+            if y0 <= y <= y1 and y1 > y0:
+                return z0 + (z1 - z0) * (y - y0) / (y1 - y0)
+        return lower[-1][0]
+
+    out = []
+    n = 14
+    for side, sfx in ((1, "L"), (-1, "R")):
+        verts, faces, uvs = [], [], []
+        rows = []
+        for i in range(n + 1):
+            t = i / n
+            y = y_tip + depth * lerp(0.30, 0.80, t)
+            z = underside_z(y) + lerp(0.0011, 0.0023, t * t)
+            hit, nrm, _i, _d = bvh.ray_cast(Vector((side * 0.05, y, z)), Vector((-side, 0.0, 0.0)))
+            if hit is None:
+                continue
+            if nrm.x * side < 0:
+                nrm = -nrm
+            rows.append((t, hit, nrm.normalized()))
+        m = len(rows)
+        for j, (t, c, nrm) in enumerate(rows):
+            nxt = rows[min(j + 1, m - 1)][1]
+            prv = rows[max(j - 1, 0)][1]
+            tan = (nxt - prv).normalized()
+            across = tan.cross(nrm).normalized() * 0.00075
+            lift = nrm * 0.0003
+            verts += [c - across + lift, c + across + lift]
+            uvs += [(t, 0.0), (t, 1.0)]
+        for j in range(m - 1):
+            a, b, c, d = 2 * j, 2 * j + 1, 2 * j + 3, 2 * j + 2
+            q = (a, b, c, d)
+            if (verts[b] - verts[a]).cross(verts[d] - verts[a]).dot(rows[j][2]) < 0:
+                q = tuple(reversed(q))
+            faces.append(q)
+        out.append(mesh_object("NoseLine_" + sfx, verts, faces, material("NoseLine", srgb("#c08474"), roughness=0.6), uvs=uvs))
+    return out
 
 
 # ── forehead seal ───────────────────────────────────────────────────────

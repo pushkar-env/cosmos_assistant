@@ -27,7 +27,9 @@ POINTS = {
     "talk": Vector((0.19, -0.23, 1.13)),
     "wave": JOINTS["rightUpperArm"] + Vector((-0.17, -0.08, 0.22)),
     "bow_front": Vector((0.0, -0.17, 1.03)),
-    "chest_front": Vector((0.0, -0.215, 1.27)),
+    # (in front of her upper chest: the Surprised hands come in from there
+    # until they rest on the kimono)
+    "chest_front": Vector((0.0, -0.200, 1.27)),
     "shy_front": Vector((0.0, -0.16, 0.99)),
     "stretch_top": JOINTS["head"] + Vector((0, -0.01, 0.37)),
     "explain": Vector((-0.24, -0.25, 1.17)),
@@ -39,6 +41,9 @@ HIP_HAND = ((-0.80, -0.14, -0.58), (-0.40, 0.92, 0.0))
 # its fingers: the thumb lifted a touch, so it lies on the (pressed) coat by
 # the obi instead of being settled down past the coat's front edge
 HIP_FINGERS = {"curl": 11, "thumb": -4, "spread": 4}
+# a gasp's hands lie along her upper chest, which slopes back steeply above
+# the bust: fingers up and back toward the collarbones, palms on the kimono
+SURPRISED_HAND = ((0.30, 0.74, 1.0), (0.12, 1.0, -0.74))
 # her hand style, layered on every pose: each finger curls a little more
 # than the one before it (index → little) and they fan slightly
 FINGER_CASCADE = 10.0
@@ -65,6 +70,8 @@ MERGES = {
     "LidShades": ["LidShade_L", "LidShade_R"],
     "Caruncles": ["Caruncle_L", "Caruncle_R"],
     "Brows": ["Brow_L", "Brow_R"],
+    "Ears": ["Ear_L", "Ear_R"],
+    "NoseLines": ["NoseLine_L", "NoseLine_R"],
     "Coat": ["Coat", "CoatSleeve_L", "CoatSleeve_R"],
     "Pants": ["Pants_L", "Pants_R"],
     "Sandals": ["Sandal_L", "Sandal_R"],
@@ -111,13 +118,14 @@ def bust_joints(side):
     second bone a length; the spring sim swings the first)."""
     c = body.BUST_CENTER[side]
     root = Vector((c.x * 0.84, -0.040, c.z + 0.010))
-    apex = Vector((c.x, -0.196, c.z - 0.010))
+    apex = Vector((c.x, -0.148, c.z - 0.010))
     return [root, apex, apex + (apex - root).normalized() * 0.02]
 
 
 def chains():
     out = {name: {"joints": joints, "parent": "head"} for name, joints in hair.chain_joints().items()}
     out.update({name: {"joints": joints, "parent": "hips"} for name, joints in clothes.coat_chain_joints().items()})
+    out.update({name: {"joints": joints, "parent": "hips"} for name, joints in clothes.tunic_chain_joints().items()})
     for side, sfx in ((1, "L"), (-1, "R")):
         out["bust_" + sfx] = {"joints": bust_joints(side), "parent": "chest"}
     return out
@@ -155,7 +163,7 @@ def adjust_weights(name, q, weights):
         return [(b, v / tot) for b, v in items if v / tot > 0.01]
     for side, sfx in ((1, "L"), (-1, "R")):
         c = body.BUST_CENTER[side]
-        d = ((q.x - c.x) / 0.086) ** 2 + ((q.y - c.y) / 0.108) ** 2 + ((q.z - c.z) / 0.086) ** 2
+        d = ((q.x - c.x) / 0.086) ** 2 + ((q.y - c.y) / 0.082) ** 2 + ((q.z - c.z) / 0.086) ** 2
         w = (1.0 - smoothstep(0.2, 1.0, d)) * smoothstep(-0.02, -0.06, q.y)
         if w > 0.01:
             out = {b: bw * (1.0 - w) for b, bw in out.items()}
@@ -174,7 +182,11 @@ def smooth_weights(name):
 def panels():
     coat = {"chains": [n for n, _az in clothes.COAT_CHAINS], "upper": _UPPER, "open_front": True,
             "blend_above": 0.05, "blend_below": 0.07}
-    return {"Coat": coat, "CoatTrim": coat}
+    # the kimono: its top weighted like the body under it (the proxy), its
+    # skirt hanging from the tunic chains (a closed ring — it wraps round)
+    tunic = {"chains": [n for n, _az in clothes.TUNIC_CHAINS], "upper": _UPPER, "open_front": False,
+             "blend_above": 0.02, "blend_below": 0.05}
+    return {"Coat": coat, "CoatTrim": coat, "Kimono": tunic, "KimonoPiping": tunic}
 
 
 def object_candidates(name):
@@ -205,6 +217,7 @@ def build_meshes(steps):
     out["head"] = head_ob.name
     if "face" in steps:
         out["face"] = face.build_face(head_ob)
+        out["ears"] = [o.name for o in head.build_ears(head_ob)]
     if "hair" in steps:
         out["hair"] = hair.build_hair(head_ob)
     if "body" in steps:

@@ -4,7 +4,16 @@ import type { AvatarRig } from './avatarAsset'
 import type { Emotion, Gesture, Reading } from './emotion'
 import { LipSync, VISEMES } from './lipsync'
 import { SpringBones } from './springBones'
+import { BodyRig } from './stage/body'
 import { shared } from './toonMaterials'
+
+/** the stage's hooks into the frame (see stage/actor.ts) */
+export interface StageHooks {
+  /** before the mixer: advance the scene, place her root */
+  preUpdate(dt: number): void
+  /** after the clips and finger life: layer the procedural body */
+  pose(dt: number): void
+}
 
 /*
  * The avatar's "nervous system": everything that makes the model feel alive,
@@ -66,6 +75,9 @@ const _q = new THREE.Quaternion()
 const _q2 = new THREE.Quaternion()
 const _q3 = new THREE.Quaternion()
 const _vPress = new THREE.Vector3()
+const _vLook = new THREE.Vector3()
+const _vLook2 = new THREE.Vector3()
+const _up = new THREE.Vector3(0, 1, 0)
 
 type HandMoment = 'tap' | 'ripple' | 'flex' | 'open' | 'thumb' | 'wrist'
 /** how a finger's lift (a negative curl) splits over its three joints */
@@ -85,6 +97,18 @@ export class AvatarController {
   speaking = false
   /** pointer in NDC, or null when the cursor is off the avatar canvas */
   pointer: THREE.Vector2 | null = null
+  /** a world point she looks at (the stage sets it while she acts) */
+  look: { target: THREE.Vector3; weight: number } | null = null
+  /** she's up and about (walking, reaching…): the clips' ambient gestures
+   *  stand down */
+  acting = false
+  /** 0..1: how freely her cloth may swing out past its at-rest limits (a
+   *  striding knee has to push the coat aside) — set by the stage */
+  clothFree = 0
+  /** the stage's procedural body layer, while one is attached */
+  stage: StageHooks | null = null
+  /** her procedural body (IK etc.) — built from the bind pose */
+  readonly body: BodyRig
 
   private rig: AvatarRig
   private headPivot: THREE.Vector3
@@ -149,6 +173,11 @@ export class AvatarController {
    *  (a bow, the end of a gesture) anything layered on top would otherwise
    *  compound frame after frame */
   private layered = new Map<THREE.Bone, THREE.Quaternion>()
+  /** the same for positions (the stage moves her hips) */
+  private layeredPos = new Map<THREE.Bone, THREE.Vector3>()
+  /** where the look target puts her head (degrees: yaw left, pitch up) */
+  private lookHeadYaw = 0
+  private lookHeadPitch = 0
   /** an occasional small hand "moment" (a tap, a flex…) */
   private moment: { kind: HandMoment; side: number; start: number; dur: number } | null = null
   private nextMoment = 6
@@ -196,6 +225,10 @@ export class AvatarController {
     }
 
     this.setupFingers()
+    this.body = new BodyRig(rig, {
+      layer: (bone, q) => this.layer(bone, q),
+      layerPos: (bone, offset) => this.layerPos(bone, offset)
+    })
     this.setupSprings()
     // settle the first pose so the springs start from the idle stance
     this.mixer.update(0)
@@ -317,6 +350,7 @@ export class AvatarController {
     const track = this.tracks.get(name)
     // only one-shots are gestures; the state loops are driven by `state`
     if (!track || !isOneShot(name)) return false
+    if (this.acting) return false
     if (this.gesture && !force) return false
     if (this.gestureCooldown > 0 && !force) return false
     if (this.gesture) this.gesture.track.target = 0
@@ -355,13 +389,17 @@ export class AvatarController {
     this.time += dt
     shared.uTime.value = this.time
 
+    this.stage?.preUpdate(dt)
     this.updateBody(dt)
-    // take last frame's finger drift back off first, in case a clip leaves a
+    // take last frame's layers back off first, in case a clip leaves a
     // joint unkeyed (the mixer would not reset it)
     for (const [bone, q] of this.layered) bone.quaternion.multiply(_q2.copy(q).invert())
     this.layered.clear()
+    for (const [bone, p] of this.layeredPos) bone.position.sub(p)
+    this.layeredPos.clear()
     this.mixer.update(dt)
     this.applyHands()
+    this.stage?.pose(dt)
     this.updateGaze(dt)
     this.applyHead(dt)
     this.updatePress()
@@ -382,6 +420,7 @@ export class AvatarController {
       0,
       -0.08 + Math.sin(t * 0.8 + 0.4) * 0.07
     )
+    this.springs.outwardFree = this.clothFree
     const stepped = this.springs.update(dt) > 0
     this.applyBreath(stepped)
 
@@ -421,7 +460,10 @@ export class AvatarController {
     }
 
     // ambient behaviour
-    if (this.state === 'idle' && !this.gesture) {
+    if (this.acting) {
+      this.idleTimer = Math.max(this.idleTimer, 10)
+      this.talkGestureTimer = Math.max(this.talkGestureTimer, 4)
+    } else if (this.state === 'idle' && !this.gesture) {
       this.idleTimer -= dt
       if (this.idleTimer <= 0) {
         this.idleTimer = 18 + Math.random() * 22
@@ -431,7 +473,7 @@ export class AvatarController {
     } else {
       this.idleTimer = Math.max(this.idleTimer, 10)
     }
-    if (this.state === 'speaking' && !this.gesture) {
+    if (this.state === 'speaking' && !this.gesture && !this.acting) {
       this.talkGestureTimer -= dt
       if (this.talkGestureTimer <= 0) {
         this.talkGestureTimer = 7 + Math.random() * 7
@@ -462,14 +504,24 @@ export class AvatarController {
   private updateGaze(dt: number): void {
     // where she wants to look
     const preset = PRESETS[this.currentEmotion()]
-    if (this.pointer) {
+    if (this.look) {
+      // head most of the way round to it, eyes the rest
+      const { yaw, pitch } = this.lookAngles(this.look.target)
+      const w = this.look.weight
+      this.lookHeadYaw = THREE.MathUtils.clamp(yaw * 0.8, -55, 55) * w
+      this.lookHeadPitch = THREE.MathUtils.clamp(pitch * 0.75, -32, 24) * w
+      this.gazeTarget.set(
+        THREE.MathUtils.clamp((yaw * w - this.lookHeadYaw) / 24, -1, 1),
+        THREE.MathUtils.clamp((pitch * w - this.lookHeadPitch) / 16, -1, 1)
+      )
+    } else if (this.pointer) {
       this.gazeTarget.set(THREE.MathUtils.clamp(this.pointer.x * 1.4, -1, 1), THREE.MathUtils.clamp(this.pointer.y * 1.2 - 0.05, -1, 1))
     } else if (this.state === 'thinking') {
       this.gazeTarget.set(-0.55 + 0.15 * Math.sin(this.time * 0.7), 0.55 + 0.1 * Math.sin(this.time * 0.9))
     } else {
       this.gazeTarget.set(0, 0)
     }
-    if (preset.gaze && !this.pointer) {
+    if (preset.gaze && !this.pointer && !this.look) {
       const k = Math.min(1, this.emotionIntensity)
       this.gazeTarget.x += preset.gaze[0] * k
       this.gazeTarget.y += preset.gaze[1] * k
@@ -494,9 +546,19 @@ export class AvatarController {
     ;(m.eyeR.uniforms.uGaze.value as THREE.Vector2).set(gx, gy)
   }
 
+  /** a world point's direction from her head, in her own frame (degrees:
+   *  yaw + = her left, pitch + = up) */
+  private lookAngles(target: THREE.Vector3): { yaw: number; pitch: number } {
+    const head = this.bonePosition('head', _vLook).add(_vLook2.set(0, 0.08, 0))
+    const d = _vLook2.copy(target).sub(head)
+    d.applyAxisAngle(_up, -this.rig.root.rotation.y)
+    const R = THREE.MathUtils.RAD2DEG
+    return { yaw: Math.atan2(d.x, d.z) * R, pitch: Math.atan2(d.y, Math.hypot(d.x, d.z)) * R }
+  }
+
   private applyHead(dt: number): void {
-    const followYaw = this.gazeTarget.x * 22
-    const followPitch = -this.gazeTarget.y * 12
+    const followYaw = this.look ? this.lookHeadYaw + this.gazeTarget.x * 24 * 0.15 : this.gazeTarget.x * 22
+    const followPitch = this.look ? -this.lookHeadPitch : -this.gazeTarget.y * 12
     const tiltTarget =
       this.state === 'listening' ? -6 : this.currentEmotion() === 'shy' ? -8 : this.currentEmotion() === 'thinking' ? 5 : 0
     this.headYaw += (followYaw - this.headYaw) * Math.min(1, dt * 3)
@@ -661,6 +723,20 @@ export class AvatarController {
     // local *= R⁻¹ · Q · R
     _q2.copy(rest).invert().multiply(_q).multiply(rest)
     this.layer(b, _q2)
+  }
+
+  /** snap the hair and cloth back to rest (after a teleport) */
+  resetSprings(): void {
+    this.rig.root.updateWorldMatrix(true, true)
+    this.springs.reset()
+  }
+
+  /** add a local offset to a bone's position, remembered like ``layer`` */
+  private layerPos(bone: THREE.Bone, offset: THREE.Vector3): void {
+    bone.position.add(offset)
+    const prev = this.layeredPos.get(bone)
+    if (prev) prev.add(offset)
+    else this.layeredPos.set(bone, offset.clone())
   }
 
   /** right-multiply a rotation onto a bone, remembering it so the next frame

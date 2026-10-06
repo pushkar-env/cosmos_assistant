@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 import { subscribeAssistantEvents, useAssistantStore } from '@/core/stores/useAssistantStore'
@@ -11,7 +11,12 @@ import { loadAvatar, prepareAvatar, type AvatarRig } from './avatarAsset'
 import { AvatarController } from './AvatarController'
 import { resolveAvatar, type AvatarConfig } from './avatars'
 import { readReplySentence, readUserMessage, SentenceSplitter } from './emotion'
-import { shared } from './toonMaterials'
+import { Actor, type StageFx } from './stage/actor'
+import { stageBridge, stageClock, useStageStore } from './stage/bridge'
+import { Director } from './stage/director'
+import { StageEffects } from './stage/vfx'
+import { view } from './stage/widgets'
+import { STAGE_CUT, cutUniforms, shared } from './toonMaterials'
 
 /** the avatar is cheap, but there is no reason to draw it faster than this */
 const AVATAR_FPS = 60
@@ -32,7 +37,17 @@ export const avatarBridge = {
   /** dev/testing aid: orbit the camera around her (radians, 0 = front) */
   orbit: 0,
   /** dev/testing aid: a close-up instead of the full-body framing */
-  focus: null as { x?: number; y: number; z?: number; dist: number } | null
+  focus: null as { x?: number; y: number; z?: number; dist: number } | null,
+  /** her stage: the actor (body IK, walking) and the director (scenes) */
+  actor: null as Actor | null,
+  director: null as Director | null,
+  /** dev/testing aid: slow her whole world down (or speed it up) */
+  get timeScale(): number {
+    return stageClock.scale
+  },
+  set timeScale(v: number) {
+    stageClock.scale = v
+  }
 }
 
 if (import.meta.env.DEV) (window as unknown as { __nova: typeof avatarBridge }).__nova = avatarBridge
@@ -40,10 +55,22 @@ if (import.meta.env.DEV) (window as unknown as { __nova: typeof avatarBridge }).
 const _v = new THREE.Vector3()
 const _w = new THREE.Vector3()
 
-function AvatarModel({ cfg, onFail }: { cfg: AvatarConfig; onFail: (err: unknown) => void }): React.JSX.Element | null {
+/** the rig on stage (for the stage effects, which live outside the model) */
+const stageRig: { current: AvatarRig | null } = { current: null }
+
+function AvatarModel({
+  cfg,
+  onFail,
+  fx
+}: {
+  cfg: AvatarConfig
+  onFail: (err: unknown) => void
+  fx: { current: StageFx | null }
+}): React.JSX.Element | null {
   const [rig, setRig] = useState<AvatarRig | null>(null)
   const camera = useThree((s) => s.camera)
   const size = useThree((s) => s.size)
+  const gl = useThree((s) => s.gl)
 
   useEffect(() => {
     let alive = true
@@ -65,6 +92,13 @@ function AvatarModel({ cfg, onFail }: { cfg: AvatarConfig; onFail: (err: unknown
   }, [cfg, onFail])
 
   const ctrl = useMemo(() => (rig ? new AvatarController(rig) : null), [rig])
+  // her stage: the actor drives her body, the director decides what she does
+  const stage = useMemo(() => {
+    if (!ctrl || !rig) return null
+    const actor = new Actor(rig, ctrl.body, ctrl)
+    const director = new Director(actor, (r) => ctrl.feel(r))
+    return { actor, director, rig }
+  }, [ctrl, rig])
 
   useEffect(() => {
     if (!ctrl) return
@@ -77,6 +111,36 @@ function AvatarModel({ cfg, onFail }: { cfg: AvatarConfig; onFail: (err: unknown
       if (avatarBridge.ctrl === ctrl) avatarBridge.ctrl = null
     }
   }, [ctrl])
+
+  useEffect(() => {
+    if (!ctrl || !stage) return
+    const { actor, director } = stage
+    ctrl.stage = actor
+    view.camera = camera
+    view.canvas = gl.domElement
+    view.ready = true
+    stageRig.current = stage.rig
+    avatarBridge.actor = actor
+    avatarBridge.director = director
+    const detach = stageBridge.attach({
+      userMessage: () => director.userMessage(),
+      newChat: () => director.newChat(),
+      canAct: () => director.canAct(),
+      playNow: () => director.playNow(),
+      userGrabbed: (id) => director.userGrabbed(id)
+    })
+    return () => {
+      detach()
+      director.dispose()
+      actor.reset()
+      ctrl.stage = null
+      view.ready = false
+      if (stageRig.current === stage.rig) stageRig.current = null
+      useStageStore.getState().setActing(false)
+      if (avatarBridge.director === director) avatarBridge.director = null
+      if (avatarBridge.actor === actor) avatarBridge.actor = null
+    }
+  }, [ctrl, stage, camera, gl])
 
   // theme → accent-coloured eyes, hair tips, glow and rim light
   const theme = useSettingsStore((s) => s.settings.theme)
@@ -123,8 +187,13 @@ function AvatarModel({ cfg, onFail }: { cfg: AvatarConfig; onFail: (err: unknown
     }
   }, [ctrl])
 
-  useFrame((_state, delta) => {
+  useFrame((_state, frameDelta) => {
     if (!ctrl) return
+    const delta = frameDelta * stageClock.scale
+    if (stage) {
+      stage.actor.fx = fx.current
+      stage.director.tick(delta)
+    }
     ctrl.state = useAssistantStore.getState().state
     ctrl.speaking = voiceSignal.speaking
     ctrl.pointer = avatarBridge.inside ? avatarBridge.pointer : null
@@ -155,6 +224,7 @@ function AvatarModel({ cfg, onFail }: { cfg: AvatarConfig; onFail: (err: unknown
     }
     const t0 = performance.now()
     ctrl.update(delta)
+    stage?.actor.postUpdate(Math.min(delta, 0.1))
     avatarBridge.updateMs += (performance.now() - t0 - avatarBridge.updateMs) * 0.05
   })
 
@@ -183,6 +253,7 @@ function CameraRig({ cfg }: { cfg: AvatarConfig }): null {
 
   useFrame((state, delta) => {
     const st = useAssistantStore.getState().state
+    const acting = useStageStore.getState().acting
     const aspect = size.width / Math.max(1, size.height)
     const half = THREE.MathUtils.degToRad(camera.fov / 2)
     // full body: from just under the soles to just over her hair, with a
@@ -190,13 +261,15 @@ function CameraRig({ cfg }: { cfg: AvatarConfig }): null {
     // to crop her feet or a raised hand.
     const top = cfg.frame.top + 0.04
     const bottom = -0.05
-    const span = (top - bottom) * (st === 'speaking' && !avatarBridge.ctrl?.gesturing ? 1.03 : 1.07)
+    const span = (top - bottom) * (st === 'speaking' && !avatarBridge.ctrl?.gesturing && !acting ? 1.03 : 1.07)
     let dist = span / 2 / Math.tan(half)
     // keep ~1.2 m of width so an arm or the coat never clips on narrow windows
     dist = Math.max(dist, 0.6 / (Math.tan(half) * aspect))
-    const t = state.clock.elapsedTime
-    const px = avatarBridge.inside ? avatarBridge.pointer.x : 0
-    const py = avatarBridge.inside ? avatarBridge.pointer.y : 0
+    // while she's up and about the camera holds still: the HUD is pinned to
+    // the glass in front of her, and her hands must land where it is
+    const t = acting ? 0 : state.clock.elapsedTime
+    const px = avatarBridge.inside && !acting ? avatarBridge.pointer.x : 0
+    const py = avatarBridge.inside && !acting ? avatarBridge.pointer.y : 0
     const lookY = (top + bottom) / 2
     goalLook.set(px * 0.03, lookY + py * 0.015, 0)
     // camera a little above the middle of her, looking very slightly down
@@ -231,7 +304,9 @@ const HALO_FRAG = /* glsl */ `
   uniform float uTime;
   uniform float uVoice;
   varying vec2 vUv;
+  ${STAGE_CUT}
   void main() {
+    if (inCut() > 0.5) discard;
     vec2 p = (vUv - 0.5) * 2.0;
     float r = length(p);
     float ang = atan(p.y, p.x);
@@ -259,7 +334,8 @@ function Halo(): React.JSX.Element {
           uAccent: shared.uAccent,
           uAccentBright: shared.uAccentBright,
           uTime: shared.uTime,
-          uVoice: shared.uVoice
+          uVoice: shared.uVoice,
+          ...cutUniforms()
         },
         transparent: true,
         depthWrite: false,
@@ -293,7 +369,9 @@ const MOTE_VERT = /* glsl */ `
 const MOTE_FRAG = /* glsl */ `
   uniform vec3 uAccentBright;
   varying float vAlpha;
+  ${STAGE_CUT}
   void main() {
+    if (inCut() > 0.5) discard;
     float d = length(gl_PointCoord - 0.5);
     float a = smoothstep(0.5, 0.0, d) * vAlpha;
     gl_FragColor = vec4(uAccentBright, a);
@@ -324,7 +402,7 @@ function Motes({ count = 140 }: { count?: number }): React.JSX.Element {
       new THREE.ShaderMaterial({
         vertexShader: MOTE_VERT,
         fragmentShader: MOTE_FRAG,
-        uniforms: { uTime: shared.uTime, uAccentBright: shared.uAccentBright },
+        uniforms: { uTime: shared.uTime, uAccentBright: shared.uAccentBright, ...cutUniforms() },
         transparent: true,
         depthWrite: false,
         blending: THREE.AdditiveBlending
@@ -349,7 +427,9 @@ const FLOOR_FRAG = /* glsl */ `
   uniform float uTime;
   uniform float uVoice;
   varying vec2 vUv;
+  ${STAGE_CUT}
   void main() {
+    if (inCut() > 0.5) discard;
     vec2 p = (vUv - 0.5) * 2.0;
     float r = length(p);
     float ang = atan(p.y, p.x);
@@ -364,18 +444,9 @@ const FLOOR_FRAG = /* glsl */ `
     #include <colorspace_fragment>
   }
 `
-const SHADOW_FRAG = /* glsl */ `
-  varying vec2 vUv;
-  void main() {
-    vec2 p = (vUv - 0.5) * vec2(2.0, 3.2);
-    float a = (1.0 - smoothstep(0.0, 1.0, length(p))) * 0.55;
-    gl_FragColor = vec4(0.0, 0.0, 0.0, a);
-  }
-`
-
 function Floor(): React.JSX.Element {
-  const [pad, shadow] = useMemo(
-    () => [
+  const pad = useMemo(
+    () =>
       new THREE.ShaderMaterial({
         vertexShader: HALO_VERT,
         fragmentShader: FLOOR_FRAG,
@@ -383,30 +454,20 @@ function Floor(): React.JSX.Element {
           uAccent: shared.uAccent,
           uAccentBright: shared.uAccentBright,
           uTime: shared.uTime,
-          uVoice: shared.uVoice
+          uVoice: shared.uVoice,
+          ...cutUniforms()
         },
         transparent: true,
         depthWrite: false,
         blending: THREE.AdditiveBlending
       }),
-      new THREE.ShaderMaterial({ vertexShader: HALO_VERT, fragmentShader: SHADOW_FRAG, transparent: true, depthWrite: false })
-    ],
     []
   )
-  useEffect(
-    () => () => {
-      pad.dispose()
-      shadow.dispose()
-    },
-    [pad, shadow]
-  )
+  useEffect(() => () => pad.dispose(), [pad])
   return (
     <group rotation={[-Math.PI / 2, 0, 0]}>
       <mesh position={[0, 0, 0.002]} material={pad} renderOrder={-9}>
         <planeGeometry args={[1.1, 1.1]} />
-      </mesh>
-      <mesh position={[0, 0.01, 0.004]} material={shadow} renderOrder={-8}>
-        <planeGeometry args={[0.55, 0.55]} />
       </mesh>
     </group>
   )
@@ -416,7 +477,14 @@ function Floor(): React.JSX.Element {
 export function AvatarScene({ onFail }: { onFail: (err: unknown) => void }): React.JSX.Element {
   const visible = useUIStore((s) => s.windowVisible)
   const avatarId = useSettingsStore((s) => s.settings.avatarId)
+  const acting = useStageStore((s) => s.acting)
   const cfg = resolveAvatar(avatarId)
+  const fx = useRef<StageFx | null>(null)
+  const getRig = useCallback(() => stageRig.current, [])
+  // her canvas lets the pointer through while she acts — forget where it was
+  useEffect(() => {
+    if (acting) avatarBridge.inside = false
+  }, [acting])
   useEffect(() => {
     if (!cfg) onFail(new Error('no avatar model is bundled'))
   }, [cfg, onFail])
@@ -431,7 +499,9 @@ export function AvatarScene({ onFail }: { onFail: (err: unknown) => void }): Rea
       camera={{ position: [0, 1.2, 3], fov: 30, near: 0.05, far: 30 }}
       dpr={[1, 1.75]}
       gl={{ antialias: true, alpha: true, powerPreference: 'high-performance' }}
-      style={{ background: 'transparent' }}
+      // while she's out on the glass the canvas sits above the HUD — and lets
+      // every click through to it
+      style={{ background: 'transparent', pointerEvents: acting ? 'none' : 'auto' }}
       onPointerMove={(e) => {
         toNdc(e, avatarBridge.pointer)
         avatarBridge.inside = true
@@ -449,7 +519,8 @@ export function AvatarScene({ onFail }: { onFail: (err: unknown) => void }): Rea
       <Halo />
       <Floor />
       <Motes />
-      {cfg && <AvatarModel key={cfg.id} cfg={cfg} onFail={onFail} />}
+      <StageEffects fx={fx} getRig={getRig} />
+      {cfg && <AvatarModel key={cfg.id} cfg={cfg} onFail={onFail} fx={fx} />}
     </Canvas>
   )
 }

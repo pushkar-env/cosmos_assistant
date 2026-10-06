@@ -135,6 +135,20 @@ export function AvatarLab(): React.JSX.Element {
             </button>
           ))}
         </Row>
+        <Row label="Stage">
+          {[
+            ['walk ←', ['right']],
+            ['walk →', ['left']],
+            ['crouch', ['crouch']]
+          ].map(([label, bits]) => (
+            <button key={label as string} className={btn} onClick={() => avatarBridge.director?.playBits(bits as string[])}>
+              {label as string}
+            </button>
+          ))}
+          <button className={btn} onClick={() => avatarBridge.director?.userMessage()}>
+            teleport home
+          </button>
+        </Row>
         <Row label="Voice">
           <button className={`${btn} ${talking ? on : ''}`} onClick={() => setTalking((t) => !t)}>
             {talking ? 'stop fake voice' : 'fake voice'}

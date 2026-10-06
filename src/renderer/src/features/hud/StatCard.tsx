@@ -1,6 +1,8 @@
-import { motion } from 'framer-motion'
-import type { ReactNode } from 'react'
+import { motion, useMotionValue } from 'framer-motion'
+import { useEffect, useRef, type ReactNode } from 'react'
 import { sound } from '@/core/sound/SoundEngine'
+import { stageBridge } from '@/features/avatar/stage/bridge'
+import { widgets } from '@/features/avatar/stage/widgets'
 
 interface StatCardProps {
   title: string
@@ -8,13 +10,30 @@ interface StatCardProps {
   delay?: number
 }
 
-/** A draggable holographic stat card with the signature bracket frame. */
+/** A draggable holographic stat card with the signature bracket frame. The
+ *  avatar can pick it up too: she drives the same motion values a drag does. */
 export function StatCard({ title, children, delay = 0 }: StatCardProps): React.JSX.Element {
+  const ref = useRef<HTMLDivElement>(null)
+  const x = useMotionValue(0)
+  const y = useMotionValue(0)
+  const scale = useMotionValue(1)
+  const rotate = useMotionValue(0)
+  const rotateY = useMotionValue(0)
+  const id = `card-${title.toLowerCase()}`
+
+  useEffect(() => {
+    if (!ref.current) return
+    return widgets.register({ id, kind: 'card', el: ref.current, motion: { x, y, scale, rotate, rotateY } })
+  }, [id, x, y, scale, rotate, rotateY])
+
   return (
     <motion.div
+      ref={ref}
       drag
       dragMomentum={false}
       whileDrag={{ scale: 1.04, zIndex: 40 }}
+      onDragStart={() => stageBridge.userGrabbed(id)}
+      style={{ x, y, scale, rotate, rotateY, transformPerspective: 900 }}
       className="glass glass-hover brackets w-52 cursor-grab px-4 py-3 active:cursor-grabbing"
       initial={{ opacity: 0, y: 14, filter: 'blur(8px)' }}
       animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}

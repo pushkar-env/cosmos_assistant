@@ -14,6 +14,13 @@ export type SoundId =
   | 'close'
   | 'mic-on'
   | 'mic-off'
+  // the avatar's hands on the glass
+  | 'grab'
+  | 'release'
+  | 'tap'
+  | 'snap'
+  | 'whoosh'
+  | 'teleport'
 
 class SoundEngine {
   private ctx: AudioContext | null = null
@@ -86,6 +93,55 @@ class SoundEngine {
         this.blip(ctx, master, t, 700, 0.07, 0.45)
         this.blip(ctx, master, t + 0.05, 460, 0.12, 0.4)
         break
+      // she takes hold of a card: a soft low catch with a glint on top
+      case 'grab':
+        this.blip(ctx, master, t, 330, 0.09, 0.45)
+        this.blip(ctx, master, t + 0.02, 990, 0.07, 0.18)
+        break
+      // …and lets it go
+      case 'release':
+        this.blip(ctx, master, t, 760, 0.06, 0.22)
+        this.blip(ctx, master, t + 0.05, 520, 0.09, 0.2)
+        break
+      // a fingertip on the glass
+      case 'tap':
+        this.blip(ctx, master, t, 1850, 0.035, 0.35)
+        this.blip(ctx, master, t + 0.004, 2780, 0.03, 0.18)
+        break
+      // a finger snap: a crack of filtered noise and a click
+      case 'snap':
+        this.noise(ctx, master, t, 0.06, 2600, 0.9)
+        this.blip(ctx, master, t, 2200, 0.025, 0.3)
+        break
+      // a card tossed / flicked
+      case 'whoosh':
+        this.noise(ctx, master, t, 0.28, 900, 0.35, 3200)
+        break
+      // she dissolves and re-forms: a shimmering fall and rise
+      case 'teleport': {
+        for (const [f0, f1, f2, d] of [
+          [1400, 380, 1500, 0.95],
+          [1407, 384, 1512, 0.95]
+        ]) {
+          const osc = ctx.createOscillator()
+          const gain = ctx.createGain()
+          osc.type = 'sine'
+          osc.frequency.setValueAtTime(f0, t)
+          osc.frequency.exponentialRampToValueAtTime(f1, t + d * 0.42)
+          osc.frequency.exponentialRampToValueAtTime(f2, t + d)
+          gain.gain.setValueAtTime(0.0001, t)
+          gain.gain.exponentialRampToValueAtTime(0.16, t + 0.04)
+          gain.gain.exponentialRampToValueAtTime(0.03, t + d * 0.45)
+          gain.gain.exponentialRampToValueAtTime(0.12, t + d * 0.7)
+          gain.gain.exponentialRampToValueAtTime(0.0001, t + d)
+          osc.connect(gain)
+          gain.connect(master)
+          osc.start(t)
+          osc.stop(t + d)
+        }
+        this.noise(ctx, master, t, 0.5, 4000, 0.18, 1200)
+        break
+      }
       case 'boot': {
         // filtered saw swell — the "power on" moment
         const osc = ctx.createOscillator()
@@ -129,6 +185,41 @@ class SoundEngine {
     gain.connect(out)
     osc.start(t)
     osc.stop(t + dur)
+  }
+
+  private noiseBuf: AudioBuffer | null = null
+
+  /** a burst of band-passed noise, its centre gliding from `freq` to `to` */
+  private noise(
+    ctx: AudioContext,
+    out: AudioNode,
+    t: number,
+    dur: number,
+    freq: number,
+    vol: number,
+    to = freq
+  ): void {
+    if (!this.noiseBuf) {
+      const n = Math.floor(ctx.sampleRate * 0.6)
+      this.noiseBuf = ctx.createBuffer(1, n, ctx.sampleRate)
+      const data = this.noiseBuf.getChannelData(0)
+      for (let i = 0; i < n; i++) data[i] = Math.random() * 2 - 1
+    }
+    const src = ctx.createBufferSource()
+    src.buffer = this.noiseBuf
+    const filter = ctx.createBiquadFilter()
+    filter.type = 'bandpass'
+    filter.Q.value = 1.4
+    filter.frequency.setValueAtTime(freq, t)
+    if (to !== freq) filter.frequency.exponentialRampToValueAtTime(to, t + dur)
+    const gain = ctx.createGain()
+    gain.gain.setValueAtTime(vol, t)
+    gain.gain.exponentialRampToValueAtTime(0.001, t + dur)
+    src.connect(filter)
+    filter.connect(gain)
+    gain.connect(out)
+    src.start(t)
+    src.stop(t + dur)
   }
 
   private sweep(

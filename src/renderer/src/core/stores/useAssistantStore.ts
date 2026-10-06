@@ -3,6 +3,8 @@ import type { Attachment, AssistantState, ChatMessage, ConversationMeta } from '
 import { useSettingsStore } from './useSettingsStore'
 import { sound } from '@/core/sound/SoundEngine'
 import { voiceSignal } from '@/core/voice/voiceSignal'
+import { stageBridge } from '@/features/avatar/stage/bridge'
+import { isNewChatIntent } from '@/features/chat/intents'
 import { useNotificationStore } from './useNotificationStore'
 
 /** Streaming lifecycle events, consumed by the voice sentence-chunker. */
@@ -43,6 +45,9 @@ const notify = (e: AssistantEvent): void => shared.listeners.forEach((cb) => cb(
 export interface UIMessage extends ChatMessage {
   id: string
   error?: boolean
+  /** shown in the chat but never sent to the model (a "new chat" command
+   *  and her "done!") */
+  ephemeral?: boolean
   /** tool-activity card rather than a chat bubble */
   tool?: {
     callId: string
@@ -70,6 +75,11 @@ interface AssistantStore {
   interrupt: () => void
   /** start a fresh chat (past conversations remain stored) */
   clear: () => void
+  /** "start a new chat": the avatar walks over and presses New when she's on
+   *  screen (else it just happens); `command` is the request, shown meanwhile */
+  newChat: (command?: string) => Promise<void>
+  /** her "done — fresh chat!" in the new chat (spoken with voice replies on) */
+  confirmNewChat: () => void
   /** wipe every stored conversation from disk, then start fresh */
   clearAllHistory: () => Promise<void>
   setState: (state: AssistantState) => void
@@ -84,6 +94,14 @@ interface AssistantStore {
 }
 
 const nextId = (): string => `msg-${Date.now()}-${shared.idCounter++}`
+
+const NEW_CHAT_LINES = [
+  "Done — fresh chat, clean slate. What's next?",
+  'There you go, a brand-new chat!',
+  "New chat's open. I'm all ears.",
+  'Clean slate! What shall we talk about?'
+]
+const NEW_CHAT_LINES_HI = ['हो गया! नई चैट तैयार है।', 'लीजिए, नई चैट शुरू हो गई।', 'नई चैट खुल गई — बताइए, क्या करें?']
 
 /**
  * Streaming-token coalescer. The model emits many deltas per second; naively
@@ -270,6 +288,12 @@ export const useAssistantStore: UseBoundStore<StoreApi<AssistantStore>> = (share
     const atts = attachments?.length ? attachments : undefined
     // allow an attachment-only message (no typed text)
     if (!trimmed && !atts) return
+    // she drops whatever she's playing at and comes home when you talk to her
+    stageBridge.userMessage()
+    if (!atts && isNewChatIntent(trimmed)) {
+      await get().newChat(trimmed)
+      return
+    }
     // barge-in: a new message interrupts any in-flight response
     get().interrupt()
 
@@ -311,7 +335,7 @@ export const useAssistantStore: UseBoundStore<StoreApi<AssistantStore>> = (share
     // build history from the (translated) messages, dropping the empty
     // assistant placeholder we just added
     const history: ChatMessage[] = get()
-      .messages.filter((m) => !m.error && !m.tool && (m.content !== '' || m.attachments?.length))
+      .messages.filter((m) => !m.error && !m.tool && !m.ephemeral && (m.content !== '' || m.attachments?.length))
       .map(({ role, content, attachments }) => ({ role, content, attachments }))
       .slice(-CONTEXT_WINDOW)
 
@@ -343,6 +367,38 @@ export const useAssistantStore: UseBoundStore<StoreApi<AssistantStore>> = (share
       set({ currentSessionId: id })
       void get().loadSessions()
     })
+  },
+
+  newChat: async (command) => {
+    get().interrupt()
+    sound.play('activate')
+    const shown = !!command && stageBridge.canAct()
+    if (shown) {
+      set({ messages: [...get().messages, { id: nextId(), role: 'user', content: command!, ephemeral: true }] })
+    }
+    const pressed = await stageBridge.newChat()
+    if (!pressed) {
+      get().clear()
+      get().confirmNewChat()
+    }
+  },
+
+  confirmNewChat: () => {
+    const hi = useSettingsStore.getState().settings.voice.language === 'hi'
+    const lines = hi ? NEW_CHAT_LINES_HI : NEW_CHAT_LINES
+    const text = lines[Math.floor(Math.random() * lines.length)]
+    set({ messages: [...get().messages, { id: nextId(), role: 'assistant', content: text, ephemeral: true }] })
+    // through the same pipeline as a streamed reply: the voice speaks it
+    // (with voice replies on) and her face reads it
+    notify({ type: 'delta', text })
+    notify({ type: 'done' })
+    if (!useSettingsStore.getState().settings.voice.voiceReplies) {
+      // no voice: she still says it (her lips move) for a moment
+      set({ state: 'speaking' })
+      setTimeout(() => {
+        if (get().state === 'speaking' && !get().activeRequestId && !voiceSignal.speaking) set({ state: 'idle' })
+      }, 1600)
+    }
   },
 
   clearAllHistory: async () => {

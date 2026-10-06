@@ -4,7 +4,8 @@ a navy obi, navy capri pants, a long open green haori with dark trim and wide
 
 The haori's skirt is cloth: six spring chains hang around the body (front,
 side, back on each side) and the coat is panel-weighted to them, so it swings
-and settles in the app. Material names are the contract with the app:
+and settles in the app. The tunic's skirt hangs from eight shorter chains the
+same way, so her legs can push it about. Material names are the contract with the app:
   Kimono  Piping  Obi  ObiCord  Pants  Coat  CoatTrim  Sandal
 """
 
@@ -286,8 +287,8 @@ COAT_TOP = 1.400
 # below the bust the coat hangs instead of hugging: z → (half-width, front,
 # back), flaring toward the hem like the reference
 _HANG = [(0.40, 0.292, 0.170, 0.196), (0.55, 0.276, 0.158, 0.184), (0.70, 0.258, 0.148, 0.170),
-         (0.90, 0.236, 0.130, 0.154), (1.00, 0.220, 0.124, 0.138), (1.10, 0.202, 0.150, 0.116),
-         (1.17, 0.194, 0.194, 0.106), (1.235, 0.188, 0.204, 0.102)]
+         (0.90, 0.236, 0.130, 0.154), (1.00, 0.220, 0.124, 0.138), (1.10, 0.202, 0.124, 0.116),
+         (1.17, 0.194, 0.152, 0.106), (1.235, 0.188, 0.166, 0.102)]
 _HW = pchip([(z, w) for z, w, _f, _b in _HANG])
 _HF = pchip([(z, f) for z, _w, f, _b in _HANG])
 _HB = pchip([(z, b) for z, _w, _f, b in _HANG])
@@ -416,6 +417,27 @@ COAT_CHAIN_Z = [1.10, 0.93, 0.77, 0.60, 0.44]
 
 def coat_chain_joints():
     return {name: [coat_point(z, az, -0.006) for z in COAT_CHAIN_Z] for name, az in COAT_CHAINS}
+
+
+# the tunic's skirt is cloth too: eight short chains round it, from under the
+# obi to the hem, so it drapes over her thighs when she strides or crouches
+# (spring-simulated in the app, pushed by colliders on the legs) instead of
+# riding her hips rigidly while the legs cut through it
+TUNIC_CHAINS = [("cloth_tunic_F_L", 22.5), ("cloth_tunic_S_L", 67.5), ("cloth_tunic_K_L", 112.5), ("cloth_tunic_B_L", 157.5),
+                ("cloth_tunic_B_R", -157.5), ("cloth_tunic_K_R", -112.5), ("cloth_tunic_S_R", -67.5), ("cloth_tunic_F_R", -22.5)]
+TUNIC_CHAIN_Z = [1.022, 0.940, 0.858, 0.772]
+
+
+def tunic_point(z, az, inflate=0.0):
+    """A point on the tunic's skirt (as build_kimono lays it out)."""
+    t = min(max((1.035 - z) / (1.035 - TUNIC_HEM), 0.0), 1.2)
+    zz = max(z, 0.965)
+    infl = 0.010 + TUNIC_FLARE * t ** 1.2 + inflate
+    return torso_point(zz, R(az), infl) + Vector((0, 0, z - zz))
+
+
+def tunic_chain_joints():
+    return {name: [tunic_point(z, az, -0.006) for z in TUNIC_CHAIN_Z] for name, az in TUNIC_CHAINS}
 
 
 # ── sandals ─────────────────────────────────────────────────────────────

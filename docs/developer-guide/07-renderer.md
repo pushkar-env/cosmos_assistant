@@ -166,10 +166,20 @@ The default centrepiece: an anime girl who reacts to the conversation. The model
   the procedural eye (iris drawn from the *morphed* position so lids cover it),
   mouth and blush shaders, soft-edged painted shading (`soft`: lid shadow,
   nose shading, lip gloss, feathered over each decal's UVs) and inverted-hull
-  outlines. glTF stores UV v flipped, so the eye, mouth and soft shaders read
-  `1 − uv.y`. The hair's height bands
-  (skull shading, angel ring, fringe line fade) are tuned on Nova's head and
-  shift with each model's own head height (`uHeadShift`, set on load).
+  outlines. A decal can be drawn only where its surface faces the camera
+  (`facing`: a mark on the side of the nose shows in profile and fades as she
+  turns to face you). A face with a sculpted profile sets `crease` on its skin
+  material: inside the nose-and-mouth region its outline is pushed back along
+  the view ray, so the hull folding out of a crease (from the usual camera,
+  below her face, the up-facing upper lip's hull showed in the pocket under
+  the nose as a dark band) hides behind her own skin, while on a profile, with
+  only background behind it, the line stays. glTF stores UV v flipped, so the
+  eye, mouth and soft shaders read `1 − uv.y`. The hair's height bands (skull shading, angel ring) are tuned on
+  Nova's head and measured from the head as it is *now* (`uHeadCenter`), so they
+  ride along when she bows or crouches; the outline's fringe fade uses rest
+  positions and each model's own head height (`uHeadShift`, set on load).
+  Every material also carries the stage's teleport dissolve (`uDissolve`) and
+  card cut-outs (`uCut`) — see *Her stage* below.
 - [`lipsync.ts`](../../src/renderer/src/features/avatar/lipsync.ts) — vowel shapes
   (A/I/U/E/O) from the TTS loudness + four formant bands that `SpeechPlayer`
   writes to `voiceSignal.bands`; a synthetic chatter when replies are text-only.
@@ -195,7 +205,93 @@ The default centrepiece: an anime girl who reacts to the conversation. The model
 Materials are matched to the GLB **by material name**, blendshapes and bones **by
 name** — see the contract in [`tools/avatar/README.md`](../../tools/avatar/README.md).
 For tuning without the whole app, serve `src/renderer` with plain Vite and open
-`/avatar-lab.html` (dev only; drives states, feelings, gestures and a fake voice).
+`/avatar-lab.html` (dev only; drives states, feelings, gestures, a fake voice, and
+the stage: a stroll, a crouch, a teleport).
+
+### Her stage — `features/avatar/stage`
+
+The avatar can leave her spot: walk about, crouch, put her hands on the HUD and
+the chat. Left alone (`Settings.avatarPlay`) she wanders over every 30 s
+(`IDLE_LOOP`, counted from your last input or her last play) and
+plays with the HUD cards; "start a new chat" sends her to press **New**; a
+message mid-scene dissolves her and she re-forms at home.
+
+- [`body.ts`](../../src/renderer/src/features/avatar/stage/body.ts) — `BodyRig`,
+  the procedural body: analytic two-bone IK for arms and legs with a real hinge
+  (each bone's own along/hinge axes, from the bind pose), forearm roll to carry
+  the hand's twist, hand aiming (finger direction + palm normal), finger poses
+  (curl, spread, thumb), shoulder lift, hips and spine offsets. It never owns a
+  bone: everything is layered through the controller and taken back off before
+  the mixer runs, each limb blended by its own weight. Layered deltas are
+  normalised — `invert()` is a conjugate and the clips' quaternions are only unit
+  to float32, so an un-normalised delta compounds through the layer/undo cycle
+  until the bone explodes.
+- [`locomotion.ts`](../../src/renderer/src/features/avatar/stage/locomotion.ts) —
+  procedural walking on a real gait cycle. The root glides toward a goal with
+  eased acceleration (never far ahead of a foot still on the floor); a stride
+  clock moves the feet. Each foot spends ~60% of a stride on the ground — heel
+  strike, rolling flat, the heel peeling up over the ball (the toes stay flat on
+  the floor) — and ~40% swinging, where its ankle rises to whatever height gives
+  the knee its natural swing bend (folded up behind her, then reaching out for
+  the next heel strike). Landing spots are planned from where her body will be
+  when the foot comes down, half a stance ahead of it. Sideways, the leading foot
+  steps out and the other closes in behind it, so they never cross. The pelvis
+  bobs, sways over the standing foot, turns with the stride and dips on the
+  swinging side; the chest turns against it; the hips never sit so high that a
+  standing knee locks straight — and start lowering ahead of each heel strike
+  (from where the foot will land and where her hips will be by then), so they
+  never drop onto it. The swinging knee's bend grows out of the bend it left
+  the floor with, the root holds still until the legs have fully taken over
+  from the clip, and the landing heading is eased like the landing spot — each
+  of those once made a foot jump. Setting off, the foot on the side she's heading
+  for opens the turn; stopping, the last steps bring her feet together. A crouch
+  is a skirt-friendly kneeling squat: one foot steps back (the reaching hand's
+  side) and sinks onto its ball, knees together.
+- [`actor.ts`](../../src/renderer/src/features/avatar/stage/actor.ts) — her body
+  as a script can direct it: `walkTo`, `crouchTo`, `reach(side, target, dur)`,
+  `rest`, `setShape`, `lookAt`, `grab`/`release`/`fly`/`tidy` for cards,
+  `teleportHome`. Each is a promise that rejects with `Aborted` when the scene is
+  interrupted. A hand resting on her hip (`restingHand`) is anchored to her
+  hips at `begin`, then lifts straight off and hangs free for the whole scene
+  (a hand left on her hip through a walk or a game looked pinned there): it
+  swings with her stride, rests on her knee when she crouches, and goes back
+  on her hip only once she's home (`handsHome`, called by `end`). Each arm's
+  moves carry a `claim`, so a move in several steps gives way to whatever
+  started since. A free
+  arm walks by IK too — hanging as wide as her clip's (clear of the haori),
+  palm in, swinging opposite its leg, fingers loosely curled. While she strides or crouches the cloth's
+  `outward` limits loosen (`clothFree` → `SpringBones.outwardFree`) so her legs
+  can push the coat aside.
+- [`director.ts`](../../src/renderer/src/features/avatar/stage/director.ts) — the
+  scenes: idle play (carry a card out and squish/stretch it between her palms or
+  toss and catch it; boop one; flick one into a spin; crouch to a low one; a
+  finger snap springs every card home), pressing **New**, and interruptions.
+  `playBits([...])` runs chosen bits (dev aid).
+- [`widgets.ts`](../../src/renderer/src/features/avatar/stage/widgets.ts) — what
+  she can touch: `StatCard`s register their framer-motion values (she drives
+  the same `x`/`y`/`scale` a drag does), the chat's New button registers a
+  `press`. DOM panels hang on "the glass", a plane just in front of her: a screen
+  point maps to a point on it and back. Touch ripples and sparks are DOM.
+- [`vfx.tsx`](../../src/renderer/src/features/avatar/stage/vfx.tsx) — the teleport
+  (she dissolves into motes sampled off her skinned body; re-forms behind a
+  glowing seam rising from her feet), footstep ripples, a contact shadow that
+  follows her.
+- [`bridge.ts`](../../src/renderer/src/features/avatar/stage/bridge.ts) — the seam
+  to the rest of the app (`stageBridge`, no three.js) and `useStageStore.acting`.
+  While she acts her canvas sits above the HUD and chat (`z-[25]`, no pointer
+  events — every click still goes through) and the camera holds still.
+
+**Cards in her hands.** The cards are DOM, under the canvas, yet a card she holds
+in front of her must sit *between* her body and her hands. Each card she has
+taken off the "wall" is a rounded rect on screen (`shared.uCut`); inside it every
+fragment of hers is discarded except those skinned to her hand and finger bones
+(`vHand`, from `uHandBones`) — so the card shows over her body, her hands over it.
+
+The "new chat" request is caught before the model sees it
+([`features/chat/intents.ts`](../../src/renderer/src/features/chat/intents.ts) —
+strict: the whole message must be the command, English or Hindi/Hinglish); her
+"done!" goes into the fresh chat as an `ephemeral` message (shown and spoken,
+never sent to the model). Without an avatar on screen it simply happens.
 
 ---
 

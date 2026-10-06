@@ -259,12 +259,14 @@ class PoseKit:
         return self.pb[s + "Hand"].head.copy()
 
     # ── contact ──
-    def cuts(self, s, against, trees=None):
+    def cuts(self, s, against, trees=None, hand_only=False):
         """How many of the ``s`` hand's triangles cut through the meshes in
         ``against`` ("hand" = the other hand) in the current pose. Only the arm
         past its sleeve counts (the hand meshes run up to the shoulder): what
         the sleeve covers is hidden, and the hand's own sleeve is skipped.
-        Always 0 for a spec without ``HAND_MESHES``."""
+        ``hand_only`` counts the hand alone, from the wrist on (for poses
+        whose bare forearm brushes the coat beside her, out of sight under
+        the wide sleeve). Always 0 for a spec without ``HAND_MESHES``."""
         from mathutils.bvhtree import BVHTree
 
         hands = getattr(SPEC, "HAND_MESHES", None)
@@ -274,20 +276,20 @@ class PoseKit:
         bpy.context.view_layer.update()
         dg = bpy.context.evaluated_depsgraph_get()
 
-        def hand_tree(side):
-            t = trees.get(("hand", side))
+        def hand_tree(side, only=False):
+            t = trees.get(("hand", side, only))
             if t is None:
                 verts, polys = _posed_mesh(hands[side], dg)
                 mw = self.ob.matrix_world
                 lower = self.pb[side + "LowerArm"]
                 elbow, wrist = mw @ lower.head, mw @ lower.tail
                 axis = (wrist - elbow).normalized()
-                skip = _sleeve_reach(self.ob, side)
+                skip = (wrist - elbow).length - 0.01 if only else _sleeve_reach(self.ob, side)
                 keep = [p for p in polys if (verts[p[0]] - elbow).dot(axis) > skip]
-                t = trees[("hand", side)] = BVHTree.FromPolygons(verts, keep)
+                t = trees[("hand", side, only)] = BVHTree.FromPolygons(verts, keep)
             return t
 
-        mine = hand_tree(s)
+        mine = hand_tree(s, hand_only)
         own_sleeve = getattr(SPEC, "SLEEVES", {}).get(s)
         n = 0
         for name in against:
@@ -305,39 +307,109 @@ class PoseKit:
             n += len(mine.overlap(t))
         return n
 
-    def clear(self, pose, moves, step=0.004, limit=0.10, extra=0.003):
+    def clear(self, pose, moves, step=0.004, limit=0.10, extra=0.003, patience=0.06):
         """Pose with ``pose(offsets)``, then push hands off what they cut.
 
         ``offsets`` maps each side to a Vector the pose adds to that hand's
-        reach target. ``moves`` lists ``(side, axis, against)``: while that
+        reach target. ``moves`` lists ``(side, axis, against[, hand_only])``
+        (see ``cuts``): while that
         hand cuts through anything in ``against`` ("hand" = the other hand),
         its offset grows along ``axis`` a step at a time (earlier entries
         first) for at most ``limit``, then ``extra`` more so it sits just
-        clear rather than grazing. ``pose`` must rebuild the whole pose from
-        scratch. Returns the hands still cutting through something (logged
-        in ``CONTACT_LOG``)."""
+        clear rather than grazing. A push that stops helping — ``patience``
+        further along without cutting through any less — is taken back to
+        where the hand cut least: what's left is a cut this push can't fix
+        (a forearm brushing the coat by the elbow), and pushing on would only
+        float the hand off what it rests on. ``pose`` must rebuild the whole
+        pose from scratch. Returns the hands still cutting through something
+        (logged in ``CONTACT_LOG``)."""
         offs = {"left": Vector(), "right": Vector()}
         pose(offs)
         if not getattr(SPEC, "HAND_MESHES", None):
             return []
-        spent = {s: 0.0 for s, _a, _g in moves}
+        spent = {m[0]: 0.0 for m in moves}
+        best = {m[0]: None for m in moves}  # (fewest cuts, push there)
+        done = set()
         while True:
             trees = {}
-            bad = next((m for m in moves if spent[m[0]] < limit and self.cuts(m[0], m[2], trees)), None)
+            bad = None
+            for m in moves:
+                s, axis, against = m[:3]
+                if s in done or spent[s] >= limit:
+                    continue
+                n = self.cuts(s, against, trees, hand_only=len(m) > 3 and m[3])
+                if n == 0:
+                    continue
+                b = best[s]
+                if b is None or n < b[0]:
+                    best[s] = (n, spent[s])
+                elif spent[s] - b[1] >= patience - 1e-9:
+                    # no better for a while: back to where it cut least
+                    offs[s] -= Vector(axis).normalized() * (spent[s] - b[1])
+                    spent[s] = b[1]
+                    done.add(s)
+                    pose(offs)
+                    trees = {}
+                    continue
+                bad = m
+                break
             if bad is None:
                 break
-            s, axis, _g = bad
+            s, axis = bad[0], bad[1]
             offs[s] += Vector(axis).normalized() * step
             spent[s] += step
             pose(offs)
         moved = [m for m in moves if spent[m[0]] > 0]
-        for s, axis, _g in moved:
-            offs[s] += Vector(axis).normalized() * extra
+        for m in moved:
+            offs[m[0]] += Vector(m[1]).normalized() * extra
         if moved:
             pose(offs)
         trees = {}
-        stuck = [s for s, _a, against in moves if self.cuts(s, against, trees)]
+        stuck = [m[0] for m in moves if self.cuts(m[0], m[2], trees, hand_only=len(m) > 3 and m[3])]
         CONTACT_LOG.append({"pose": getattr(pose, "__qualname__", "?"), "moved_cm": {s: round(v * 100, 1) for s, v in spent.items()}, "stuck": stuck})
+        return stuck
+
+    def land(self, pose, moves, step=0.004, limit=0.10, extra=0.003):
+        """Pose with ``pose(offsets)``, then bring hands in until they rest on
+        what's in front of them: each hand in ``moves`` — ``(side, axis,
+        against[, hand_only])`` as for ``clear`` — travels against ``axis`` a
+        step at a time until it first cuts through something, then backs off
+        to just clear (``extra``). A hand that meets nothing within ``limit``
+        stays where the pose put it; one cutting from the start is pushed off
+        by ``clear``. Logged in ``CONTACT_LOG`` like ``clear``."""
+        offs = {"left": Vector(), "right": Vector()}
+        pose(offs)
+        if not getattr(SPEC, "HAND_MESHES", None):
+            return []
+        landed = {}
+        for m in moves:
+            s, axis, against = m[:3]
+            only = len(m) > 3 and m[3]
+            a = Vector(axis).normalized()
+            if self.cuts(s, against, {}, hand_only=only):
+                landed[s] = None
+                continue
+            went = 0.0
+            while went < limit:
+                offs[s] -= a * step
+                went += step
+                pose(offs)
+                if self.cuts(s, against, {}, hand_only=only):
+                    offs[s] += a * (step + extra)
+                    pose(offs)
+                    break
+            else:
+                offs[s] += a * went
+                pose(offs)
+                went = 0.0
+            landed[s] = went
+        start = {s: Vector(v) for s, v in offs.items()}
+
+        def again(o):
+            pose({s: start[s] + o[s] for s in o})
+
+        stuck = self.clear(again, [m for m in moves if landed.get(m[0]) is None], step, limit, extra) if None in landed.values() else []
+        CONTACT_LOG.append({"pose": getattr(pose, "__qualname__", "?"), "landed_cm": {s: (round(v * 100, 1) if v is not None else None) for s, v in landed.items()}, "stuck": stuck})
         return stuck
 
     # ── keys ──
@@ -907,6 +979,10 @@ def clip_surprised(arm_ob, k):
     act = new_action(arm_ob, "Surprised", 54, False)
     chest = SPEC.POINTS["chest_front"]
     fwd = (0.0, -1.0, 0.0)
+    # (finger direction, palm normal) for her left hand — mirrored for the
+    # right; a spec can lay the hands along its own chest's slope. Each hand
+    # then comes in from the target until it rests on her chest.
+    (dx, dy, dz), (px, py, pz) = getattr(SPEC, "SURPRISED_HAND", ((0.36, 0.42, 1.0), (0.15, 1.0, -0.35)))
 
     def gasp(f, amt):
         def pose(offs):
@@ -917,11 +993,14 @@ def clip_surprised(arm_ob, k):
                 for s, sd in (("left", 1), ("right", -1)):
                     tgt = chest + Vector((sd * 0.085, 0.0, -0.03)) + offs[s]
                     k.reach(s, tgt, tgt + Vector((sd * 0.3, 0.1, -0.25)))
-                    k.aim_hand(s, (-sd * 0.36, 0.42, 1.0), (sd * 0.15, 1.0, -0.35))
+                    k.aim_hand(s, (-sd * dx, dy, dz), (sd * px, py, pz))
                     k.fingers(s, curl=7, thumb=4, spread=5 * amt)
 
         if amt > 0.01:
-            k.clear(pose, [("left", fwd, _solids() + ["hand"]), ("right", fwd, _solids() + ["hand"])])
+            # each hand comes in until it rests on her chest (the hands alone
+            # count: the bare forearms brush the coat by the elbows, out of
+            # sight under the sleeves)
+            k.land(pose, [("left", fwd, _solids() + ["hand"], True), ("right", fwd, _solids() + ["hand"], True)])
         else:
             pose(_NO_OFFSET)
         k.key(act, f)

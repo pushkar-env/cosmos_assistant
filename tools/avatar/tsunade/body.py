@@ -76,21 +76,27 @@ TORSO_F = pchip([(z, f) for z, _w, f, _b in _TORSO])
 TORSO_B = pchip([(z, b) for z, _w, _f, b in _TORSO])
 
 # the bust: two full forms on the chest wall (her reference is very busty).
-# Centres also anchor the breast spring bones and their weights.
+# Centres also anchor the breast spring bones and their weights. Width and
+# height are the front view's; the depth is measured on the reference's
+# profile (it stands ~5 cm proud of the obi there — a deeper form read as a
+# long, pointed bust from the side).
 BUST_Z = 1.232
 BUST_X = 0.080
-BUST_DEPTH = 0.106
+BUST_DEPTH = 0.058
 BUST_SPREAD = 0.064
-BUST_CENTER = {1: Vector((BUST_X, -0.104, BUST_Z)), -1: Vector((-BUST_X, -0.104, BUST_Z))}
+BUST_CENTER = {1: Vector((BUST_X, -0.086, BUST_Z)), -1: Vector((-BUST_X, -0.086, BUST_Z))}
 
 
 def bust_bulge(x, z):
-    """Forward push (m) of the chest surface at (x, z) from both breasts."""
+    """Forward push (m) of the chest surface at (x, z) from both breasts:
+    a long slope from the collarbones to a round underside. The profile is
+    a rounded dome rather than a bell (the bell's peak read as a point)."""
     total = 0.0
     for bx in (BUST_X, -BUST_X):
         dz = z - BUST_Z
-        sz = 0.092 if dz > 0 else 0.052  # long slope above, a firmer, rounded underside
-        total += math.exp(-(((x - bx) / BUST_SPREAD) ** 2) - (dz / sz) ** 2)
+        sz = 0.092 if dz > 0 else 0.054  # long slope above, a firmer, rounded underside
+        r2 = ((x - bx) / BUST_SPREAD) ** 2 + (dz / sz) ** 2
+        total += math.exp(-(r2 ** 1.18))
     return BUST_DEPTH * total
 
 

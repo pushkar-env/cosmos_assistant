@@ -27,6 +27,10 @@ export type MaterialSpec =
       color: string
       shade: string
       outline?: [color: string, width: number]
+      /** a face with a sculpted profile: its outline is kept off the creases
+       *  of the nose and mouth where they'd draw over her own skin (how far
+       *  the line is pushed back, × its width) — see OUTLINE_VERT */
+      crease?: number
       sphere?: number
       rim?: number
       double?: boolean
@@ -42,11 +46,16 @@ export type MaterialSpec =
        *  for curtains framing the face, which want their ink edge */
       fringeFade?: boolean
     }
-  | { kind: 'flat'; color: string; opacity?: number; overHair?: boolean }
+  /** `facing` (both decal kinds): drawn only where the surface faces the
+   *  camera — fully above facing[1] (|n·v|), gone below facing[0] — for a
+   *  mark on a surface that faces sideways, like the side of the nose */
+  | { kind: 'flat'; color: string; opacity?: number; overHair?: boolean; facing?: [number, number] }
   /** painted shading with soft edges: it fades in over `feather` of its UV
    *  square from each edge (uv.x 0, uv.x 1, uv.y 0, uv.y 1) */
-  | { kind: 'soft'; color: string; opacity?: number; feather?: [number, number, number, number] }
-  | { kind: 'eyeL' | 'eyeR' | 'mouth' | 'blush' | 'glow' }
+  | { kind: 'soft'; color: string; opacity?: number; feather?: [number, number, number, number]; facing?: [number, number] }
+  /** `line`: the closed mouth's line colour (default a soft pink) */
+  | { kind: 'mouth'; line?: string }
+  | { kind: 'eyeL' | 'eyeR' | 'blush' | 'glow' }
 
 export interface SpringChainSpec {
   /** chain bones are named `${prefix}_1`, `${prefix}_2`, … */
@@ -107,7 +116,8 @@ export interface AvatarConfig {
    *  hand "moment" (a tap, a flex…) */
   fingerLife?: number
   /** the hand her base pose rests on her body: its fingers only ever lift
-   *  (never press into what they lie on) and its wrist stays put */
+   *  (never press into what they lie on) and its wrist stays put — and when
+   *  she's up and about (the stage) it comes off and hangs free */
   restingHand?: 'left' | 'right'
   /** a morph that presses her clothes under the resting hand, faded in as
    *  the hand nears its resting spot and out as it leaves */
@@ -116,16 +126,24 @@ export interface AvatarConfig {
    *  as far as the press is in, so the breeze can't swing pressed cloth back
    *  out through her fingers */
   pressHolds?: string[]
+  /** how she moves about the stage (walking, crouching to the HUD) */
+  stage?: {
+    /** deepest crouch, 0..1 of a full squat (a short skirt: keep it shallow) */
+    crouchMax?: number
+    /** how far her knees open as she crouches (m of pole, at a full squat) */
+    kneeOut?: number
+  }
 }
 
-const SKIN_FACE = (color: string, shade: string, outline: string, width = 0.55): MaterialSpec => ({
+const SKIN_FACE = (color: string, shade: string, outline: string, width = 0.55, crease?: number): MaterialSpec => ({
   kind: 'toon',
   color,
   shade,
   sphere: 0.85,
   rim: 0.22,
   step: 0.42,
-  outline: [outline, width]
+  outline: [outline, width],
+  crease
 })
 
 const LIBRARY: Record<AvatarId, Omit<AvatarConfig, 'url'> & { url: string | undefined }> = {
@@ -173,6 +191,8 @@ const LIBRARY: Record<AvatarId, Omit<AvatarConfig, 'url'> & { url: string | unde
       { prefix: 'hair_side_R', stiffness: 1.1, drag: 0.38, gravity: 0.2, radius: 0.008, wind: 0.4 },
       { prefix: 'hair_ahoge', stiffness: 3.2, drag: 0.22, gravity: 0, radius: 0 }
     ],
+    // a short skirt: crouch shallow, knees together, and lean for the rest
+    stage: { crouchMax: 0.5, kneeOut: 0.02 },
     colliders: [
       { bone: 'head', at: [0, 1.405, -0.004], radius: 0.1 },
       { bone: 'neck', at: [0, 1.27, 0], radius: 0.038 },
@@ -204,11 +224,20 @@ const LIBRARY: Record<AvatarId, Omit<AvatarConfig, 'url'> & { url: string | unde
       // the palette is sampled from the reference: warm peach skin, pale
       // beige-blonde hair, muted forest green, slate navy
       // the face, with the bolder ink jawline of the reference
-      Skin: SKIN_FACE('#f8dfd1', '#e0a993', '#8a5444', 0.75),
+      // (her sculpted profile's creases keep their ink off her face — see crease)
+      Skin: SKIN_FACE('#f8dfd1', '#e0a993', '#8a5444', 0.75, 3),
       // a higher shading step than the face: the cleavage and the curves of
       // the chest pick up a soft shadow instead of reading flat
       'Skin:Body': { kind: 'toon', color: '#f8dfd1', shade: '#d9a08a', rim: 0.22, step: 0.56, outline: ['#9c6656', 0.7] },
       SkinLine: { kind: 'flat', color: '#c98c7c' },
+      // the ink of the ear's folds and the nostril wings' creases (the
+      // jawline's colour)
+      EarLine: { kind: 'flat', color: '#8a5444', opacity: 0.85 },
+      // the ears shade by their own shape (the face's sphere normals would
+      // flatten them into the cheek): the bowl dips into shade, the rim stays lit
+      'Skin:Ears': { kind: 'toon', color: '#f8dfd1', shade: '#dba08c', sphere: 0.25, rim: 0.18, step: 0.5, outline: ['#8a5444', 0.75] },
+      // the soft shade in the bowl of each ear
+      EarShade: { kind: 'soft', color: '#dfa592', opacity: 0.6, feather: [0.45, 0.45, 0.45, 0.45] },
       // the soft shade down the cleavage and under the kimono's edges
       SkinShade: { kind: 'flat', color: '#ecc2b1' },
       // the head's cel shadow on the neck (matches the body's shade colour)
@@ -218,7 +247,8 @@ const LIBRARY: Record<AvatarId, Omit<AvatarConfig, 'url'> & { url: string | unde
       Hair: { kind: 'hair', color: '#f0d8ae', shade: '#a9865c', outline: ['#6a5034', 0.85], tipMix: 0, fringeFade: false },
       Eye_L: { kind: 'eyeL' },
       Eye_R: { kind: 'eyeR' },
-      Mouth: { kind: 'mouth' },
+      // a firm brownish line, as the reference draws her closed mouth
+      Mouth: { kind: 'mouth', line: '#93605a' },
       Blush: { kind: 'blush' },
       Lash: { kind: 'flat', color: '#1f130d' },
       LashLower: { kind: 'flat', color: '#6b4630', opacity: 0.85 },
@@ -230,16 +260,21 @@ const LIBRARY: Record<AvatarId, Omit<AvatarConfig, 'url'> & { url: string | unde
       Brow: { kind: 'flat', color: '#9a7558', overHair: true },
       // full lips: the lower lip, the upper lip's soft bow over the line, a
       // gloss, and the soft shadow under the lower lip
-      Lips: { kind: 'flat', color: '#d9918c' },
-      LipUpper: { kind: 'soft', color: '#cf8985', opacity: 0.85, feather: [0.22, 0.22, 0.02, 0.55] },
+      // (as the reference: from a few metres her mouth reads as the line over
+      // a soft lower lip — the lips stay light, the upper one faint)
+      Lips: { kind: 'flat', color: '#dd9b91' },
+      LipUpper: { kind: 'soft', color: '#c97c7b', opacity: 0.55, feather: [0.22, 0.22, 0.02, 0.55] },
       LipLight: { kind: 'soft', color: '#f8d8d1', opacity: 0.7, feather: [0.45, 0.45, 0.45, 0.45] },
       LipShade: { kind: 'soft', color: '#c98d80', opacity: 0.45, feather: [0.35, 0.35, 0.75, 0.1] },
       Mark: { kind: 'flat', color: '#5f6cb4' },
       // the nose: a soft shadow down the bridge (fading in from the brows,
-      // uv.x top → tip), its underside, nostrils and a highlight on the tip
-      NoseShadow: { kind: 'soft', color: '#cf9583', opacity: 0.95, feather: [0.5, 0.1, 0.35, 0.35] },
-      NoseUnder: { kind: 'soft', color: '#d9a291', opacity: 0.6, feather: [0.5, 0.5, 0.5, 0.5] },
-      Nostril: { kind: 'soft', color: '#ad7868', opacity: 0.9, feather: [0.4, 0.4, 0.4, 0.4] },
+      // uv.x top → tip), its underside and a highlight on the tip
+      NoseShadow: { kind: 'soft', color: '#cfae9d', opacity: 0.92, feather: [0.45, 0.25, 0.36, 0.36] },
+      NoseUnder: { kind: 'soft', color: '#d6b2a0', opacity: 0.8, feather: [0.5, 0.5, 0.5, 0.5] },
+      Nostril: { kind: 'soft', color: '#a88370', opacity: 0.75, feather: [0.45, 0.45, 0.45, 0.45] },
+      // the nostril, as the reference draws it in profile: a short soft shade
+      // on the side of the nose, gone as she turns to face you
+      NoseLine: { kind: 'soft', color: '#b9796a', opacity: 0.85, feather: [0.3, 0.45, 0.5, 0.5], facing: [0.42, 0.72] },
       NoseLight: { kind: 'soft', color: '#fff6ef', opacity: 0.8, feather: [0.5, 0.5, 0.5, 0.5] },
       Nail: { kind: 'flat', color: '#d02a40' },
       // shaded on the underside and outer flanks of the bust (light comes from
@@ -258,8 +293,8 @@ const LIBRARY: Record<AvatarId, Omit<AvatarConfig, 'url'> & { url: string | unde
       HairTie: { kind: 'toon', color: '#9a7038', shade: '#6a4a22', outline: ['#3a2812', 0.5] }
     },
     springs: [
-      { prefix: 'hair_tail_L', stiffness: 0.8, drag: 0.32, gravity: 0.3, radius: 0.026, wind: 0.6, group: 'hair' },
-      { prefix: 'hair_tail_R', stiffness: 0.8, drag: 0.32, gravity: 0.3, radius: 0.026, wind: 0.6, group: 'hair' },
+      { prefix: 'hair_tail_L', stiffness: 0.8, drag: 0.32, gravity: 0.3, radius: 0.03, wind: 0.6, group: 'hair' },
+      { prefix: 'hair_tail_R', stiffness: 0.8, drag: 0.32, gravity: 0.3, radius: 0.03, wind: 0.6, group: 'hair' },
       { prefix: 'hair_lock_L', stiffness: 1.0, drag: 0.36, gravity: 0.25, radius: 0.012, wind: 0.35, group: 'hair' },
       { prefix: 'hair_lock_R', stiffness: 1.0, drag: 0.36, gravity: 0.25, radius: 0.012, wind: 0.35, group: 'hair' },
       // the haori's skirt swings round her, but never in through her tunic (it
@@ -275,6 +310,18 @@ const LIBRARY: Record<AvatarId, Omit<AvatarConfig, 'url'> & { url: string | unde
         group: 'cloth',
         inward: 0.01,
         outward: [0.012, 0.016, 0.02]
+      })),
+      // the tunic's skirt hangs from under the obi and her legs push it about:
+      // it drapes over a striding thigh, and over both when she crouches
+      ...['F_L', 'S_L', 'K_L', 'B_L', 'B_R', 'K_R', 'S_R', 'F_R'].map((p) => ({
+        prefix: `cloth_tunic_${p}`,
+        stiffness: 1.3,
+        drag: 0.34,
+        gravity: 0.22,
+        radius: 0.012,
+        wind: 0.4,
+        group: 'tunic',
+        inward: 0.006
       })),
       // gentle secondary motion: ~7° of sway on a hop or a quick gesture,
       // settling in under a second (tuned live in the app at 60 fps)
@@ -293,8 +340,8 @@ const LIBRARY: Record<AvatarId, Omit<AvatarConfig, 'url'> & { url: string | unde
       // shoulders, wide sleeves and the bust it drapes over
       { bone: 'upperChest', at: [0, 1.33, 0], radius: 0.108, groups: ['hair'] },
       { bone: 'chest', at: [0, 1.21, -0.005], radius: 0.108, groups: ['hair'] },
-      { bone: 'chest', at: [0.08, 1.215, 0.122], radius: 0.09, groups: ['hair'] },
-      { bone: 'chest', at: [-0.08, 1.215, 0.122], radius: 0.09, groups: ['hair'] },
+      { bone: 'chest', at: [0.08, 1.22, 0.088], radius: 0.086, groups: ['hair'] },
+      { bone: 'chest', at: [-0.08, 1.22, 0.088], radius: 0.086, groups: ['hair'] },
       { bone: 'spine', at: [0, 1.1, 0], radius: 0.118, groups: ['hair'] },
       { bone: 'hips', at: [0, 0.97, -0.01], radius: 0.142, groups: ['hair'] },
       { bone: 'leftShoulder', at: [0.12, 1.37, -0.01], radius: 0.06, groups: ['hair'] },
@@ -318,7 +365,18 @@ const LIBRARY: Record<AvatarId, Omit<AvatarConfig, 'url'> & { url: string | unde
       { bone: 'leftLowerLeg', at: [0.083, 0.5, 0], radius: 0.065, groups: ['cloth'] },
       { bone: 'rightLowerLeg', at: [-0.083, 0.5, 0], radius: 0.065, groups: ['cloth'] },
       { bone: 'leftLowerLeg', at: [0.08, 0.34, 0], radius: 0.055, groups: ['cloth'] },
-      { bone: 'rightLowerLeg', at: [-0.08, 0.34, 0], radius: 0.055, groups: ['cloth'] }
+      { bone: 'rightLowerLeg', at: [-0.08, 0.34, 0], radius: 0.055, groups: ['cloth'] },
+      // the tunic's skirt rests on her thighs (and knees, when she crouches):
+      // clear of it while she stands, pushing it once a leg swings forward
+      ...([1, -1] as const).flatMap((s) => {
+        const bone = s > 0 ? 'leftUpperLeg' : 'rightUpperLeg'
+        return [
+          { bone, at: [s * 0.09, 0.84, 0] as [number, number, number], radius: 0.078, groups: ['tunic'] },
+          { bone, at: [s * 0.088, 0.73, 0] as [number, number, number], radius: 0.072, groups: ['tunic'] },
+          { bone, at: [s * 0.086, 0.63, 0] as [number, number, number], radius: 0.064, groups: ['tunic'] },
+          { bone: s > 0 ? 'leftLowerLeg' : 'rightLowerLeg', at: [s * 0.084, 0.535, 0.01] as [number, number, number], radius: 0.058, groups: ['tunic'] }
+        ]
+      })
     ]
   }
 }

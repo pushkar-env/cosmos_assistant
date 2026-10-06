@@ -7,6 +7,7 @@ import { useUIStore } from '@/core/stores/useUIStore'
 import { useVoiceStore } from '@/features/voice/useVoiceStore'
 import { useNotificationStore } from '@/core/stores/useNotificationStore'
 import { MicButton } from '@/features/voice/MicButton'
+import { widgets } from '@/features/avatar/stage/widgets'
 import { ToolCard } from './ToolCard'
 import { ApprovalCard } from './ApprovalCard'
 import { SessionList } from './SessionList'
@@ -39,6 +40,7 @@ export function ChatPanel(): React.JSX.Element {
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const newRef = useRef<HTMLButtonElement>(null)
   /** stay pinned to the bottom only while the user hasn't scrolled up */
   const stickToBottom = useRef(true)
   const notify = useNotificationStore((s) => s.push)
@@ -49,6 +51,17 @@ export function ChatPanel(): React.JSX.Element {
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
     stickToBottom.current = distanceFromBottom < 60
   }
+
+  // the avatar can walk over and press "New" herself
+  useEffect(() => {
+    if (!newRef.current) return
+    return widgets.register({
+      id: 'chat-new',
+      kind: 'button',
+      el: newRef.current,
+      press: () => useAssistantStore.getState().clear()
+    })
+  }, [])
 
   useEffect(() => {
     const el = scrollRef.current
@@ -148,10 +161,11 @@ export function ChatPanel(): React.JSX.Element {
             <span className="ml-auto shrink-0 text-[9px]">▾</span>
           </button>
           <button
+            ref={newRef}
             onClick={clear}
             disabled={messages.length === 0}
             title="New chat"
-            className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 font-ui text-xs font-semibold uppercase tracking-widest text-dim transition-colors hover:bg-white/5 hover:text-body disabled:pointer-events-none disabled:opacity-30"
+            className="stage-press flex shrink-0 items-center gap-1 rounded-md px-2 py-1 font-ui text-xs font-semibold uppercase tracking-widest text-dim transition-colors hover:bg-white/5 hover:text-body disabled:pointer-events-none disabled:opacity-30"
           >
             <span className="text-sm leading-none">+</span> New
           </button>

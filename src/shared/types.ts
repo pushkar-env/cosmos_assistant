@@ -296,6 +296,8 @@ export interface Settings {
   coreVisual: CoreVisual
   /** which avatar, when coreVisual is 'avatar' */
   avatarId: AvatarId
+  /** left alone for a while, the avatar wanders over and plays with the HUD */
+  avatarPlay: boolean
   userName: string
   location: { lat: number | null; lon: number | null; label: string }
   voice: VoiceSettings
@@ -507,6 +509,7 @@ export const DEFAULT_SETTINGS: Settings = {
   soundEnabled: true,
   coreVisual: 'avatar',
   avatarId: 'tsunade',
+  avatarPlay: true,
   userName: '',
   location: { lat: null, lon: null, label: '' },
   voice: DEFAULT_VOICE_SETTINGS,

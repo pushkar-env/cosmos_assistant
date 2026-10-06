@@ -157,8 +157,8 @@ def taper(w0, w_mid, peak=0.35, tip_pow=1.0):
 def build_cap(head_ob, mat, center, hairline, volume, name="HairCap", snap_edge=False):
     """Hair volume over the skull: the head mesh above ``hairline(az)``,
     pushed out by ``volume(rel)`` and tapered to nothing at the hairline so
-    the cap meets the skin. ``snap_edge`` moves the cut's boundary onto the
-    hairline curve itself (otherwise it steps along the head mesh's rows)."""
+    the cap meets the skin. ``snap_edge`` cuts the mesh exactly along the
+    hairline curve (otherwise the edge steps along the head mesh's rows)."""
     center = Vector(center)
     me = head_ob.data.copy()
     me.name = name
@@ -168,21 +168,71 @@ def build_cap(head_ob, mat, center, hairline, volume, name="HairCap", snap_edge=
         ob.shape_key_clear()
     bm = bmesh.new()
     bm.from_mesh(me)
-    kill = []
-    for v in bm.verts:
-        rel = v.co - center
-        az = abs(math.degrees(math.atan2(rel.x, -rel.y)))
-        if rel.z < hairline(az):
-            kill.append(v)
-    bmesh.ops.delete(bm, geom=kill, context="VERTS")
+
+    def above(co):
+        rel = co - center
+        return rel.z - hairline(abs(math.degrees(math.atan2(rel.x, -rel.y))))
+
     if snap_edge:
-        for v in [v for v in bm.verts if any(e.is_boundary for e in v.link_edges)]:
-            rel = v.co - center
-            v.co.z = center.z + hairline(abs(math.degrees(math.atan2(rel.x, -rel.y))))
+        # a level-set cut: every edge the hairline crosses is split where it
+        # crosses, each face is split between its two new vertices, and what
+        # lies below goes — the edge runs along the curve itself, however
+        # steeply it climbs (snapping the vertices of a row/column staircase
+        # onto a steep stretch, behind an ear, folded the faces into teeth)
+        f = {v: above(v.co) for v in bm.verts}
+        on = set()
+        for e in list(bm.edges):
+            a, b = e.verts
+            fa, fb = f[a], f[b]
+            if (fa < 0) == (fb < 0) or abs(fa - fb) < 1e-12:
+                continue
+            t = fa / (fa - fb)
+            if t <= 1e-4 or t >= 1 - 1e-4:
+                continue
+            pa, pb = a.co.copy(), b.co.copy()
+            _e, nv = bmesh.utils.edge_split(e, a, t)
+            nv.co = pa.lerp(pb, t)
+            # (pulled onto the curve exactly, at its own height)
+            rel = nv.co - center
+            nv.co.z = center.z + hairline(abs(math.degrees(math.atan2(rel.x, -rel.y))))
+            f[nv] = 0.0
+            on.add(nv)
+        for face in list(bm.faces):
+            vs = [v for v in face.verts if v in on]
+            if len(vs) != 2:
+                continue
+            v1, v2 = vs
+            if any(v2 in (e.other_vert(v1),) for e in v1.link_edges):
+                continue
+            try:
+                bmesh.utils.face_split(face, v1, v2)
+            except ValueError:
+                pass
+        kill = [v for v in bm.verts if f.get(v, 0.0) < -1e-9]
+    else:
+        kill = [v for v in bm.verts if above(v.co) < 0]
+    bmesh.ops.delete(bm, geom=kill, context="VERTS")
+
+    def edge_distance(rel):
+        """how far a cap point lies above the hairline, measured round the
+        head and up (a plain height difference overstates it wherever the
+        hairline runs steeply — the volume would jump up beside the edge)"""
+        r = math.hypot(rel.x, rel.y)
+        az0 = abs(math.degrees(math.atan2(rel.x, -rel.y)))
+        best = rel.z - hairline(az0)
+        if not snap_edge:
+            return best
+        for k in range(-48, 49, 2):
+            az = min(180.0, max(0.0, az0 + k * 0.25))
+            dz = rel.z - hairline(az)
+            d = math.hypot(math.radians(az - az0) * r, dz)
+            if d < abs(best):
+                best = d if dz >= 0 else -d
+        return best
+
     for v in bm.verts:
         rel = v.co - center
-        az = abs(math.degrees(math.atan2(rel.x, -rel.y)))
-        vol = volume(rel) * smoothstep(0.0, 0.022, rel.z - hairline(az))
+        vol = volume(rel) * smoothstep(0.0, 0.022, edge_distance(rel))
         v.co = v.co + rel.normalized() * (vol + 0.0006)
     bm.to_mesh(me)
     bm.free()

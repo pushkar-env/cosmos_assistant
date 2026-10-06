@@ -97,6 +97,17 @@ export function prepareAvatar(gltf: GLTF, cfg: AvatarConfig): AvatarRig {
     if ((o as THREE.Mesh).isMesh) meshes.push(o as THREE.SkinnedMesh)
   })
 
+  // which skin joints are her hands (the stage keeps them in front of a card
+  // she holds — see shared.uCut)
+  const skinned = meshes.find((m) => m.isSkinnedMesh)
+  if (skinned) {
+    const flags = shared.uHandBones.value
+    flags.forEach((v) => v.set(0, 0, 0, 0))
+    skinned.skeleton.bones.forEach((b, i) => {
+      if (i < flags.length * 4 && /(Hand|Thumb|Index|Middle|Ring|Little)/.test(b.name)) flags[i >> 2].setComponent(i & 3, 1)
+    })
+  }
+
   for (const mesh of meshes) {
     const old = mesh.material as THREE.Material
     // `Material:Mesh` overrides a plain material entry (e.g. face vs body skin)
@@ -127,10 +138,10 @@ export function prepareAvatar(gltf: GLTF, cfg: AvatarConfig): AvatarRig {
         })
         break
       case 'flat':
-        mat = flatMaterial(spec.color, spec.opacity ?? 1, spec.overHair)
+        mat = flatMaterial(spec.color, spec.opacity ?? 1, spec.overHair, spec.facing)
         break
       case 'soft':
-        mat = softMaterial(spec.color, spec.opacity ?? 1, spec.feather ?? [0.3, 0.3, 0.3, 0.3])
+        mat = softMaterial(spec.color, spec.opacity ?? 1, spec.feather ?? [0.3, 0.3, 0.3, 0.3], spec.facing)
         break
       case 'eyeL':
         mat = found.eyeL = eyeMaterial(new THREE.Vector2(...cfg.eyes.centerL), 0.3, irisR.clone(), iris)
@@ -139,7 +150,7 @@ export function prepareAvatar(gltf: GLTF, cfg: AvatarConfig): AvatarRig {
         mat = found.eyeR = eyeMaterial(new THREE.Vector2(...cfg.eyes.centerR), 1.7, irisR.clone(), iris)
         break
       case 'mouth':
-        mat = found.mouth = mouthMaterial()
+        mat = found.mouth = mouthMaterial(spec.line)
         break
       case 'blush':
         mat = found.blush = blushMaterial()
@@ -162,7 +173,8 @@ export function prepareAvatar(gltf: GLTF, cfg: AvatarConfig): AvatarRig {
     if (outline && mesh.isSkinnedMesh) {
       const hair = spec.kind === 'hair'
       const fringe = hair && spec.fringeFade !== false ? 1 : 0
-      const o = new THREE.SkinnedMesh(mesh.geometry, outlineMaterial(outline[0], outline[1], hair ? 1 : 0, fringe))
+      const crease = spec.kind === 'toon' ? (spec.crease ?? 0) : 0
+      const o = new THREE.SkinnedMesh(mesh.geometry, outlineMaterial(outline[0], outline[1], hair ? 1 : 0, fringe, crease))
       o.name = mesh.name + '_outline'
       // the line follows the mesh's blendshapes (a mouth opening, cloth
       // pressed under a hand): one weights array for both

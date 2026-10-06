@@ -11,6 +11,7 @@ import { AgentRing } from '@/features/agents/AgentRing'
 import { sound } from '@/core/sound/SoundEngine'
 import { BootSequence } from '@/features/boot/BootSequence'
 import { CoreStage } from '@/features/avatar/CoreStage'
+import { useStageStore } from '@/features/avatar/stage/bridge'
 import { HudLayer } from '@/features/hud/HudLayer'
 import { StatusBar } from '@/features/hud/StatusBar'
 import { ChatPanel } from '@/features/chat/ChatPanel'
@@ -36,6 +37,7 @@ export default function App(): React.JSX.Element {
   const mode = useUIStore((s) => s.mode)
   const windowVisible = useUIStore((s) => s.windowVisible)
   const togglePalette = useUIStore((s) => s.togglePalette)
+  const acting = useStageStore((s) => s.acting)
 
   useEffect(() => {
     void useSettingsStore
@@ -136,8 +138,10 @@ export default function App(): React.JSX.Element {
           />
           <div className="orb-aura pointer-events-none absolute left-1/2 top-1/2 h-[520px] w-[520px] -translate-x-1/2 -translate-y-1/2 rounded-full" />
 
-          {/* the AI core — Nova (avatar) or the orb, per Settings */}
-          <div className="absolute inset-0">
+          {/* the AI core — the avatar or the orb, per Settings. While the
+              avatar is up and about (playing with the HUD, pressing New) her
+              stage sits above the HUD and chat so her hands are on them */}
+          <div className={`absolute inset-0${acting ? ' pointer-events-none z-[25]' : ''}`}>
             <CoreStage />
           </div>
 

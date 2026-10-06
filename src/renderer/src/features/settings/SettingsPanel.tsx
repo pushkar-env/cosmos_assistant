@@ -790,7 +790,7 @@ export function SettingsPanel(): React.JSX.Element {
         label: 'Assistant Presence',
         group: 'personal',
         hint: 'A 3D anime avatar — or the classic AI core orb',
-        keywords: 'avatar nova tsunade anime girl character orb core visual 3d model presence',
+        keywords: 'avatar nova tsunade anime girl character orb core visual 3d model presence play idle playful widgets',
         render: () => {
           const options = [
             ...AVATAR_IDS.map((id) => ({
@@ -802,20 +802,31 @@ export function SettingsPanel(): React.JSX.Element {
             { key: 'orb', label: 'Core Orb', active: settings.coreVisual === 'orb', patch: { coreVisual: 'orb' } as Partial<Settings> }
           ]
           return (
-            <div className="flex flex-wrap gap-2">
-              {options.map((o) => (
-                <button
-                  key={o.key}
-                  onClick={() => void update(o.patch)}
-                  className={`rounded-lg border px-4 py-2 font-ui text-xs font-bold uppercase tracking-widest transition-colors ${
-                    o.active
-                      ? 'border-[var(--accent-dim)] bg-white/5 text-[var(--accent-bright)]'
-                      : 'border-white/10 text-dim hover:text-body'
-                  }`}
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-wrap gap-2">
+                {options.map((o) => (
+                  <button
+                    key={o.key}
+                    onClick={() => void update(o.patch)}
+                    className={`rounded-lg border px-4 py-2 font-ui text-xs font-bold uppercase tracking-widest transition-colors ${
+                      o.active
+                        ? 'border-[var(--accent-dim)] bg-white/5 text-[var(--accent-bright)]'
+                        : 'border-white/10 text-dim hover:text-body'
+                    }`}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+              {settings.coreVisual === 'avatar' && (
+                <div
+                  className="flex items-center justify-end gap-3"
+                  title="Left alone for a while, she wanders over and plays with the HUD cards"
                 >
-                  {o.label}
-                </button>
-              ))}
+                  <span className="font-ui text-xs text-dim">Plays with the HUD when idle</span>
+                  {toggle(settings.avatarPlay, (v) => void update({ avatarPlay: v }))}
+                </div>
+              )}
             </div>
           )
         }
