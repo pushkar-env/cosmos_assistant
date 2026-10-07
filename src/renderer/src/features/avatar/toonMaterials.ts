@@ -13,6 +13,8 @@ import * as THREE from 'three'
 
 /** how many HUD cards the shaders can cut her out behind (the HUD has seven) */
 export const CUT_SLOTS = 8
+/** how many tubes draped cloth can be kept out of (two down each thigh) */
+export const DRAPE_SLOTS = 4
 
 export const shared = {
   uLightDir: { value: new THREE.Vector3(0.35, 0.55, 0.75).normalize() },
@@ -43,8 +45,74 @@ export const shared = {
   uCut: { value: Array.from({ length: CUT_SLOTS }, () => new THREE.Vector4()) },
   uCutShape: { value: Array.from({ length: CUT_SLOTS }, () => new THREE.Vector4()) },
   /** per skin joint (packed 4 to a vec4): 1 for her hands and fingers */
-  uHandBones: { value: Array.from({ length: 32 }, () => new THREE.Vector4()) }
+  uHandBones: { value: Array.from({ length: 32 }, () => new THREE.Vector4()) },
+  /** the tubes round her thighs that draped cloth (a skirt) is laid over:
+   *  each from A to B in world space, its radius there in w (A.w < 0: unused).
+   *  Updated every frame from her leg bones (see AvatarConfig.drape) */
+  uDrapeA: { value: Array.from({ length: DRAPE_SLOTS }, () => new THREE.Vector4(0, 0, 0, -1)) },
+  uDrapeB: { value: Array.from({ length: DRAPE_SLOTS }, () => new THREE.Vector4(0, 0, 0, -1)) }
 }
+
+/*
+ * Cloth draped over her legs. A skirt hangs from a handful of spring chains,
+ * and between two of them the cloth runs straight: when a crouch or a stride
+ * brings a thigh up under it, the springs keep the chains (and the straight
+ * runs between them) off the thigh, but the round of the thigh still pokes a
+ * few millimetres through here and there. So after skinning, a vertex inside
+ * one of the leg tubes is moved straight out of it to lie on top, `uDrape`
+ * clear (the cloth's thickness over the trousers), its normal turning toward
+ * the tube's as it does — the cloth shades like the leg it lies on. Off (and
+ * the cloth exactly as skinned) wherever it hangs clear of her legs: all of
+ * it while she stands.
+ */
+const DRAPE_PARS = /* glsl */ `
+  #ifdef DRAPE
+    uniform vec4 uDrapeA[${DRAPE_SLOTS}];
+    uniform vec4 uDrapeB[${DRAPE_SLOTS}];
+    uniform float uDrape;
+    // pos and nrm in the mesh's space; modelMatrix is rigid (her root)
+    void drape(inout vec3 pos, inout vec3 nrm) {
+      vec3 wp = (modelMatrix * vec4(pos, 1.0)).xyz;
+      vec3 move = vec3(0.0);
+      vec3 away = vec3(0.0);
+      float bend = 0.0;
+      for (int i = 0; i < ${DRAPE_SLOTS}; i++) {
+        vec4 a = uDrapeA[i];
+        if (a.w < 0.0) continue;
+        vec4 b = uDrapeB[i];
+        vec3 ab = b.xyz - a.xyz;
+        float len = max(length(ab), 1e-5);
+        vec3 p = wp + move;
+        float s = dot(p - a.xyz, ab) / len;
+        float t = clamp(s / len, 0.0, 1.0);
+        vec3 d = p - (a.xyz + ab * t);
+        float dist = length(d);
+        // open at A: above her hip joint the skirt narrows to her waist
+        float depth = (mix(a.w, b.w, t) + uDrape - dist) * smoothstep(-0.03, 0.0, s);
+        if (depth > 0.0 && dist > 1e-5) {
+          vec3 dir = d / dist;
+          move += dir * depth;
+          float k = smoothstep(0.0, 0.006, depth);
+          if (k > bend) {
+            bend = k;
+            away = dir;
+          }
+        }
+      }
+      mat3 back = transpose(mat3(modelMatrix));
+      pos += back * move;
+      if (bend > 0.0) nrm = normalize(mix(nrm, back * away, bend));
+    }
+  #endif
+`
+
+const drapeUniforms = (clearance: number | undefined): Record<string, THREE.IUniform> =>
+  clearance === undefined
+    ? {}
+    : { uDrape: { value: clearance }, uDrapeA: shared.uDrapeA, uDrapeB: shared.uDrapeB }
+
+const drapeDefines = (clearance: number | undefined): Record<string, string> =>
+  clearance === undefined ? {} : { DRAPE: '' }
 
 /** the card cut-outs (see shared.uCut) — for any fragment shader */
 export const STAGE_CUT = /* glsl */ `
@@ -153,6 +221,7 @@ const VERT_COMMON = /* glsl */ `
   #include <morphtarget_pars_vertex>
   #include <skinning_pars_vertex>
   ${HAND_PARS}
+  ${DRAPE_PARS}
   varying vec3 vNormalV;
   varying vec3 vViewPos;
   varying vec3 vWorldPos;
@@ -174,6 +243,13 @@ const VERT_BODY = /* glsl */ `
   #include <morphtarget_vertex>
   vObjPos = transformed;
   #include <skinning_vertex>
+  #ifdef DRAPE
+    drape(transformed, objectNormal);
+    transformedNormal = normalMatrix * objectNormal;
+    #ifdef FLIP_SIDED
+      transformedNormal = -transformedNormal;
+    #endif
+  #endif
   #include <project_vertex>
   vNormalV = normalize(transformedNormal);
   vViewPos = -mvPosition.xyz;
@@ -280,13 +356,17 @@ export interface ToonOptions {
   tipMix?: number
   doubleSided?: boolean
   transparent?: boolean
+  /** cloth draped over her legs: how far (m) it's kept outside them */
+  drape?: number
 }
 
 export function toonMaterial(o: ToonOptions): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     vertexShader: TOON_VERT,
     fragmentShader: TOON_FRAG,
+    defines: drapeDefines(o.drape),
     uniforms: {
+      ...drapeUniforms(o.drape),
       uColor: { value: new THREE.Color(o.color) },
       uShade: { value: new THREE.Color(o.shade) },
       uStep: { value: o.step ?? 0.5 },
@@ -342,13 +422,16 @@ export function flatMaterial(
   color: string,
   opacity = 1,
   overHair = false,
-  facing?: [number, number]
+  facing?: [number, number],
+  drape?: number
 ): THREE.ShaderMaterial {
   const fades = opacity < 1 || !!facing
   const m = new THREE.ShaderMaterial({
     vertexShader: TOON_VERT,
     fragmentShader: FLAT_FRAG,
+    defines: drapeDefines(drape),
     uniforms: {
+      ...drapeUniforms(drape),
       uColor: { value: new THREE.Color(color) },
       uOpacity: { value: opacity },
       uFacing: { value: new THREE.Vector2(...(facing ?? [0, 0])) },
@@ -653,6 +736,7 @@ const OUTLINE_VERT = /* glsl */ `
   varying vec3 vRest;
   varying float vCutZ;
   ${HAND_PARS}
+  ${DRAPE_PARS}
   void main() {
     ${HAND_VERT}
     #include <morphinstance_vertex>
@@ -665,6 +749,10 @@ const OUTLINE_VERT = /* glsl */ `
     vec3 restPos = transformed;
     vRest = restPos;
     #include <skinning_vertex>
+    #ifdef DRAPE
+      // the line wraps the cloth where it lies over a leg
+      drape(transformed, objectNormal);
+    #endif
     #include <project_vertex>
     vCutZ = (modelMatrix * vec4(transformed, 1.0)).z;
     // push the back faces out along the view-space normal, scaled with depth
@@ -711,18 +799,22 @@ const OUTLINE_FRAG = /* glsl */ `
   }
 `
 
-/** ``fringe``: fade the line where bangs lie over the face (see the shader) */
+/** ``fringe``: fade the line where bangs lie over the face (see the shader);
+ *  ``drape``: the line of cloth draped over her legs (see toonMaterial) */
 export function outlineMaterial(
   color: string,
   width: number,
   tipTaper = 0,
   fringe = tipTaper,
-  crease = 0
+  crease = 0,
+  drape?: number
 ): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     vertexShader: OUTLINE_VERT,
     fragmentShader: OUTLINE_FRAG,
+    defines: drapeDefines(drape),
     uniforms: {
+      ...drapeUniforms(drape),
       uColor: { value: new THREE.Color(color) },
       uWidth: { value: width },
       uTipTaper: { value: tipTaper },

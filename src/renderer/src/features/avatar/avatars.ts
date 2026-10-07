@@ -35,6 +35,9 @@ export type MaterialSpec =
       rim?: number
       double?: boolean
       step?: number
+      /** cloth that drapes over her legs: kept this far (m) outside the
+       *  avatar's `drape` tubes (see AvatarConfig.drape) */
+      drape?: number
     }
   | {
       kind: 'hair'
@@ -48,8 +51,9 @@ export type MaterialSpec =
     }
   /** `facing` (both decal kinds): drawn only where the surface faces the
    *  camera — fully above facing[1] (|n·v|), gone below facing[0] — for a
-   *  mark on a surface that faces sideways, like the side of the nose */
-  | { kind: 'flat'; color: string; opacity?: number; overHair?: boolean; facing?: [number, number] }
+   *  mark on a surface that faces sideways, like the side of the nose.
+   *  `drape` (flat): a line on draped cloth, kept as far out as it (see toon) */
+  | { kind: 'flat'; color: string; opacity?: number; overHair?: boolean; facing?: [number, number]; drape?: number }
   /** painted shading with soft edges: it fades in over `feather` of its UV
    *  square from each edge (uv.x 0, uv.x 1, uv.y 0, uv.y 1) */
   | { kind: 'soft'; color: string; opacity?: number; feather?: [number, number, number, number]; facing?: [number, number] }
@@ -75,6 +79,15 @@ export interface SpringChainSpec {
   /** …and per joint, root first, never more than this further out (joints
    *  past the list swing out freely — see SpringSettings.outward) */
   outward?: number[]
+  /** cloth lying over a limb that swings up under it (a skirt over a thigh):
+   *  the chain's root turns with the limb — `weight` of its swing, faded in
+   *  from `from` to `to` degrees of it (default 20 → 60), forward only (see
+   *  SpringFollow) */
+  follow?: { bone: string; weight: number; from?: number; to?: number }[]
+  /** chains hung side by side round her (a skirt): those sharing a `name`,
+   *  in list order and closed, keep the cloth between them out of the
+   *  colliders too, from joint `from` down (see SpringSettings.ring) */
+  ring?: { name: string; from: number }
 }
 
 export interface ColliderSpec {
@@ -82,8 +95,22 @@ export interface ColliderSpec {
   /** rest-pose world position of the sphere centre */
   at: [number, number, number]
   radius: number
+  /** a capsule instead: the rest-pose world position of its other end and
+   *  its radius there (it tapers from `radius`) */
+  to?: [number, number, number]
+  toRadius?: number
   /** spring groups this collider affects; omitted = all of them */
   groups?: string[]
+}
+
+/** a tube riding on a bone that draped cloth is kept out of: rest-pose world
+ *  ends and the radius at each (m). Open at `from` (a thigh's tube starts at
+ *  the hip, where the skirt above it hangs from her waist), rounded at `to`. */
+export interface DrapeTube {
+  bone: string
+  from: [number, number, number]
+  to: [number, number, number]
+  radius: [number, number]
 }
 
 export interface AvatarConfig {
@@ -109,6 +136,10 @@ export interface AvatarConfig {
   materials: Record<string, MaterialSpec>
   springs: SpringChainSpec[]
   colliders: ColliderSpec[]
+  /** her legs as the cloth draped over them sees them (materials with a
+   *  `drape`): wherever a crouch or a stride brings a thigh up through that
+   *  cloth, the shader lays it over the thigh instead (see DrapeTube) */
+  drape?: DrapeTube[]
   /** a tiny breath-synced lift layered on top of the spring sim (degrees) */
   breath?: { bones: string[]; degrees: number; period: number }
   /** living hands: each finger drifts this many degrees on its own slow
@@ -285,9 +316,11 @@ const LIBRARY: Record<AvatarId, Omit<AvatarConfig, 'url'> & { url: string | unde
       NoseLight: { kind: 'soft', color: '#fff6ef', opacity: 0.8, feather: [0.5, 0.5, 0.5, 0.5] },
       Nail: { kind: 'flat', color: '#d02a40' },
       // shaded on the underside and outer flanks of the bust (light comes from
-      // above-right), which is what makes the figure read from the front
-      Kimono: { kind: 'toon', color: '#c6beb8', shade: '#8a817d', double: true, rim: 0.2, step: 0.66, outline: ['#3a3434', 0.8] },
-      Piping: { kind: 'flat', color: '#221e1f' },
+      // above-right), which is what makes the figure read from the front.
+      // Its skirt drapes over her thighs (see drape), the line down its
+      // overlap a little further out than the cloth under it
+      Kimono: { kind: 'toon', color: '#c6beb8', shade: '#8a817d', double: true, rim: 0.2, step: 0.66, outline: ['#3a3434', 0.8], drape: 0.004 },
+      Piping: { kind: 'flat', color: '#221e1f', drape: 0.0055 },
       // the cel shadow under each breast + the ink line along its curve
       KimonoShadow: { kind: 'flat', color: '#8a817d' },
       KimonoFold: { kind: 'flat', color: '#463e3c' },
@@ -319,17 +352,26 @@ const LIBRARY: Record<AvatarId, Omit<AvatarConfig, 'url'> & { url: string | unde
         outward: [0.012, 0.016, 0.02]
       })),
       // the tunic's skirt hangs from under the obi and her legs push it about:
-      // it drapes over a striding thigh, and over both when she crouches
-      ...['F_L', 'S_L', 'K_L', 'B_L', 'B_R', 'K_R', 'S_R', 'F_R'].map((p) => ({
-        prefix: `cloth_tunic_${p}`,
-        stiffness: 1.3,
-        drag: 0.34,
-        gravity: 0.22,
-        radius: 0.012,
-        wind: 0.4,
-        group: 'tunic',
-        inward: 0.006
-      })),
+      // it drapes over a striding thigh, and over both when she crouches —
+      // its front lies on them (a little short of their swing, so it rests
+      // on top rather than floating over them), its sides fall half way.
+      // Round the ring (in this order) the cloth between the chains is kept
+      // off her thighs too, below the first joint (by her hips it hugs them)
+      ...['F_L', 'S_L', 'K_L', 'B_L', 'B_R', 'K_R', 'S_R', 'F_R'].map((p) => {
+        const lies = p[0] === 'F' ? 0.9 : p[0] === 'S' ? 0.45 : 0
+        return {
+          prefix: `cloth_tunic_${p}`,
+          stiffness: 1.3,
+          drag: 0.34,
+          gravity: 0.22,
+          radius: 0.012,
+          wind: 0.4,
+          group: 'tunic',
+          inward: 0.006,
+          follow: lies ? [{ bone: p.endsWith('L') ? 'leftUpperLeg' : 'rightUpperLeg', weight: lies }] : undefined,
+          ring: { name: 'tunic', from: 1 }
+        }
+      }),
       // gentle secondary motion: ~7° of sway on a hop or a quick gesture,
       // settling in under a second (tuned live in the app at 60 fps)
       { prefix: 'bust_L', stiffness: 0.5, drag: 0.1, gravity: 0, radius: 0, group: 'bust' },
@@ -382,19 +424,40 @@ const LIBRARY: Record<AvatarId, Omit<AvatarConfig, 'url'> & { url: string | unde
       { bone: 'rightLowerLeg', at: [-0.083, 0.5, 0], radius: 0.065, groups: ['cloth'] },
       { bone: 'leftLowerLeg', at: [0.08, 0.34, 0], radius: 0.055, groups: ['cloth'] },
       { bone: 'rightLowerLeg', at: [-0.08, 0.34, 0], radius: 0.055, groups: ['cloth'] },
-      // the tunic's skirt rests on her thighs (and knees, when she crouches):
-      // clear of it while she stands, pushing it once a leg swings forward
-      ...([1, -1] as const).flatMap((s) => {
-        const bone = s > 0 ? 'leftUpperLeg' : 'rightUpperLeg'
-        return [
-          { bone, at: [s * 0.09, 0.84, 0] as [number, number, number], radius: 0.078, groups: ['tunic'] },
-          { bone, at: [s * 0.088, 0.73, 0] as [number, number, number], radius: 0.072, groups: ['tunic'] },
-          { bone, at: [s * 0.086, 0.63, 0] as [number, number, number], radius: 0.064, groups: ['tunic'] },
-          { bone: s > 0 ? 'leftLowerLeg' : 'rightLowerLeg', at: [s * 0.084, 0.535, 0.01] as [number, number, number], radius: 0.058, groups: ['tunic'] }
-        ]
-      })
-    ]
+      // the tunic's skirt rests on her thighs (when she strides or crouches):
+      // two capsules down each, hip → mid-thigh → knee, holding its joints
+      // ~3 mm off her trousers (her thighs, less the chains' own radius)
+      ...([1, -1] as const).flatMap((s) =>
+        thighTubes(s).map((t) => ({
+          bone: t.bone,
+          at: t.from,
+          to: t.to,
+          radius: t.radius[0] - 0.009,
+          toRadius: t.radius[1] - 0.009,
+          groups: ['tunic']
+        }))
+      )
+    ],
+    // where a thigh still pokes through the skirt between those joints, the
+    // shader lays the cloth over it (see toonMaterials, drape)
+    drape: [...thighTubes(1), ...thighTubes(-1)]
   }
+}
+
+/** Tsunade's thighs, hip → mid-thigh → knee (rest-pose world points of her
+ *  leg joints), as thick as her trousers there (measured off the Pants mesh:
+ *  76 mm at the hip, 67 mid-thigh, 53 at the knee; a tube's radius runs
+ *  straight from end to end, so mid-thigh is set a little over to cover the
+ *  trousers' fuller curve either side of it) */
+function thighTubes(s: 1 | -1): DrapeTube[] {
+  const bone = s > 0 ? 'leftUpperLeg' : 'rightUpperLeg'
+  const hip: [number, number, number] = [s * 0.092, 0.955, 0]
+  const mid: [number, number, number] = [s * 0.0875, 0.7415, 0.0025]
+  const knee: [number, number, number] = [s * 0.083, 0.528, 0.005]
+  return [
+    { bone, from: hip, to: mid, radius: [0.077, 0.069] },
+    { bone, from: mid, to: knee, radius: [0.069, 0.053] }
+  ]
 }
 
 /** the avatars whose model is actually bundled */

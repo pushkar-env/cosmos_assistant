@@ -122,7 +122,8 @@ export function prepareAvatar(gltf: GLTF, cfg: AvatarConfig): AvatarRig {
           sphere: spec.sphere,
           rim: spec.rim,
           doubleSided: spec.double,
-          step: spec.step
+          step: spec.step,
+          drape: spec.drape
         })
         break
       case 'hair':
@@ -138,7 +139,7 @@ export function prepareAvatar(gltf: GLTF, cfg: AvatarConfig): AvatarRig {
         })
         break
       case 'flat':
-        mat = flatMaterial(spec.color, spec.opacity ?? 1, spec.overHair, spec.facing)
+        mat = flatMaterial(spec.color, spec.opacity ?? 1, spec.overHair, spec.facing, spec.drape)
         break
       case 'soft':
         mat = softMaterial(spec.color, spec.opacity ?? 1, spec.feather ?? [0.3, 0.3, 0.3, 0.3], spec.facing)
@@ -174,7 +175,8 @@ export function prepareAvatar(gltf: GLTF, cfg: AvatarConfig): AvatarRig {
       const hair = spec.kind === 'hair'
       const fringe = hair && spec.fringeFade !== false ? 1 : 0
       const crease = spec.kind === 'toon' ? (spec.crease ?? 0) : 0
-      const o = new THREE.SkinnedMesh(mesh.geometry, outlineMaterial(outline[0], outline[1], hair ? 1 : 0, fringe, crease))
+      const drape = spec.kind === 'toon' ? spec.drape : undefined
+      const o = new THREE.SkinnedMesh(mesh.geometry, outlineMaterial(outline[0], outline[1], hair ? 1 : 0, fringe, crease, drape))
       o.name = mesh.name + '_outline'
       // the line follows the mesh's blendshapes (a mouth opening, cloth
       // pressed under a hand): one weights array for both

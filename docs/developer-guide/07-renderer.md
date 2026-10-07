@@ -199,7 +199,13 @@ The default centrepiece: an anime girl who reacts to the conversation. The model
   ride along when she bows or crouches; the outline's fringe fade uses rest
   positions and each model's own head height (`uHeadShift`, set on load).
   Every material also carries the stage's teleport dissolve (`uDissolve`) and
-  card cut-outs (`uCut`) — see *Her stage* below.
+  card cut-outs (`uCut`) — see *Her stage* below. Cloth that drapes over her
+  legs (a material's `drape`: Tsunade's kimono, its piping and their outline)
+  is kept outside the avatar's `drape` tubes, hip → mid-thigh → knee, as thick
+  as her trousers and moved with her leg bones every frame. After skinning, a
+  vertex inside a tube moves straight out onto it, its normal turning toward
+  the tube's, so wherever a raised thigh would come through the skirt the
+  cloth lies over it instead. While she stands nothing is moved.
 - [`lipsync.ts`](../../src/renderer/src/features/avatar/lipsync.ts) — vowel shapes
   (A/I/U/E/O) from the TTS loudness + four formant bands that `SpeechPlayer`
   writes to `voiceSignal.bands`; a synthetic chatter when replies are text-only.
@@ -207,14 +213,19 @@ The default centrepiece: an anime girl who reacts to the conversation. The model
   reader: sentences → emotion + intensity + optional gesture (greeting → wave,
   compliment → shy, thanks → bow, …). No model call, no latency.
 - [`springBones.ts`](../../src/renderer/src/features/avatar/springBones.ts) —
-  verlet spring joints with body colliders, for hair and cloth chains. Colliders
+  verlet spring joints with body colliders (spheres, or capsules tapering from
+  end to end), for hair and cloth chains. Colliders
   only hold the joints off the body; the cloth between joints can still cut what
   lies just under it. So cloth chains can also be kept within limits of where
   they hang at rest, measured from the body's axis: `inward` (never more than
   this much closer, so the coat can't swing in through the tunic) and `outward`
   per joint (never more than this much further, so it can't sweep through an arm
   hanging beside it; joints past the list, such as a hem, swing freely).
-  `hold(bone, amount)` pins a joint at its animated rest.
+  `hold(bone, amount)` pins a joint at its animated rest. Two more are for a
+  skirt (Tsunade's tunic):
+  - `follow` turns a chain's root with a thigh as it swings forward out of its rest pose (faded in from 20° to 60°). In a crouch the cloth then rides on top of the thigh; colliders alone let it slide off round the thigh's side, and the thigh came up through the skirt.
+  - Chains sharing a `ring` keep the cloth *between* neighbours out of the colliders too. Joints step a level at a time (every chain's first joint, then every chain's second, and so on), so both ends of a straight run of cloth move out together. Without it, a thigh striding forward between a front and a side chain cut ~5 cm into the cloth between them.
+  - What still pokes through is laid over the leg by the shader (`drape`, see `toonMaterials.ts`).
 
 - [`avatars.ts`](../../src/renderer/src/features/avatar/avatars.ts) — the avatar
   registry: per character, its model, camera framing, eye geometry and iris

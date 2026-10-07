@@ -5,7 +5,7 @@ import type { Emotion, Gesture, Reading } from './emotion'
 import { LipSync, VISEMES } from './lipsync'
 import { SpringBones } from './springBones'
 import { BodyRig } from './stage/body'
-import { shared } from './toonMaterials'
+import { DRAPE_SLOTS, shared } from './toonMaterials'
 
 /** the stage's hooks into the frame (see stage/actor.ts) */
 export interface StageHooks {
@@ -75,6 +75,7 @@ const _q = new THREE.Quaternion()
 const _q2 = new THREE.Quaternion()
 const _q3 = new THREE.Quaternion()
 const _vPress = new THREE.Vector3()
+const _vDrape = new THREE.Vector3()
 const _vLook = new THREE.Vector3()
 const _vLook2 = new THREE.Vector3()
 const _up = new THREE.Vector3(0, 1, 0)
@@ -130,6 +131,8 @@ export class AvatarController {
   private weights = new Map<string, number>()
   private lipsync = new LipSync()
   private springs = new SpringBones()
+  /** the tubes her draped cloth is kept out of (AvatarConfig.drape) */
+  private drapeTubes: { bone: THREE.Bone; from: THREE.Vector3; to: THREE.Vector3; radius: [number, number] }[] = []
 
   // emotion
   private emotion: Emotion = 'neutral'
@@ -253,14 +256,47 @@ export class AvatarController {
       return out
     }
     this.rig.root.updateWorldMatrix(true, true)
-    const { springs, colliders } = this.rig.config
+    const { springs, colliders, drape } = this.rig.config
     for (const s of springs) {
       const bones = chain(s.prefix)
-      if (bones.length) this.springs.addChain(bones, s)
+      const follow = (s.follow ?? []).flatMap((f) => {
+        const bone = b(f.bone)
+        return bone ? [{ bone, weight: f.weight, from: f.from ?? 20, to: f.to ?? 60 }] : []
+      })
+      if (bones.length) this.springs.addChain(bones, s, follow)
     }
     for (const c of colliders) {
       const bone = b(c.bone)
-      if (bone) this.springs.addCollider(bone, new THREE.Vector3(...c.at), c.radius, c.groups)
+      const end = c.to ? { at: new THREE.Vector3(...c.to), radius: c.toRadius ?? c.radius } : undefined
+      if (bone) this.springs.addCollider(bone, new THREE.Vector3(...c.at), c.radius, c.groups, end)
+    }
+    // the tubes draped cloth is kept out of, in their bones' frames
+    for (const t of drape ?? []) {
+      const bone = b(t.bone)
+      if (!bone || this.drapeTubes.length >= DRAPE_SLOTS) continue
+      this.drapeTubes.push({
+        bone,
+        from: bone.worldToLocal(new THREE.Vector3(...t.from)),
+        to: bone.worldToLocal(new THREE.Vector3(...t.to)),
+        radius: t.radius
+      })
+    }
+  }
+
+  /** where her draped cloth's tubes are this frame (see shared.uDrapeA) */
+  private updateDrape(): void {
+    const a = shared.uDrapeA.value
+    const z = shared.uDrapeB.value
+    for (let i = 0; i < DRAPE_SLOTS; i++) {
+      const t = this.drapeTubes[i]
+      if (!t) {
+        a[i].w = -1
+        continue
+      }
+      _vDrape.copy(t.from).applyMatrix4(t.bone.matrixWorld)
+      a[i].set(_vDrape.x, _vDrape.y, _vDrape.z, t.radius[0])
+      _vDrape.copy(t.to).applyMatrix4(t.bone.matrixWorld)
+      z[i].set(_vDrape.x, _vDrape.y, _vDrape.z, t.radius[1])
     }
   }
 
@@ -427,6 +463,7 @@ export class AvatarController {
     this.springs.outwardFree = this.clothFree
     const stepped = this.springs.update(dt) > 0
     this.applyBreath(stepped)
+    this.updateDrape()
 
     // keep the face shading sphere glued to the moving head
     const head = this.rig.bones.get('head')
@@ -868,6 +905,8 @@ export class AvatarController {
   dispose(): void {
     this.mixer.stopAllAction()
     this.mixer.uncacheRoot(this.rig.root)
+    // (the tubes are shared by every material: no stale legs for the next avatar)
+    shared.uDrapeA.value.forEach((v) => (v.w = -1))
   }
 }
 
