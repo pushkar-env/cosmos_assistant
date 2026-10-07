@@ -206,7 +206,10 @@ export function prepareAvatar(gltf: GLTF, cfg: AvatarConfig): AvatarRig {
   }
 }
 
-/** SkeletonUtils.clone, inlined: clone a skinned hierarchy with rebound bones */
+/** SkeletonUtils.clone, inlined: clone a skinned hierarchy with rebound bones.
+ *  Meshes sharing a skeleton (the loader makes one per skin) share its clone
+ *  too — SkeletonUtils would give each mesh its own copy, i.e. one bone update
+ *  and one bone texture upload per mesh every frame instead of one */
 function cloneSkinned(source: THREE.Object3D): THREE.Object3D {
   const sourceLookup = new Map<THREE.Object3D, THREE.Object3D>()
   const cloneLookup = new Map<THREE.Object3D, THREE.Object3D>()
@@ -215,12 +218,20 @@ function cloneSkinned(source: THREE.Object3D): THREE.Object3D {
     sourceLookup.set(b, a)
     cloneLookup.set(a, b)
   })
+  const skeletons = new Map<THREE.Skeleton, THREE.Skeleton>()
   clone.traverse((node) => {
     const sm = node as THREE.SkinnedMesh
     if (!sm.isSkinnedMesh) return
-    const src = sourceLookup.get(node) as THREE.SkinnedMesh
-    const bones = src.skeleton.bones.map((b) => cloneLookup.get(b) as THREE.Bone)
-    sm.bind(new THREE.Skeleton(bones, src.skeleton.boneInverses), sm.bindMatrix)
+    const src = (sourceLookup.get(node) as THREE.SkinnedMesh).skeleton
+    let skeleton = skeletons.get(src)
+    if (!skeleton) {
+      skeleton = new THREE.Skeleton(
+        src.bones.map((b) => cloneLookup.get(b) as THREE.Bone),
+        src.boneInverses
+      )
+      skeletons.set(src, skeleton)
+    }
+    sm.bind(skeleton, sm.bindMatrix)
   })
   return clone
 }

@@ -16,6 +16,10 @@ export default defineConfig({
     }
   },
   renderer: {
+    // electron-vite leaves the renderer unminified by default: a 5.3 MB bundle
+    // the renderer keeps in memory as source, vs 2.5 MB minified (~6 MB less
+    // renderer memory, measured)
+    build: { minify: true },
     plugins: [react()],
     resolve: {
       alias: {

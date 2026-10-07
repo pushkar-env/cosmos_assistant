@@ -82,7 +82,10 @@ notes & research reports as `.md` files to a user-chosen folder (default
 telemetry via `systeminformation` (+ an `nvidia-smi` path for NVIDIA GPUs).
 `start(getWindow)` polls every ~2s and pushes `SystemStats` over `SYSTEM_STATS`;
 `snapshot()` gives a one-shot reading (used by the `system_stats` tool);
-`stop()` on quit. The renderer never polls.
+`stop()` on quit. The renderer never polls. On Windows every query goes through
+one long-lived PowerShell host (~95 MB); `pause()`/`resume()` (window hidden to
+the tray / shown again) stop the polling and let that host go, then start it
+again.
 
 ### `CommandService`
 [`CommandService.ts`](../../src/main/services/CommandService.ts) — OS-level
@@ -158,7 +161,8 @@ token.
 COSMOS-controlled browser via `playwright-core`. Two jobs: **media playback**
 (`playMedia`, `mediaControl`, `stopMedia`, `listTabs`, `closeTab`) and **page
 automation** (`goto`, `readText`, `search`, `listInputs`, `click`, `type`,
-`screenshot`). Lazily launches; `close()` on quit.
+`screenshot`). Lazily launches — Playwright itself is only loaded then (it is
+~45 MB of main-process memory most sessions never need); `close()` on quit.
 
 ### `MediaService`
 [`MediaService.ts`](../../src/main/services/MediaService.ts) — the `play_youtube`

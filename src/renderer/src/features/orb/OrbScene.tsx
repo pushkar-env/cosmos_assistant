@@ -7,6 +7,7 @@ import { useUIStore } from '@/core/stores/useUIStore'
 import { useVoiceStore } from '@/features/voice/useVoiceStore'
 import { voiceSignal } from '@/core/voice/voiceSignal'
 import { FrameDriver } from '@/shared/three/FrameDriver'
+import { CANVAS_GL, MsaaRender } from '@/shared/three/MsaaRender'
 import { THEMES } from '@/core/theme/themes'
 import { LERP_RATE, ORB_FPS, ORB_STATES, type OrbParams } from './orbConfig'
 import {
@@ -335,7 +336,7 @@ export function OrbScene(): React.JSX.Element {
       frameloop="never"
       camera={{ position: [0, 0, 6], fov: 42 }}
       dpr={[1, 1.75]}
-      gl={{ antialias: true, alpha: true, powerPreference: 'high-performance' }}
+      gl={CANVAS_GL}
       style={{ background: 'transparent' }}
       onPointerMove={() => {
         pointerSignal.inside = true
@@ -345,6 +346,7 @@ export function OrbScene(): React.JSX.Element {
       }}
     >
       <FrameDriver fps={visible ? ORB_FPS : null} />
+      <MsaaRender parked={!visible} />
       <OrbRig />
     </Canvas>
   )

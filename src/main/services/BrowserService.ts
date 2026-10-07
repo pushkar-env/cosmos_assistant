@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import { promises as fs } from 'fs'
 import { join } from 'path'
-import { chromium, type BrowserContext, type Page } from 'playwright-core'
+import type { BrowserContext, Page } from 'playwright-core'
 
 const IDLE_CLOSE_MS = 3 * 60_000
 const READ_LIMIT = 15_000
@@ -26,6 +26,9 @@ export class BrowserService {
     if (this.context) return this.context
     const userDataDir = join(app.getPath('userData'), 'cosmos-browser')
     await fs.mkdir(userDataDir, { recursive: true }).catch(() => undefined)
+    // loaded on first use: Playwright is ~45 MB of main-process memory that
+    // most sessions never need
+    const { chromium } = await import('playwright-core')
     let lastErr: unknown = null
     for (const channel of ['chrome', 'msedge'] as const) {
       try {

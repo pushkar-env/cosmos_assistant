@@ -116,7 +116,8 @@ A React Three Fiber scene — the classic centrepiece, and the fallback whenever
 the avatar is switched off or can't load.
 
 - [`OrbScene.tsx`](../../src/renderer/src/features/orb/OrbScene.tsx) — the R3F
-  canvas (capped DPR, `frameloop="always"`).
+  canvas (capped DPR, frames from the shared `FrameDriver`, antialiased by
+  `MsaaRender` — see [Canvases and memory](#canvases-and-memory)).
 - [`shaders.ts`](../../src/renderer/src/features/orb/shaders.ts) — the custom GLSL
   for the core sphere and the ~2,400-particle field.
 - [`orbConfig.ts`](../../src/renderer/src/features/orb/orbConfig.ts) — tunables per
@@ -128,6 +129,24 @@ speaking → idle`) from `useAssistantStore.state` and drives shader uniforms
 envelope** — the mic while listening, TTS while speaking — bridged through
 `core/voice/voiceSignal.ts`. Every visual system keys off the same state, so
 adding a new voice/agent surface means driving the store, not touching the shader.
+
+### Canvases and memory
+
+Both 3D canvases (the orb and the avatar) are created **without** antialiasing
+or a depth buffer (`CANVAS_GL`) and render through
+[`shared/three/MsaaRender.tsx`](../../src/renderer/src/shared/three/MsaaRender.tsx):
+the scene is drawn with 4× MSAA into a framebuffer of our own, which is then
+resolved into the canvas. The pixels are identical to an `antialias: true`
+canvas (the browser resolves its own MSAA buffer with the same blit; checked
+bit for bit), but on Windows (ANGLE on D3D11) the browser's antialiased canvas
+kept ~250 MB more in the GPU process at 1920×1020, and swung by ±150 MB as it
+ran. On a machine whose display runs on an integrated GPU, that is plain RAM.
+`MsaaRender` takes over R3F's render (`useFrame` priority 1), so a canvas has
+one of these and no other render callback. Three draws into the framebuffer
+through its XR render-target path (`setRenderTargetFramebuffer`), so output
+colour space, tone mapping and clear colour are exactly as for the canvas.
+While the window is hidden (`parked`, like `FrameDriver`) the buffers are freed;
+the first frame back builds them again.
 
 ---
 
@@ -141,7 +160,8 @@ The default centrepiece: an anime girl who reacts to the conversation. The model
   Nova or the orb from `Settings.coreVisual`; any load/render failure falls back to
   the orb.
 - [`AvatarScene.tsx`](../../src/renderer/src/features/avatar/AvatarScene.tsx) — the
-  R3F canvas (60 fps cap via the shared `FrameDriver`, parked while hidden), the
+  R3F canvas (60 fps cap via the shared `FrameDriver`, parked while hidden,
+  antialiased by `MsaaRender`), the
   camera rig (head-to-hips, easing in while she speaks), the holographic halo and
   motes, theme colours, click hit-testing (headpats), and the wiring from the chat:
   your message → `readUserMessage`, her streamed reply → `readReplySentence` per

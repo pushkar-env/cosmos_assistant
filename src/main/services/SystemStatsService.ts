@@ -95,18 +95,23 @@ export class SystemStatsService {
   /**
    * Stop polling while nothing can see the readout (hidden to tray, or
    * minimised). Voice and audio live in the renderer and are unaffected.
+   * The PowerShell host goes too — ~95 MB, idling for nobody for as long as
+   * COSMOS sits in the tray (a query already sent still finishes: `exit`
+   * queues behind it).
    */
   pause(): void {
     if (this.paused) return
     this.paused = true
     if (this.timer) clearTimeout(this.timer)
     this.timer = null
+    if (isWindows && this.running) si.powerShellRelease()
   }
 
   /** Resume polling, with an immediate refresh so the HUD is never stale. */
   resume(): void {
     if (!this.paused) return
     this.paused = false
+    if (isWindows && this.running) si.powerShellStart()
     if (this.running && !this.timer) void this.tick()
   }
 
@@ -128,7 +133,7 @@ export class SystemStatsService {
         console.error('[stats] poll failed:', err)
         // A timeout means the shared PowerShell host stopped answering; its
         // pending queries never resolve, so replace it before the next tick.
-        if (isWindows && err instanceof Error && err.message === 'stats-timeout') {
+        if (isWindows && !this.paused && err instanceof Error && err.message === 'stats-timeout') {
           si.powerShellRelease()
           si.powerShellStart()
         }

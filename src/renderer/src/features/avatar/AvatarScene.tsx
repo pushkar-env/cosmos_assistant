@@ -7,6 +7,7 @@ import { useUIStore } from '@/core/stores/useUIStore'
 import { voiceSignal } from '@/core/voice/voiceSignal'
 import { THEMES } from '@/core/theme/themes'
 import { FrameDriver } from '@/shared/three/FrameDriver'
+import { CANVAS_GL, MsaaRender } from '@/shared/three/MsaaRender'
 import { loadAvatar, prepareAvatar, type AvatarRig } from './avatarAsset'
 import { AvatarController } from './AvatarController'
 import { resolveAvatar, type AvatarConfig } from './avatars'
@@ -498,7 +499,7 @@ export function AvatarScene({ onFail }: { onFail: (err: unknown) => void }): Rea
       flat
       camera={{ position: [0, 1.2, 3], fov: 30, near: 0.05, far: 30 }}
       dpr={[1, 1.75]}
-      gl={{ antialias: true, alpha: true, powerPreference: 'high-performance' }}
+      gl={CANVAS_GL}
       // while she's out on the glass the canvas sits above the HUD — and lets
       // every click through to it
       style={{ background: 'transparent', pointerEvents: acting ? 'none' : 'auto' }}
@@ -514,6 +515,7 @@ export function AvatarScene({ onFail }: { onFail: (err: unknown) => void }): Rea
       }}
     >
       <FrameDriver fps={visible ? AVATAR_FPS : null} />
+      <MsaaRender parked={!visible} />
       <ExposeAdvance />
       {cfg && <CameraRig cfg={cfg} />}
       <Halo />

@@ -1,8 +1,7 @@
-import { useEffect } from 'react'
+import { lazy, Suspense, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useUIStore } from '@/core/stores/useUIStore'
 import { useSettingsStore } from '@/core/stores/useSettingsStore'
-import { CodeEditor } from './CodeEditor'
 import { useStudioStore } from './useStudioStore'
 import { ActivityBar } from './ActivityBar'
 import { FileExplorer, extColor } from './FileExplorer'
@@ -10,6 +9,10 @@ import { StudioTerminals } from './StudioTerminals'
 import { StudioPreview } from './StudioPreview'
 import { StudioChat } from './StudioChat'
 import { Resizer } from './Resizer'
+
+// CodeMirror and its six language packs load with the first file opened here,
+// not with the app — most sessions never open the Studio
+const CodeEditor = lazy(() => import('./CodeEditor').then((m) => ({ default: m.CodeEditor })))
 
 /** the slim bottom status strip */
 function StatusStrip(): React.JSX.Element {
@@ -119,13 +122,15 @@ function EditorArea(): React.JSX.Element {
               {activeTab.content}
             </div>
           ) : (
-            <CodeEditor
-              key={activeTab.path}
-              path={activeTab.path}
-              value={activeTab.content}
-              onChange={editActive}
-              onSave={() => void saveActive()}
-            />
+            <Suspense fallback={null}>
+              <CodeEditor
+                key={activeTab.path}
+                path={activeTab.path}
+                value={activeTab.content}
+                onChange={editActive}
+                onSave={() => void saveActive()}
+              />
+            </Suspense>
           )
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
